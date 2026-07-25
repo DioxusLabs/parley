@@ -14,7 +14,7 @@ use super::FontContext;
 use super::builder::{BuilderOptions, RangedBuilder, StyleRunBuilder};
 use super::resolve::tree::TreeStyleBuilder;
 use super::resolve::{RangedStyleBuilder, ResolveContext, ResolvedStyle, StyleRun};
-use super::style::{Brush, TextStyle};
+use super::style::{Brush, RootStyle, TextStyle};
 
 use crate::builder::TreeBuilder;
 use crate::inline_box::InlineBox;
@@ -37,6 +37,10 @@ pub struct LayoutContext<B: Brush = [u8; 4]> {
     pub(crate) ranged_style_builder: RangedStyleBuilder<B>,
     pub(crate) tree_style_builder: TreeStyleBuilder<B>,
 
+    // The resolved root style for the layout currently being built
+    pub(crate) root_style: ResolvedStyle<B>,
+    pub(crate) root_style_strut: bool,
+
     /// Style index for each character, parallel to [`Analysis::char_info`].
     pub(crate) char_style_indices: Vec<u16>,
     pub(crate) scx: Shaper,
@@ -57,6 +61,8 @@ impl<B: Brush> LayoutContext<B> {
             word_break: Vec::new(),
             ranged_style_builder: RangedStyleBuilder::default(),
             tree_style_builder: TreeStyleBuilder::default(),
+            root_style: ResolvedStyle::default(),
+            root_style_strut: false,
             char_style_indices: vec![],
             analysis_data_sources: AnalysisDataSources::new(),
             scx: Shaper::default(),
@@ -98,10 +104,13 @@ impl<B: Brush> LayoutContext<B> {
         text: &'a str,
         scale: f32,
         quantize: bool,
+        root_style: &RootStyle<'_, '_, B>,
     ) -> RangedBuilder<'a, B> {
         self.begin();
 
-        let resolved_root_style = self.resolve_style_set(fcx, scale, &TextStyle::default());
+        let resolved_root_style = self.resolve_style_set(fcx, scale, &root_style.style);
+        self.root_style = resolved_root_style.clone();
+        self.root_style_strut = root_style.strut;
         self.ranged_style_builder
             .begin(resolved_root_style, text.len());
 
@@ -128,8 +137,12 @@ impl<B: Brush> LayoutContext<B> {
         text: &'a str,
         scale: f32,
         quantize: bool,
+        root_style: &RootStyle<'_, '_, B>,
     ) -> StyleRunBuilder<'a, B> {
         self.begin();
+
+        self.root_style = self.resolve_style_set(fcx, scale, &root_style.style);
+        self.root_style_strut = root_style.strut;
 
         fcx.source_cache.prune(128, false);
 
@@ -166,11 +179,13 @@ impl<B: Brush> LayoutContext<B> {
         fcx: &'a mut FontContext,
         scale: f32,
         quantize: bool,
-        root_style: &TextStyle<'_, '_, B>,
+        root_style: &RootStyle<'_, '_, B>,
     ) -> TreeBuilder<'a, B> {
         self.begin();
 
-        let resolved_root_style = self.resolve_style_set(fcx, scale, root_style);
+        let resolved_root_style = self.resolve_style_set(fcx, scale, &root_style.style);
+        self.root_style = resolved_root_style.clone();
+        self.root_style_strut = root_style.strut;
         self.tree_style_builder.begin(resolved_root_style);
 
         fcx.source_cache.prune(128, false);

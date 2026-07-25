@@ -5,7 +5,7 @@ use peniko::Color;
 use vello_cpu::Pixmap;
 
 use super::renderer::{ColorBrush, RenderingConfig, draw_layout, render_to_pixmap};
-use parley::{Affinity, Cursor, FontContext, Layout, LayoutContext};
+use parley::{Affinity, Cursor, FontContext, Layout, LayoutContext, RootStyle};
 
 // Note: This module is only compiled when running tests, which requires std,
 // so we don't have to worry about being no_std-compatible.
@@ -50,7 +50,7 @@ impl CursorTest {
         lcx: &mut LayoutContext<ColorBrush>,
         fcx: &mut FontContext,
     ) -> Self {
-        let builder = lcx.ranged_builder(fcx, text, 1.0, true);
+        let builder = lcx.ranged_builder(fcx, text, 1.0, true, &RootStyle::default());
         let mut layout = builder.build(text);
         layout.break_all_lines(None);
 

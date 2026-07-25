@@ -24,6 +24,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use fontique::{Blob, Collection, CollectionOptions, SourceCache};
+use parley::RootStyle;
 use parley::{
     CHROMIUM_LINE_BREAK_OVERRIDE, FontContext, FontFamily, Layout, LayoutContext, StyleProperty,
 };
@@ -105,7 +106,8 @@ fn check_font(font_family: &str, expected_residuals: u64) {
             "This code is not written to be robust against non-ASCII text, primarily to the DOM's use of UTF-16."
         );
 
-        let mut builder = layout_cx.ranged_builder(&mut font_cx, &case.text, 1.0, false);
+        let mut builder =
+            layout_cx.ranged_builder(&mut font_cx, &case.text, 1.0, false, &RootStyle::default());
         builder.set_line_break_override(Some(CHROMIUM_LINE_BREAK_OVERRIDE));
         builder.push_default(FontFamily::named(font.family));
         builder.push_default(StyleProperty::FontSize(chromium_quantized_font_size(

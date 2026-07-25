@@ -55,6 +55,22 @@ pub(crate) fn assert_eq_layout_data<B: Brush>(a: &LayoutData<B>, b: &LayoutData<
         "{case} coords mismatch"
     );
 
+    // Root style
+    assert_eq!(a.root_style, b.root_style, "{case} root_style mismatch");
+    assert_eq!(
+        a.root_font_size, b.root_font_size,
+        "{case} root_font_size mismatch"
+    );
+    assert_eq!(
+        a.root_line_height, b.root_line_height,
+        "{case} root_line_height mismatch"
+    );
+    assert_eq!(
+        a.root_font_metrics, b.root_font_metrics,
+        "{case} root_font_metrics mismatch"
+    );
+    assert_eq!(a.strut, b.strut, "{case} strut mismatch");
+
     // Input (/ output of style resolution)
     assert_eq!(a.styles, b.styles, "{case} styles mismatch");
     assert_eq!(

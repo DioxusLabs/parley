@@ -150,6 +150,7 @@ fn verify_analysis(
             text,
             1.,
             true,
+            &crate::RootStyle::default(),
         );
 
         // Apply test-specific configuration
@@ -173,6 +174,7 @@ fn verify_analysis_with_override(
             text,
             1.,
             true,
+            &crate::RootStyle::default(),
         );
         builder.set_line_break_override(Some(line_break_override));
         _ = builder.build(text);

@@ -9,7 +9,7 @@
 use image::codecs::png::PngEncoder;
 use image::{self, Pixel, Rgba, RgbaImage};
 use parley::layout::{Alignment, Glyph, GlyphRun, Layout, PositionedLayoutItem};
-use parley::style::{FontFamily, FontWeight, StyleProperty, TextStyle};
+use parley::style::{FontFamily, FontWeight, RootStyle, StyleProperty, TextStyle};
 use parley::{AlignmentOptions, FontContext, InlineBox, InlineBoxKind, LayoutContext, LineHeight};
 use std::fs::File;
 use swash::FontRef;
@@ -75,13 +75,13 @@ fn main() {
 
         // TODO: cleanup API
 
-        let root_style = TextStyle {
+        let root_style = RootStyle::from(TextStyle {
             brush: text_brush,
             font_family,
             line_height: LineHeight::FontSizeRelative(1.3),
             font_size: 16.0,
             ..TextStyle::default()
-        };
+        });
 
         let mut builder =
             layout_cx.tree_builder(&mut font_cx, display_scale, quantize, &root_style);
@@ -137,7 +137,13 @@ fn main() {
         // ============
 
         // Creates a RangedBuilder
-        let mut builder = layout_cx.ranged_builder(&mut font_cx, &text, display_scale, quantize);
+        let mut builder = layout_cx.ranged_builder(
+            &mut font_cx,
+            &text,
+            display_scale,
+            quantize,
+            &RootStyle::default(),
+        );
 
         // Set default text colour styles (set foreground text color)
         builder.push_default(brush_style);

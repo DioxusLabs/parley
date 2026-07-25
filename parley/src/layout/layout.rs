@@ -8,6 +8,7 @@ use crate::layout::data::LayoutData;
 use crate::style::Brush;
 use core::cmp::Ordering;
 use core::fmt;
+use parley_engine::FontMetrics;
 
 use crate::IndentOptions;
 use crate::layout::{
@@ -57,6 +58,30 @@ impl<B: Brush> Layout<B> {
     /// Returns the style collection for the layout.
     pub fn styles(&self) -> &[Style<B>] {
         &self.data.styles
+    }
+
+    /// Returns the layout's root style (see [`RootStyle`](crate::RootStyle)).
+    pub fn root_style(&self) -> &Style<B> {
+        &self.data.root_style
+    }
+
+    /// Returns the font size of the layout's root style, in layout units
+    /// (i.e. scaled by the layout's scale factor).
+    pub fn root_font_size(&self) -> f32 {
+        self.data.root_font_size
+    }
+
+    /// Returns the resolved line height of the layout's root style, in layout units.
+    pub fn root_line_height(&self) -> f32 {
+        self.data.root_line_height
+    }
+
+    /// Returns the metrics of the font selected for the layout's root style.
+    ///
+    /// These are resolved at build time without shaping any text, so they are
+    /// available even for an empty layout.
+    pub fn root_font_metrics(&self) -> &FontMetrics {
+        &self.data.root_font_metrics
     }
 
     /// The `max_advance` that was used to line break the `Layout`

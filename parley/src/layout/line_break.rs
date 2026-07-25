@@ -432,6 +432,9 @@ pub struct BreakLines<'a, B: Brush> {
     state: BreakerState,
     prev_state: Option<BreakerState>,
     done: bool,
+    /// The metrics every line starts out with. These are zero unless the layout's root
+    /// style acts as a strut, in which case they floor every line box's metrics.
+    initial_box_metrics: LineBoxMetrics,
 }
 
 impl<'a, B: Brush> BreakLines<'a, B> {
@@ -442,12 +445,23 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         lines.swap(&mut layout.data);
         lines.lines.clear();
         lines.line_items.clear();
+        let mut initial_box_metrics = LineBoxMetrics::default();
+        if layout.data.strut {
+            initial_box_metrics.add_text(
+                &layout.data.root_font_metrics,
+                layout.data.root_line_height,
+                layout.data.quantize,
+            );
+        }
+        let mut state = BreakerState::default();
+        state.line.box_metrics = initial_box_metrics;
         Self {
             layout,
             lines,
-            state: BreakerState::default(),
+            state,
             prev_state: None,
             done: false,
+            initial_box_metrics,
         }
     }
 
@@ -479,6 +493,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         // it must run before we reset the per-line running state.
         self.finish_line(self.lines.lines.len() - 1, line_height);
         self.state.line.reset();
+        self.state.line.box_metrics = self.initial_box_metrics;
 
         self.state.line_y += line_height as f64;
 
@@ -1117,10 +1132,6 @@ impl<'a, B: Brush> BreakLines<'a, B> {
     }
 
     fn finish_line(&mut self, line_idx: usize, line_height: f32) {
-        let prev_line_metrics = match line_idx {
-            0 => None,
-            idx => Some(self.lines.lines[idx - 1].metrics),
-        };
         let line = &mut self.lines.lines[line_idx];
 
         // Reset metrics for line
@@ -1225,26 +1236,23 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
         let mut line_box_extents = self.state.line.box_metrics.line_box;
         let mut content_box_extents = self.state.line.box_metrics.content_box;
-        if !have_metrics
-            && line.item_range.is_empty()
-            && let Some(metrics) = prev_line_metrics
-        {
-            // HACK: copy metrics from previous line if we don't have
-            // any; this should only occur for an empty line following
-            // a newline at the end of a layout
-            line.metrics = metrics;
-            line_box_extents = Extents {
-                over: metrics.baseline - metrics.block_min_coord,
-                under: metrics.block_max_coord - metrics.baseline,
-            };
-            content_box_extents = Extents {
-                over: metrics.baseline - metrics.content_block_min_coord,
-                under: metrics.content_block_max_coord - metrics.baseline,
-            };
-            // If we have no items on this line, it must be the last (empty)
-            // line in a layout following a newline. Commit an empty run so
-            // that AccessKit has a node with which to identify the visual
-            // cursor position
+        if !have_metrics && line.item_range.is_empty() {
+            // An empty line has no content to derive metrics from, so derive
+            // them from the layout's root style. This occurs for the empty
+            // line following a newline at the end of a layout, and for a
+            // layout with no text at all.
+            let mut box_metrics = LineBoxMetrics::default();
+            box_metrics.add_text(
+                &self.layout.data.root_font_metrics,
+                self.layout.data.root_line_height,
+                quantize,
+            );
+            line.metrics.line_height = box_metrics.line_height();
+            line_box_extents = box_metrics.line_box;
+            content_box_extents = box_metrics.content_box;
+            // If this line follows a newline at the end of a layout, commit
+            // an empty run so that AccessKit has a node with which to
+            // identify the visual cursor position
             if let Some((index, run)) = self
                 .layout
                 .data

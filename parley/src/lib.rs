@@ -27,7 +27,7 @@
 //! ```rust
 //! use parley::{
 //!    Alignment, AlignmentOptions, FontContext, FontWeight, InlineBox, InlineBoxKind, Layout,
-//!    LayoutContext, LineHeight, PositionedLayoutItem, StyleProperty,
+//!    LayoutContext, LineHeight, PositionedLayoutItem, RootStyle, StyleProperty,
 //! };
 //!
 //! // Create a FontContext (font database) and LayoutContext (scratch space).
@@ -38,7 +38,7 @@
 //! // Create a `RangedBuilder` or a `TreeBuilder`, which are used to construct a `Layout`.
 //! const DISPLAY_SCALE : f32 = 1.0;
 //! const TEXT : &str = "Lorem Ipsum...";
-//! let mut builder = layout_cx.ranged_builder(&mut font_cx, &TEXT, DISPLAY_SCALE, true);
+//! let mut builder = layout_cx.ranged_builder(&mut font_cx, &TEXT, DISPLAY_SCALE, true, &RootStyle::default());
 //!
 //! // Set default styles that apply to the entire layout
 //! builder.push_default(StyleProperty::FontSize(16.0));

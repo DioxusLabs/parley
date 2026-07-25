@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
+use parley::RootStyle;
 use parley::fontique::Blob;
 use parley::{
     Alignment, AlignmentOptions, FontContext, FontFamily, FontWeight, GenericFamily, InlineBox,
@@ -124,8 +125,13 @@ pub fn build_simple_layout(
     layout_cx: &mut LayoutContext<ColorBrush>,
     config: &ExampleConfig,
 ) -> (Layout<ColorBrush>, u16, u16) {
-    let mut builder =
-        layout_cx.ranged_builder(font_cx, &config.text, config.display_scale, config.quantize);
+    let mut builder = layout_cx.ranged_builder(
+        font_cx,
+        &config.text,
+        config.display_scale,
+        config.quantize,
+        &RootStyle::default(),
+    );
 
     let foreground_brush = ColorBrush {
         color: config.foreground_color,
@@ -174,8 +180,13 @@ pub fn build_rich_layout(
 
     let (underline_range, strikethrough_range, party_emoji_range) = style_ranges(&config.text);
 
-    let mut builder =
-        layout_cx.ranged_builder(font_cx, &config.text, config.display_scale, config.quantize);
+    let mut builder = layout_cx.ranged_builder(
+        font_cx,
+        &config.text,
+        config.display_scale,
+        config.quantize,
+        &RootStyle::default(),
+    );
 
     let foreground_brush = ColorBrush {
         color: config.foreground_color,

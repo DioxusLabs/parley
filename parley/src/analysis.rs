@@ -23,7 +23,8 @@ pub(crate) fn analyze_text<B: Brush>(
     lcx.word_break
         .extend(lcx.style_runs.iter().filter_map(|sr| {
             let word_break = lcx.style_table[sr.style_index as usize].word_break;
-            (word_break != WordBreak::Normal).then(|| (sr.range.clone(), word_break))
+            (!sr.range.is_empty() && word_break != WordBreak::Normal)
+                .then(|| (sr.range.clone(), word_break))
         }));
 
     let options = AnalysisOptions {

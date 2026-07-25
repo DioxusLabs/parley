@@ -200,6 +200,49 @@ impl<B: Brush> Default for TextStyle<'static, 'static, B> {
     }
 }
 
+/// Root-level style for a layout.
+///
+/// The nested [`TextStyle`] acts as the default style for the layout: it is the style
+/// which applies to any text that has no more specific style, and its font and
+/// line-height properties determine the layout's root font metrics. These metrics are
+/// used to size empty layouts and empty lines (for example, the line following a
+/// trailing newline), and are exposed via [`Layout::root_style`] and
+/// [`Layout::root_font_metrics`].
+///
+/// [`Layout::root_style`]: crate::Layout::root_style
+/// [`Layout::root_font_metrics`]: crate::Layout::root_font_metrics
+#[derive(Clone, PartialEq, Debug)]
+pub struct RootStyle<'family, 'settings, B: Brush> {
+    /// The style of the layout's root, which is also the default style for the layout's text.
+    pub style: TextStyle<'family, 'settings, B>,
+    /// Whether the root style acts as a "strut" (in the CSS sense): if `true`, every line
+    /// box's metrics are floored by the metrics of the root style, as if each line began
+    /// with a zero-width glyph in the root style's font and line height.
+    ///
+    /// See <https://www.w3.org/TR/CSS22/visudet.html#strut>.
+    pub strut: bool,
+}
+
+impl<B: Brush> Default for RootStyle<'static, 'static, B> {
+    fn default() -> Self {
+        Self {
+            style: TextStyle::default(),
+            strut: false,
+        }
+    }
+}
+
+impl<'family, 'settings, B: Brush> From<TextStyle<'family, 'settings, B>>
+    for RootStyle<'family, 'settings, B>
+{
+    fn from(style: TextStyle<'family, 'settings, B>) -> Self {
+        Self {
+            style,
+            strut: false,
+        }
+    }
+}
+
 impl<'a, B: Brush> From<FontFamily<'a>> for StyleProperty<'a, B> {
     fn from(value: FontFamily<'a>) -> Self {
         StyleProperty::FontFamily(value)

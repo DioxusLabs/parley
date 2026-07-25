@@ -67,6 +67,21 @@ pub struct Style<B: Brush> {
     pub(crate) locale: Option<fontique::Language>,
 }
 
+impl<B: Brush> Default for Style<B> {
+    fn default() -> Self {
+        Self {
+            brush: B::default(),
+            underline: None,
+            strikethrough: None,
+            line_height: LineHeight::default(),
+            overflow_wrap: OverflowWrap::default(),
+            text_wrap_mode: TextWrapMode::default(),
+            #[cfg(feature = "accesskit")]
+            locale: None,
+        }
+    }
+}
+
 /// Underline or strikethrough decoration.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Decoration<B: Brush> {
