@@ -6,6 +6,7 @@
 //! This module provides benchmarks for text layout and rendering.
 
 use crate::{ColorBrush, FONT_FAMILY_LIST, get_samples, with_contexts};
+use parley::RootStyle;
 use parley::{
     Alignment, AlignmentOptions, FontFamily, FontStyle, FontWeight, Layout, RangedBuilder,
     StyleProperty,
@@ -30,8 +31,13 @@ pub fn defaults() -> Vec<Benchmark> {
                     b.iter(|| {
                         let text = &sample.text;
                         with_contexts(|font_cx, layout_cx| {
-                            let mut builder =
-                                layout_cx.ranged_builder(font_cx, text, DISPLAY_SCALE, QUANTIZE);
+                            let mut builder = layout_cx.ranged_builder(
+                                font_cx,
+                                text,
+                                DISPLAY_SCALE,
+                                QUANTIZE,
+                                &RootStyle::default(),
+                            );
                             builder.push_default(FontFamily::from(FONT_FAMILY_LIST));
 
                             let mut layout: Layout<ColorBrush> = builder.build(text);
@@ -81,8 +87,13 @@ pub fn styled() -> Vec<Benchmark> {
                         let text = &sample.text;
 
                         with_contexts(|font_cx, layout_cx| {
-                            let mut builder =
-                                layout_cx.ranged_builder(font_cx, text, DISPLAY_SCALE, QUANTIZE);
+                            let mut builder = layout_cx.ranged_builder(
+                                font_cx,
+                                text,
+                                DISPLAY_SCALE,
+                                QUANTIZE,
+                                &RootStyle::default(),
+                            );
                             builder.push_default(FontFamily::from(FONT_FAMILY_LIST));
 
                             // Apply different styles every `style_interval` characters

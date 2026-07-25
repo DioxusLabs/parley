@@ -15,7 +15,7 @@ use core::{
 use crate::editing::{Cursor, Selection};
 use crate::layout::{Affinity, Alignment, AlignmentOptions, Layout};
 use crate::style::Brush;
-use crate::{BoundingBox, FontContext, LayoutContext, StyleProperty, StyleSet};
+use crate::{BoundingBox, FontContext, LayoutContext, RootStyle, StyleProperty, StyleSet};
 
 #[cfg(feature = "accesskit")]
 use crate::layout::LayoutAccessibility;
@@ -1227,8 +1227,13 @@ where
     }
     /// Update the layout.
     fn update_layout(&mut self, font_cx: &mut FontContext, layout_cx: &mut LayoutContext<T>) {
-        let mut builder =
-            layout_cx.ranged_builder(font_cx, &self.buffer, self.scale, self.quantize);
+        let mut builder = layout_cx.ranged_builder(
+            font_cx,
+            &self.buffer,
+            self.scale,
+            self.quantize,
+            &RootStyle::default(),
+        );
         for prop in self.default_style.inner().values() {
             builder.push_default(prop.to_owned());
         }

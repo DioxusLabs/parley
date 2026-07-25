@@ -148,6 +148,56 @@ pub(crate) fn shape_text<'a, B: Brush>(
     }
 }
 
+/// Selects the root font for `style` and computes its metrics and line height
+/// without shaping any text.
+pub(crate) fn root_font_metrics<B: Brush>(
+    rcx: &ResolveContext,
+    fq: &mut Query<'_>,
+    style: &ResolvedStyle<B>,
+) -> (parley_engine::FontMetrics, f32) {
+    let fonts = rcx.stack(style.font_family).unwrap_or(&[]);
+    fq.set_families(fonts.iter().copied());
+    fq.set_fallbacks(fontique::FallbackKey::new(
+        Script::from_bytes(*b"Latn"),
+        style.locale.as_ref(),
+    ));
+    fq.set_attributes(fontique::Attributes {
+        width: style.font_width,
+        weight: style.font_weight,
+        style: style.font_style,
+    });
+    let mut selected: Option<QueryFont> = None;
+    fq.matches_with(|font| {
+        selected = Some(font.clone());
+        fontique::QueryStatus::Stop
+    });
+
+    let variations = rcx.variations(style.font_variations).unwrap_or(&[]);
+    let metrics = selected
+        .and_then(|font| {
+            parley_engine::FontMetrics::from_font(
+                &FontData {
+                    data: font.blob,
+                    index: font.index,
+                },
+                style.font_size,
+                &font.synthesis,
+                variations,
+            )
+        })
+        .unwrap_or_default();
+
+    let line_height = match style.line_height {
+        crate::LineHeight::Absolute(value) => value,
+        crate::LineHeight::FontSizeRelative(value) => value * style.font_size,
+        crate::LineHeight::MetricsRelative(value) => {
+            (metrics.ascent + metrics.descent + metrics.leading) * value
+        }
+    };
+
+    (metrics, line_height)
+}
+
 struct FontSelector<'a, 'b, B: Brush> {
     query: &'b mut Query<'a>,
     fonts_id: Option<usize>,

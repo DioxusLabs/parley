@@ -11,7 +11,7 @@ use std::sync::Arc;
 use fontique::{Blob, Collection, CollectionOptions, SourceCache};
 use parley::{
     BoundingBox, FontContext, FontFamily, FontFamilyName, Layout, LayoutContext, LineHeight,
-    PlainEditor, PlainEditorDriver, RangedBuilder, StyleProperty, TextStyle, TreeBuilder,
+    PlainEditor, PlainEditorDriver, RangedBuilder, RootStyle, StyleProperty, TreeBuilder,
 };
 use peniko::{Color, kurbo::Size};
 use vello_cpu::Pixmap;
@@ -191,9 +191,13 @@ impl TestEnv {
 
     pub(crate) fn ranged_builder<'a>(&'a mut self, text: &'a str) -> RangedBuilder<'a, ColorBrush> {
         let default_style = self.default_style();
-        let mut builder = self
-            .layout_cx
-            .ranged_builder(&mut self.font_cx, text, 1.0, true);
+        let mut builder = self.layout_cx.ranged_builder(
+            &mut self.font_cx,
+            text,
+            1.0,
+            true,
+            &RootStyle::default(),
+        );
         for style in default_style {
             builder.push_default(style);
         }
@@ -204,7 +208,7 @@ impl TestEnv {
         let default_style = self.default_style();
         let mut builder =
             self.layout_cx
-                .tree_builder(&mut self.font_cx, 1.0, true, &TextStyle::default());
+                .tree_builder(&mut self.font_cx, 1.0, true, &RootStyle::default());
         builder.push_style_modification_span(&default_style);
         builder
     }

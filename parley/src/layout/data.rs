@@ -11,7 +11,7 @@ use core::ops::Range;
 
 use alloc::vec::Vec;
 use parley_engine::shape::ClusterData;
-use parley_engine::{Boundary, ShapedText};
+use parley_engine::{Boundary, FontMetrics, ShapedText};
 
 /// `HarfRust`-based run data
 #[derive(Clone, Debug, PartialEq)]
@@ -158,6 +158,18 @@ pub(crate) struct LayoutData<B: Brush> {
     /// The length of the text in the layout
     pub(crate) text_len: usize,
 
+    // Resolved root style
+    /// The layout's root style.
+    pub(crate) root_style: Style<B>,
+    /// The font size of the root style, in layout units.
+    pub(crate) root_font_size: f32,
+    /// The resolved line height of the root style, in layout units.
+    pub(crate) root_line_height: f32,
+    /// The metrics of the root style's font.
+    pub(crate) root_font_metrics: FontMetrics,
+    /// Whether the root style acts as a strut, flooring the metrics of every line box.
+    pub(crate) strut: bool,
+
     // Output of style resolution (input to line breaking)
     pub(crate) styles: Vec<Style<B>>,
     pub(crate) inline_boxes: Vec<InlineBox>,
@@ -204,6 +216,11 @@ impl<B: Brush> Default for LayoutData<B> {
             width: 0.,
             full_width: 0.,
             height: 0.,
+            root_style: Style::default(),
+            root_font_size: 0.,
+            root_line_height: 0.,
+            root_font_metrics: FontMetrics::default(),
+            strut: false,
             styles: Vec::new(),
             inline_boxes: Vec::new(),
             shaped_text: ShapedText::new(),
@@ -230,6 +247,11 @@ impl<B: Brush> LayoutData<B> {
         self.width = 0.;
         self.full_width = 0.;
         self.height = 0.;
+        self.root_style = Style::default();
+        self.root_font_size = 0.;
+        self.root_line_height = 0.;
+        self.root_font_metrics = FontMetrics::default();
+        self.strut = false;
         self.styles.clear();
         self.inline_boxes.clear();
         self.shaped_text.clear();

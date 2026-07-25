@@ -9,6 +9,7 @@
 
 #![expect(clippy::cast_possible_truncation, reason = "Deferred")]
 
+use parley::RootStyle;
 use parley::{
     Alignment, AlignmentOptions, FontContext, FontWeight, GenericFamily, GlyphRun, InlineBox,
     InlineBoxKind, Layout, LayoutContext, LineHeight, PositionedLayoutItem, StyleProperty,
@@ -64,7 +65,13 @@ fn main() {
     let mut layout_cx = LayoutContext::new();
 
     // Create a RangedBuilder
-    let mut builder = layout_cx.ranged_builder(&mut font_cx, &text, display_scale, quantize);
+    let mut builder = layout_cx.ranged_builder(
+        &mut font_cx,
+        &text,
+        display_scale,
+        quantize,
+        &RootStyle::default(),
+    );
 
     // Set default text colour styles (set foreground text color)
     let foreground_brush = ColorBrush {

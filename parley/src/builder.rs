@@ -16,7 +16,7 @@ use parley_engine::break_overrides::LineBreakOverrideFn;
 
 use crate::InlineBoxKind;
 use crate::inline_box::InlineBox;
-use crate::resolve::{ResolvedStyle, StyleRun, tree::ItemKind};
+use crate::resolve::{StyleRun, tree::ItemKind};
 
 #[derive(Clone, Copy)]
 pub(crate) struct BuilderOptions<'a> {
@@ -51,6 +51,7 @@ impl<'b, B: Brush> RangedBuilder<'b, B> {
             self.lcx
                 .rcx
                 .resolve_property(self.fcx, &property.into(), self.options.scale);
+        self.lcx.root_style.apply(resolved.clone());
         self.lcx.ranged_style_builder.push_default(resolved);
     }
 
@@ -302,7 +303,9 @@ fn build_into_layout<B: Brush>(
     options: BuilderOptions<'_>,
 ) {
     if text.is_empty() && lcx.style_runs.is_empty() {
-        lcx.style_table.push(ResolvedStyle::default());
+        // Style the empty layout with the root style so that it produces
+        // meaningful metrics (e.g. for sizing a cursor).
+        lcx.style_table.push(lcx.root_style.clone());
         lcx.style_runs.push(StyleRun {
             style_index: 0,
             range: 0..0,
@@ -325,6 +328,17 @@ fn build_into_layout<B: Brush>(
     layout.data.quantize = options.quantize;
     layout.data.base_level = lcx.analysis.paragraph_level();
     layout.data.text_len = text.len();
+
+    layout.data.root_style = lcx.root_style.as_layout_style();
+    layout.data.root_font_size = lcx.root_style.font_size;
+    layout.data.strut = lcx.root_style_strut;
+    {
+        let mut query = fcx.collection.query(&mut fcx.source_cache);
+        let (metrics, line_height) =
+            super::shape::root_font_metrics(&lcx.rcx, &mut query, &lcx.root_style);
+        layout.data.root_font_metrics = metrics;
+        layout.data.root_line_height = line_height;
+    }
 
     lcx.char_style_indices
         .resize(lcx.analysis.char_info().len(), 0);
