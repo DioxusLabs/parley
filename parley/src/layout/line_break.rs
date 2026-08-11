@@ -1282,6 +1282,17 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         let mut line_box_extents = self.state.line.box_metrics.line_box;
         let mut content_box_extents = self.state.line.box_metrics.content_box;
 
+        // Lines with content include the layout's strut (see `LayoutData::strut`): the extents
+        // of a zero-width text run in the layout's root style. Lines without content (e.g. a
+        // trailing empty line after a newline, or a line holding only out-of-flow boxes) do not
+        // get the strut, matching CSS's treatment of line boxes with no inline-level content.
+        if have_metrics && let Some(strut) = self.layout.data.strut {
+            let strut_extents =
+                text_extents(strut.ascent, strut.descent, strut.line_height, quantize);
+            line_box_extents.over = line_box_extents.over.max(strut_extents.over);
+            line_box_extents.under = line_box_extents.under.max(strut_extents.under);
+        }
+
         // Resolve lines with no extent contributions at all to zero extents.
         if line_box_extents.is_unset() {
             line_box_extents = Extents::ZERO;

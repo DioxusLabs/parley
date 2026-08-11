@@ -29,6 +29,18 @@ pub(crate) struct RunData {
     pub(crate) letter_spacing: f32,
 }
 
+/// The metrics of the "strut": a zero-width inline box with the root style's primary font
+/// and line height (CSS 2 § 10.8), used to initialize each line box's extents.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct StrutMetrics {
+    /// Distance from the baseline to the top of the strut's alignment box.
+    pub(crate) ascent: f32,
+    /// Distance from the baseline to the bottom of the strut's alignment box.
+    pub(crate) descent: f32,
+    /// The strut's line height.
+    pub(crate) line_height: f32,
+}
+
 #[derive(Copy, Clone, Default, PartialEq, Debug)]
 pub enum BreakReason {
     #[default]
@@ -182,6 +194,9 @@ pub(crate) struct LayoutData<B: Brush> {
     /// The length of the text in the layout
     pub(crate) text_len: usize,
 
+    /// The strut whose metrics initialize each line box's extents (if any).
+    pub(crate) strut: Option<StrutMetrics>,
+
     // Output of style resolution (input to line breaking)
     pub(crate) styles: Vec<Style<B>>,
     pub(crate) inline_boxes: Vec<InlineBox>,
@@ -225,6 +240,7 @@ impl<B: Brush> Default for LayoutData<B> {
             quantize: true,
             base_level: BidiLevel::new(0),
             text_len: 0,
+            strut: None,
             width: 0.,
             full_width: 0.,
             height: 0.,
@@ -251,6 +267,7 @@ impl<B: Brush> LayoutData<B> {
         self.quantize = true;
         self.base_level = BidiLevel::new(0);
         self.text_len = 0;
+        self.strut = None;
         self.width = 0.;
         self.full_width = 0.;
         self.height = 0.;

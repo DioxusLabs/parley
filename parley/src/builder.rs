@@ -16,7 +16,9 @@ use parley_engine::break_overrides::LineBreakOverrideFn;
 
 use crate::InlineBoxKind;
 use crate::inline_box::InlineBox;
+use crate::layout::data::StrutMetrics;
 use crate::resolve::{ResolvedStyle, StyleRun, tree::ItemKind};
+use parley_engine::FontMetrics;
 
 #[derive(Clone, Copy)]
 pub(crate) struct BuilderOptions<'a> {
@@ -24,6 +26,7 @@ pub(crate) struct BuilderOptions<'a> {
     quantize: bool,
     base_direction: BaseDirection,
     line_break_override: Option<&'a LineBreakOverrideFn>,
+    compute_strut: bool,
 }
 
 impl BuilderOptions<'_> {
@@ -33,6 +36,7 @@ impl BuilderOptions<'_> {
             quantize,
             base_direction: BaseDirection::Auto,
             line_break_override: None,
+            compute_strut: false,
         }
     }
 }
@@ -82,6 +86,16 @@ impl<'b, B: Brush> RangedBuilder<'b, B> {
     /// See [`LineBreakOverrideFn`] for more details.
     pub fn set_line_break_override(&mut self, overrides: Option<&'b LineBreakOverrideFn>) {
         self.options.line_break_override = overrides;
+    }
+
+    /// Sets whether each line box's extents are initialized from a "strut" (CSS 2 § 10.8):
+    /// a zero-width inline box with the root style's primary font and line height.
+    ///
+    /// When enabled, every line is sized as if it contained a zero-width glyph in the
+    /// root style, even if it contains no text (e.g. only inline boxes). This also allows
+    /// text with negative leading to produce lines shorter than the text's ascent + descent.
+    pub fn set_compute_strut(&mut self, compute_strut: bool) {
+        self.options.compute_strut = compute_strut;
     }
 
     pub fn build_into(self, layout: &mut Layout<B>, text: impl AsRef<str>) {
@@ -288,6 +302,16 @@ impl<'b, B: Brush> TreeBuilder<'b, B> {
         self.options.line_break_override = overrides;
     }
 
+    /// Sets whether each line box's extents are initialized from a "strut" (CSS 2 § 10.8):
+    /// a zero-width inline box with the root style's primary font and line height.
+    ///
+    /// When enabled, every line is sized as if it contained a zero-width glyph in the
+    /// root style, even if it contains no text (e.g. only inline boxes). This also allows
+    /// text with negative leading to produce lines shorter than the text's ascent + descent.
+    pub fn set_compute_strut(&mut self, compute_strut: bool) {
+        self.options.compute_strut = compute_strut;
+    }
+
     #[inline]
     pub fn build_into(self, layout: &mut Layout<B>) -> String {
         // Apply TreeStyleBuilder styles to LayoutContext.
@@ -342,6 +366,13 @@ fn build_into_layout<B: Brush>(
     layout.data.base_level = lcx.analysis.paragraph_level();
     layout.data.text_len = text.len();
 
+    if options.compute_strut {
+        layout.data.strut = lcx
+            .root_style
+            .as_ref()
+            .and_then(|style| compute_strut(style, &lcx.rcx, fcx));
+    }
+
     lcx.char_style_indices
         .resize(lcx.analysis.char_info().len(), 0);
     let mut char_index = 0;
@@ -382,6 +413,57 @@ fn build_into_layout<B: Brush>(
     core::mem::swap(&mut layout.data.inline_boxes, &mut lcx.inline_boxes);
 
     layout.data.finish();
+}
+
+/// Compute the metrics of the "strut": a zero-width inline box with the root style's
+/// primary font and line height (CSS 2 § 10.8).
+fn compute_strut<B: Brush>(
+    style: &ResolvedStyle<B>,
+    rcx: &crate::resolve::ResolveContext,
+    fcx: &mut FontContext,
+) -> Option<StrutMetrics> {
+    let families = rcx.stack(style.font_family).unwrap_or(&[]);
+    let mut query = fcx.collection.query(&mut fcx.source_cache);
+    query.set_families(families.iter().copied());
+    query.set_attributes(fontique::Attributes {
+        width: style.font_width,
+        weight: style.font_weight,
+        style: style.font_style,
+    });
+
+    // The strut takes its metrics from the "first available font": the first font in the
+    // family stack that contains the space character (U+0020), or the first font at all if
+    // none do. See <https://drafts.csswg.org/css-fonts/#first-available-font>.
+    let mut first_font = None;
+    let mut font = None;
+    query.matches_with(|f| {
+        if first_font.is_none() {
+            first_font = Some(f.clone());
+        }
+        let has_space = FontMetrics::font_covers_char(f.blob.as_ref(), f.index, ' ');
+        if has_space {
+            font = Some(f.clone());
+            fontique::QueryStatus::Stop
+        } else {
+            fontique::QueryStatus::Continue
+        }
+    });
+    let font = font.or(first_font)?;
+
+    let metrics = FontMetrics::from_font(font.blob.as_ref(), font.index, style.font_size)?;
+    let line_height = match style.line_height {
+        crate::LineHeight::Absolute(value) => value,
+        crate::LineHeight::FontSizeRelative(value) => value * style.font_size,
+        crate::LineHeight::MetricsRelative(value) => {
+            (metrics.ascent + metrics.descent + metrics.leading) * value
+        }
+    };
+
+    Some(StrutMetrics {
+        ascent: metrics.ascent,
+        descent: metrics.descent,
+        line_height,
+    })
 }
 
 fn resolve_range(range: impl RangeBounds<usize>, len: usize) -> Range<usize> {
