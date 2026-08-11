@@ -101,15 +101,48 @@ struct Extents {
 
 impl Default for Extents {
     fn default() -> Self {
+        // Negative infinity so that legitimately negative extents (which occur when the line
+        // height is smaller than the text's ascent + descent) are not clamped to zero. Lines
+        // with no extent contributions at all are resolved to zero in `finish_line`.
         Self {
-            // NOTE: these should be `f32::NEG_INFINITY`, but that's currently causing
-            // `tests::test_builders::builders_empty` to fail with a `NaN`.
-            //
-            // And even more ideally, a line's initial extents should be sourced from the primary
-            // font.
-            over: 0.,
-            under: 0.,
+            over: f32::NEG_INFINITY,
+            under: f32::NEG_INFINITY,
         }
+    }
+}
+
+impl Extents {
+    fn is_unset(self) -> bool {
+        self.over == f32::NEG_INFINITY && self.under == f32::NEG_INFINITY
+    }
+
+    const ZERO: Self = Self {
+        over: 0.,
+        under: 0.,
+    };
+}
+
+/// Compute the extents of text over and under the baseline, distributing the leading
+/// (the difference between the line height and the text's ascent + descent) equally
+/// over and under the text (CSS 2 § 10.8.1). The leading (and thus the extents) may
+/// be negative when the line height is smaller than ascent + descent.
+fn text_extents(mut ascent: f32, mut descent: f32, line_height: f32, quantize: bool) -> Extents {
+    if quantize {
+        ascent = ascent.round();
+        descent = descent.round();
+    }
+    let half_leading = (line_height - (ascent + descent)) / 2.;
+    let over = if quantize {
+        ascent + half_leading.floor()
+    } else {
+        ascent + half_leading
+    };
+    // Note the `under` part is *not* quantized. This is such that the exact line height is
+    // reached. For determining the line box block, add this to the baseline and then quantize
+    // by rounding.
+    Extents {
+        over,
+        under: line_height - over,
     }
 }
 
@@ -127,19 +160,10 @@ impl LineBoxMetrics {
         } else {
             (metrics.ascent, metrics.descent)
         };
-        let half_leading = (line_height - (ascent + descent)) / 2.;
-        let over = if quantize {
-            ascent + half_leading.floor()
-        } else {
-            ascent + half_leading
-        };
-        // Note the `under` part is *not* quantized. This is such that the exact line height is
-        // reached. For determining the line box block, add this to the baseline and then quantize
-        // by rounding.
-        let under = line_height - over;
+        let extents = text_extents(metrics.ascent, metrics.descent, line_height, quantize);
 
-        self.line_box.over = self.line_box.over.max(over);
-        self.line_box.under = self.line_box.under.max(under);
+        self.line_box.over = self.line_box.over.max(extents.over);
+        self.line_box.under = self.line_box.under.max(extents.under);
         self.content_box.over = self.content_box.over.max(ascent);
         self.content_box.under = self.content_box.under.max(descent);
     }
@@ -298,6 +322,15 @@ impl Default for BreakerState {
     }
 }
 
+/// How an inline box contributes to its line box's metrics, resolved from the box's
+/// [`baseline`](crate::InlineBox::baseline).
+#[derive(Clone, Copy, Debug)]
+pub enum InlineBoxAlignment {
+    /// The box is aligned to the line's baseline: `ascent` extends over it and `descent`
+    /// under it.
+    Baseline { ascent: f32, descent: f32 },
+}
+
 impl BreakerState {
     /// Add the atom currently being evaluated to the current line.
     ///
@@ -326,22 +359,25 @@ impl BreakerState {
 
     /// Add an inline box to the line.
     ///
-    /// `ascent` and `descent` are the distances the box extends above and below the text baseline
-    /// respectively. A box with its bottom aligned to the baseline is simply one with a zero
-    /// descent. The box grows the line only insofar as it extends beyond the text.
+    /// `alignment` describes how the box contributes to the line's vertical metrics. Pass `None`
+    /// for boxes that should not affect them (e.g. out-of-flow boxes).
     pub fn append_inline_box_to_line(
         &mut self,
         next_x: f32,
-        ascent: f32,
-        descent: f32,
+        alignment: Option<InlineBoxAlignment>,
         quantize: bool,
     ) {
         self.item_idx += 1;
         self.line.items.end += 1;
         self.line.x = next_x;
-        self.line
-            .box_metrics
-            .add_inline_box(ascent, descent, quantize);
+        match alignment {
+            Some(InlineBoxAlignment::Baseline { ascent, descent }) => {
+                self.line
+                    .box_metrics
+                    .add_inline_box(ascent, descent, quantize);
+            }
+            None => {}
+        }
         self.update_max_height_exceeded();
     }
 
@@ -478,7 +514,6 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             line_indent,
         );
 
-        let line_height = self.state.line.box_metrics.line_height();
         let line_y_start = self.state.line_y;
 
         self.state.items = self.lines.line_items.len();
@@ -488,7 +523,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
         // `finish_line` reads the line's accumulated vertical metrics from `self.state.line`, so
         // it must run before we reset the per-line running state.
-        self.finish_line(self.lines.lines.len() - 1, line_height);
+        let line_height = self.finish_line(self.lines.lines.len() - 1);
         self.state.line.reset();
 
         self.state.line_y += line_height as f64;
@@ -636,26 +671,31 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     // and the portion below to its descent. By default (no explicit baseline) the
                     // bottom of the box is aligned with the text baseline, i.e. the box is all
                     // ascent and zero descent. Out-of-flow boxes contribute nothing.
-                    let (width_contribution, height_contribution, resolved_baseline) =
-                        match inline_box.kind {
-                            InlineBoxKind::InFlow => {
-                                let baseline = inline_box.baseline.unwrap_or(inline_box.height);
-                                (inline_box.width, inline_box.height, baseline)
-                            }
-                            InlineBoxKind::OutOfFlow => (0.0, 0.0, 0.0),
-                            // If the box is a `CustomOutOfFlow` box then we yield control flow back to the caller.
-                            // It is then the caller's responsibility to handle placement of the box.
-                            InlineBoxKind::CustomOutOfFlow => {
-                                return Some(YieldData::InlineBoxBreak(BoxBreakData {
-                                    inline_box_id: inline_box.id,
-                                    inline_box_index: item.index,
-                                    advance: self.state.line.x,
-                                }));
-                            }
-                        };
+                    let (width_contribution, height_contribution) = match inline_box.kind {
+                        InlineBoxKind::InFlow => (inline_box.width, inline_box.height),
+                        InlineBoxKind::OutOfFlow => (0.0, 0.0),
+                        // If the box is a `CustomOutOfFlow` box then we yield control flow back to the caller.
+                        // It is then the caller's responsibility to handle placement of the box.
+                        InlineBoxKind::CustomOutOfFlow => {
+                            return Some(YieldData::InlineBoxBreak(BoxBreakData {
+                                inline_box_id: inline_box.id,
+                                inline_box_index: item.index,
+                                advance: self.state.line.x,
+                            }));
+                        }
+                    };
 
-                    let ascent_contribution = resolved_baseline;
-                    let descent_contribution = height_contribution - resolved_baseline;
+                    // Out-of-flow boxes do not contribute to the line's vertical metrics.
+                    let alignment = match inline_box.kind {
+                        InlineBoxKind::InFlow => {
+                            let baseline = inline_box.baseline.unwrap_or(height_contribution);
+                            Some(InlineBoxAlignment::Baseline {
+                                ascent: baseline,
+                                descent: height_contribution - baseline,
+                            })
+                        }
+                        _ => None,
+                    };
 
                     // Compute the x position of the content being currently processed
                     let next_x = self.state.line.x + width_contribution;
@@ -675,8 +715,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                         self.state.append_inline_box_to_line(
                             next_x,
-                            ascent_contribution,
-                            descent_contribution,
+                            alignment,
                             self.layout.data.quantize,
                         );
 
@@ -688,8 +727,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             // println!("BOX EMERGENCY BREAK");
                             self.state.append_inline_box_to_line(
                                 next_x,
-                                ascent_contribution,
-                                descent_contribution,
+                                alignment,
                                 self.layout.data.quantize,
                             );
                             BreakReason::Emergency
@@ -943,8 +981,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     if inline_box.kind != InlineBoxKind::InFlow {
                         self.state.append_inline_box_to_line(
                             self.state.line.x,
-                            0.0,
-                            0.0,
+                            None,
                             self.layout.data.quantize,
                         );
                         continue;
@@ -964,8 +1001,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let baseline = inline_box.baseline.unwrap_or(inline_box.height);
                     self.state.append_inline_box_to_line(
                         next_x,
-                        baseline,
-                        inline_box.height - baseline,
+                        Some(InlineBoxAlignment::Baseline {
+                            ascent: baseline,
+                            descent: inline_box.height - baseline,
+                        }),
                         self.layout.data.quantize,
                     );
                     char_count += 1;
@@ -1119,7 +1158,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         }
     }
 
-    fn finish_line(&mut self, line_idx: usize, line_height: f32) {
+    /// Finalize the metrics of the line at `line_idx`, returning its line height.
+    fn finish_line(&mut self, line_idx: usize) -> f32 {
         let prev_line_metrics = match line_idx {
             0 => None,
             idx => Some(self.lines.lines[idx - 1].metrics),
@@ -1129,8 +1169,6 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         // Reset metrics for line
         line.metrics.offset = 0.;
         line.text_range.start = usize::MAX;
-
-        line.metrics.line_height = line_height;
 
         if line.item_range.is_empty() {
             line.text_range = self.layout.data.text_len..self.layout.data.text_len;
@@ -1243,6 +1281,14 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
         let mut line_box_extents = self.state.line.box_metrics.line_box;
         let mut content_box_extents = self.state.line.box_metrics.content_box;
+
+        // Resolve lines with no extent contributions at all to zero extents.
+        if line_box_extents.is_unset() {
+            line_box_extents = Extents::ZERO;
+        }
+        if content_box_extents.is_unset() {
+            content_box_extents = Extents::ZERO;
+        }
         if !have_metrics
             && line.item_range.is_empty()
             && let Some(metrics) = prev_line_metrics
@@ -1315,6 +1361,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
         line.metrics.inline_min_coord = self.state.line_x;
         line.metrics.inline_max_coord = self.state.line_x + self.state.line_max_advance;
+
+        let line_height = line_box_extents.over + line_box_extents.under;
+        line.metrics.line_height = line_height;
+        line_height
     }
 }
 

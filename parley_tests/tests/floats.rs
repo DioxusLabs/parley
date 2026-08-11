@@ -180,8 +180,7 @@ fn layout_floats(
 
                 state.append_inline_box_to_line(
                     box_break_data.advance,
-                    0.0,
-                    0.0,
+                    None,
                     true, // TODO: quantize is known to be `true` here, but perhaps we should expose
                           // something like `Layout::quantized`.
                 );
