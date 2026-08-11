@@ -16,7 +16,7 @@ use crate::layout::{
     LineMetrics, Run,
 };
 use crate::style::Brush;
-use crate::{InlineBoxKind, OverflowWrap, TextWrapMode};
+use crate::{InlineBoxKind, InlineBoxVerticalAlign, OverflowWrap, TextWrapMode};
 
 use core::ops::Range;
 use parley_engine::shape::{Character, ShapedCluster, Whitespace};
@@ -89,6 +89,11 @@ struct LineBoxMetrics {
     ///
     /// Like [`Self::line_box`], these are in block flow direction.
     content_box: Extents,
+    /// The height of the tallest top- or bottom-aligned inline box on the line.
+    ///
+    /// Such boxes grow the line box if they are taller than it, but do not affect the
+    /// position of the baseline within it.
+    top_or_bottom_box_height: f32,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -112,6 +117,13 @@ impl Default for Extents {
 }
 
 impl Extents {
+    fn max(self, other: Self) -> Self {
+        Self {
+            over: self.over.max(other.over),
+            under: self.under.max(other.under),
+        }
+    }
+
     fn is_unset(self) -> bool {
         self.over == f32::NEG_INFINITY && self.under == f32::NEG_INFINITY
     }
@@ -150,7 +162,7 @@ impl LineBoxMetrics {
     /// The line height seen so far.
     #[inline(always)]
     fn line_height(self) -> f32 {
-        self.line_box.over + self.line_box.under
+        (self.line_box.over + self.line_box.under).max(self.top_or_bottom_box_height)
     }
 
     fn add_text(&mut self, metrics: &FontMetrics, line_height: f32, quantize: bool) {
@@ -180,6 +192,14 @@ impl LineBoxMetrics {
             self.content_box.over = self.content_box.over.max(ascent);
             self.content_box.under = self.content_box.under.max(descent);
         }
+    }
+
+    /// Add an inline box aligned to the top or bottom of the line box rather than to the
+    /// baseline. Such a box only grows the line if it is taller than the line's height; it
+    /// does not affect the baseline's position within the line.
+    fn add_top_or_bottom_aligned_inline_box(&mut self, height: f32, quantize: bool) {
+        let height = if quantize { height.round() } else { height };
+        self.top_or_bottom_box_height = self.top_or_bottom_box_height.max(height);
     }
 }
 
@@ -323,12 +343,15 @@ impl Default for BreakerState {
 }
 
 /// How an inline box contributes to its line box's metrics, resolved from the box's
-/// [`baseline`](crate::InlineBox::baseline).
+/// [`vertical_align`](InlineBox::vertical_align) and [`baseline`](InlineBox::baseline).
 #[derive(Clone, Copy, Debug)]
 pub enum InlineBoxAlignment {
     /// The box is aligned to the line's baseline: `ascent` extends over it and `descent`
     /// under it.
     Baseline { ascent: f32, descent: f32 },
+    /// The box is aligned to the top or bottom of the line box, growing the line to at
+    /// least `height` without affecting the baseline's position.
+    TopOrBottom { height: f32 },
 }
 
 impl BreakerState {
@@ -375,6 +398,11 @@ impl BreakerState {
                 self.line
                     .box_metrics
                     .add_inline_box(ascent, descent, quantize);
+            }
+            Some(InlineBoxAlignment::TopOrBottom { height }) => {
+                self.line
+                    .box_metrics
+                    .add_top_or_bottom_aligned_inline_box(height, quantize);
             }
             None => {}
         }
@@ -489,10 +517,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         lines.swap(&mut layout.data);
         lines.lines.clear();
         lines.line_items.clear();
+        let state = BreakerState::default();
         Self {
             layout,
             lines,
-            state: BreakerState::default(),
+            state,
             prev_state: None,
             done: false,
         }
@@ -687,13 +716,20 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                     // Out-of-flow boxes do not contribute to the line's vertical metrics.
                     let alignment = match inline_box.kind {
-                        InlineBoxKind::InFlow => {
-                            let baseline = inline_box.baseline.unwrap_or(height_contribution);
-                            Some(InlineBoxAlignment::Baseline {
-                                ascent: baseline,
-                                descent: height_contribution - baseline,
-                            })
-                        }
+                        InlineBoxKind::InFlow => Some(match inline_box.vertical_align {
+                            InlineBoxVerticalAlign::Baseline => {
+                                let baseline = inline_box.baseline.unwrap_or(height_contribution);
+                                InlineBoxAlignment::Baseline {
+                                    ascent: baseline,
+                                    descent: height_contribution - baseline,
+                                }
+                            }
+                            InlineBoxVerticalAlign::Top | InlineBoxVerticalAlign::Bottom => {
+                                InlineBoxAlignment::TopOrBottom {
+                                    height: height_contribution,
+                                }
+                            }
+                        }),
                         _ => None,
                     };
 
@@ -998,13 +1034,23 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let next_x = self.state.line.x + inline_box.width;
                     // The portion above the baseline is ascent, the rest descent. A box without an
                     // explicit baseline is bottom-aligned, i.e. all ascent and zero descent.
-                    let baseline = inline_box.baseline.unwrap_or(inline_box.height);
+                    let alignment = match inline_box.vertical_align {
+                        InlineBoxVerticalAlign::Baseline => {
+                            let baseline = inline_box.baseline.unwrap_or(inline_box.height);
+                            InlineBoxAlignment::Baseline {
+                                ascent: baseline,
+                                descent: inline_box.height - baseline,
+                            }
+                        }
+                        InlineBoxVerticalAlign::Top | InlineBoxVerticalAlign::Bottom => {
+                            InlineBoxAlignment::TopOrBottom {
+                                height: inline_box.height,
+                            }
+                        }
+                    };
                     self.state.append_inline_box_to_line(
                         next_x,
-                        Some(InlineBoxAlignment::Baseline {
-                            ascent: baseline,
-                            descent: inline_box.height - baseline,
-                        }),
+                        Some(alignment),
                         self.layout.data.quantize,
                     );
                     char_count += 1;
@@ -1289,8 +1335,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         if have_metrics && let Some(strut) = self.layout.data.strut {
             let strut_extents =
                 text_extents(strut.ascent, strut.descent, strut.line_height, quantize);
-            line_box_extents.over = line_box_extents.over.max(strut_extents.over);
-            line_box_extents.under = line_box_extents.under.max(strut_extents.under);
+            line_box_extents = line_box_extents.max(strut_extents);
         }
 
         // Resolve lines with no extent contributions at all to zero extents.
@@ -1299,6 +1344,14 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         }
         if content_box_extents.is_unset() {
             content_box_extents = Extents::ZERO;
+        }
+
+        // Grow the line box to fit any top- or bottom-aligned inline boxes taller than it.
+        // The extra space is added below the baseline, keeping the baseline's position
+        // relative to the baseline-aligned content.
+        let top_or_bottom_box_height = self.state.line.box_metrics.top_or_bottom_box_height;
+        if line_box_extents.over + line_box_extents.under < top_or_bottom_box_height {
+            line_box_extents.under = top_or_bottom_box_height - line_box_extents.over;
         }
         if !have_metrics
             && line.item_range.is_empty()
