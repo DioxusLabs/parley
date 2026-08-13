@@ -135,7 +135,20 @@ fn scan_system_fonts() -> Option<scan::ScannedCollection> {
         return None;
     }
 
-    Some(scan::ScannedCollection::from_paths(paths.iter(), 0))
+    Some(match scan_cache_path() {
+        Some(cache_path) => {
+            scan::ScannedCollection::from_paths_cached(paths.iter(), 0, &cache_path)
+        }
+        None => scan::ScannedCollection::from_paths(paths.iter(), 0),
+    })
+}
+
+/// Returns the path of the persistent font scan cache, which lets us avoid
+/// re-parsing font files that haven't changed since the last scan.
+fn scan_cache_path() -> Option<PathBuf> {
+    let mut path = std::env::home_dir()?;
+    path.push("Library/Caches/fontique/font-scan-cache.bin");
+    Some(path)
 }
 
 fn library_font_files() -> Vec<PathBuf> {

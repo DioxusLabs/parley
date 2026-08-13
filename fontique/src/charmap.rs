@@ -38,6 +38,24 @@ impl CharmapIndex {
         })
     }
 
+    /// Decomposes the index into raw parts for serialization.
+    #[cfg(feature = "std")]
+    pub(crate) fn to_parts(self) -> (u32, bool, bool) {
+        (self.subtable_offset, self.is_symbol, self.is_mac_roman)
+    }
+
+    /// Recreates an index from raw parts produced by [`Self::to_parts`].
+    #[cfg(feature = "std")]
+    pub(crate) fn from_parts(
+        (subtable_offset, is_symbol, is_mac_roman): (u32, bool, bool),
+    ) -> Self {
+        Self {
+            subtable_offset,
+            is_symbol,
+            is_mac_roman,
+        }
+    }
+
     /// Creates a character map from the given font data.
     pub fn charmap<'a>(&self, font_data: &'a [u8]) -> Option<Charmap<'a>> {
         let subtable_data = font_data.get(self.subtable_offset as usize..)?;

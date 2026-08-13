@@ -20,15 +20,16 @@ use read_fonts::{
 };
 use smallvec::SmallVec;
 #[cfg(feature = "std")]
-use {super::source::SourcePathMap, std::path::Path};
-#[cfg(feature = "std")]
 use {
+    super::scan_cache,
     super::source::{SourceId, SourceInfo, SourceKind},
     core::sync::atomic::{AtomicUsize, Ordering},
     hashbrown::HashSet,
     std::path::PathBuf,
     std::sync::Arc,
 };
+#[cfg(feature = "std")]
+use {super::source::SourcePathMap, std::path::Path};
 
 use alloc::vec::Vec;
 
@@ -47,7 +48,21 @@ impl ScannedCollection {
     /// Creates a new collection by scanning the given paths for
     /// font files.
     pub fn from_paths(paths: impl IntoIterator<Item = impl AsRef<Path>>, max_depth: u32) -> Self {
-        scan_collection(paths, max_depth)
+        scan_collection(paths, max_depth, None)
+    }
+
+    /// Creates a new collection by scanning the given paths for font files,
+    /// using a persistent cache stored at `cache_path` to skip parsing
+    /// files that haven't changed since the last scan.
+    ///
+    /// The cache is created or refreshed as needed. If it can't be read or
+    /// written, the scan still succeeds without it.
+    pub fn from_paths_cached(
+        paths: impl IntoIterator<Item = impl AsRef<Path>>,
+        max_depth: u32,
+        cache_path: &Path,
+    ) -> Self {
+        scan_collection(paths, max_depth, Some(cache_path))
     }
 }
 
@@ -90,9 +105,13 @@ pub fn scan_memory<'a>(buf: &'a [u8], mut f: impl FnMut(&ScannedFont<'a>)) {
 fn scan_collection(
     paths: impl IntoIterator<Item = impl AsRef<Path>>,
     max_depth: u32,
+    cache_path: Option<&Path>,
 ) -> ScannedCollection {
     let files = collect_font_files(paths, max_depth);
-    let records = parse_files(&files);
+    let records = match cache_path {
+        Some(cache_path) => parse_files_cached(&files, cache_path),
+        None => parse_files(&files),
+    };
     let mut collection = ScannedCollection::default();
     let mut families: HashMap<FamilyId, (FamilyName, SmallVec<[FontInfo; 4]>)> = HashMap::default();
     for record in records {
@@ -122,10 +141,10 @@ fn scan_collection(
 }
 
 #[cfg(feature = "std")]
-struct FontRecord {
-    names: Vec<String>,
-    postscript_name: String,
-    font: FontInfo,
+pub(crate) struct FontRecord {
+    pub(crate) names: Vec<String>,
+    pub(crate) postscript_name: String,
+    pub(crate) font: FontInfo,
 }
 
 /// Expands the given paths into a deduplicated list of files, walking
@@ -164,31 +183,100 @@ fn collect_font_files(
 /// available CPU cores.
 #[cfg(feature = "std")]
 fn parse_files(files: &[PathBuf]) -> Vec<FontRecord> {
+    parse_files_impl(files)
+        .into_iter()
+        .flat_map(|(_, records)| records)
+        .collect()
+}
+
+/// As [`parse_files`], but reusing results from and refreshing the cache
+/// stored at `cache_path`.
+#[cfg(feature = "std")]
+fn parse_files_cached(files: &[PathBuf], cache_path: &Path) -> Vec<FontRecord> {
+    let mut cache = scan_cache::load(cache_path).unwrap_or_default();
+    let cached_file_count = cache.len();
+
+    // Partition into cache hits and files that need parsing.
+    let mut results: Vec<(&Path, Option<scan_cache::FileStamp>, Vec<FontRecord>)> =
+        Vec::with_capacity(files.len());
+    let mut misses: Vec<(&Path, Option<scan_cache::FileStamp>)> = Vec::new();
+    for path in files {
+        let stamp = std::fs::metadata(path)
+            .ok()
+            .as_ref()
+            .and_then(scan_cache::FileStamp::from_metadata);
+        match cache.remove(path.as_path()) {
+            Some(cached) if stamp == Some(cached.stamp) => {
+                results.push((path, stamp, cached.records));
+            }
+            _ => misses.push((path.as_path(), stamp)),
+        }
+    }
+    let hit_count = results.len();
+
+    // Parse the files that missed the cache in parallel.
+    let miss_paths: Vec<PathBuf> = misses
+        .iter()
+        .map(|(path, _)| (*path).to_path_buf())
+        .collect();
+    for (index, records) in parse_files_impl(&miss_paths) {
+        let (path, stamp) = misses[index];
+        results.push((path, stamp, records));
+    }
+
+    // Refresh the cache if anything was parsed or any cached file no longer
+    // exists in the scanned set.
+    let stale_cached_files = cached_file_count - hit_count;
+    if !misses.is_empty() || stale_cached_files > 0 {
+        let _ = scan_cache::save(
+            cache_path,
+            results
+                .iter()
+                .filter_map(|(path, stamp, records)| Some((*path, (*stamp)?, records.as_slice()))),
+        );
+    }
+
+    results
+        .into_iter()
+        .flat_map(|(_, _, records)| records)
+        .collect()
+}
+
+/// Reads and parses the given font files in parallel, returning the records
+/// grouped by file (in arbitrary order).
+#[cfg(feature = "std")]
+fn parse_files_impl(files: &[PathBuf]) -> Vec<(usize, Vec<FontRecord>)> {
     let num_threads = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1)
         .min(files.len());
     if num_threads <= 1 {
-        let mut records = Vec::new();
-        for path in files {
-            parse_file(path, &mut records);
-        }
-        return records;
+        return files
+            .iter()
+            .enumerate()
+            .map(|(index, path)| {
+                let mut records = Vec::new();
+                parse_file(path, &mut records);
+                (index, records)
+            })
+            .collect();
     }
     let cursor = AtomicUsize::new(0);
     std::thread::scope(|scope| {
         let handles: Vec<_> = (0..num_threads)
             .map(|_| {
                 scope.spawn(|| {
-                    let mut records = Vec::new();
+                    let mut results = Vec::new();
                     loop {
                         let index = cursor.fetch_add(1, Ordering::Relaxed);
                         let Some(path) = files.get(index) else {
                             break;
                         };
+                        let mut records = Vec::new();
                         parse_file(path, &mut records);
+                        results.push((index, records));
                     }
-                    records
+                    results
                 })
             })
             .collect();
@@ -544,4 +632,121 @@ fn english_or_first<'a>(names: &name::Name<'a>, id: NameId) -> Option<name::Name
         }
     }
     best_record.and_then(|record| record.string(names.string_data()).ok())
+}
+
+#[cfg(all(test, feature = "std"))]
+mod tests {
+    use super::*;
+    use alloc::format;
+    use alloc::string::ToString;
+
+    /// Font files shipped in the repo for use as test assets.
+    const ASSETS: &[&str] = &[
+        "../parley_dev/assets/fonts/roboto_fonts/Roboto-Regular.ttf",
+        "../parley_dev/assets/fonts/arimo_fonts/Arimo-VariableFont_wght.ttf",
+        "../parley_dev/assets/fonts/noto_fonts/NotoKufiArabic-Regular.otf",
+    ];
+
+    fn summarize(collection: &ScannedCollection) -> Vec<(String, usize)> {
+        let mut summary: Vec<_> = collection
+            .families
+            .values()
+            .map(|family| (family.name().to_string(), family.fonts().len()))
+            .collect();
+        summary.sort();
+        summary
+    }
+
+    fn font_key(font: &FontInfo) -> (PathBuf, u32) {
+        let SourceKind::Path(path) = font.source().kind() else {
+            unreachable!()
+        };
+        (path.to_path_buf(), font.index())
+    }
+
+    fn sorted_fonts(collection: &ScannedCollection, family_name: &str) -> Vec<FontInfo> {
+        let mut fonts: Vec<FontInfo> = collection
+            .families
+            .values()
+            .find(|family| family.name() == family_name)
+            .unwrap()
+            .fonts()
+            .to_vec();
+        fonts.sort_by_key(font_key);
+        fonts
+    }
+
+    #[test]
+    fn cached_scan_matches_uncached() {
+        let dir = std::env::temp_dir().join(format!("fontique-scan-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let fonts_dir = dir.join("fonts");
+        std::fs::create_dir_all(&fonts_dir).unwrap();
+        for asset in ASSETS {
+            let asset = Path::new(env!("CARGO_MANIFEST_DIR")).join(asset);
+            std::fs::copy(&asset, fonts_dir.join(asset.file_name().unwrap())).unwrap();
+        }
+        let cache_path = dir.join("cache.bin");
+
+        let uncached = ScannedCollection::from_paths([&fonts_dir], 2);
+        // Cold cache run (writes the cache).
+        let cold = ScannedCollection::from_paths_cached([&fonts_dir], 2, &cache_path);
+        assert!(cache_path.exists());
+        // Warm cache run.
+        let warm = ScannedCollection::from_paths_cached([&fonts_dir], 2, &cache_path);
+
+        assert_eq!(summarize(&uncached), summarize(&cold));
+        assert_eq!(summarize(&uncached), summarize(&warm));
+        let mut expected_ps: Vec<_> = uncached.postscript_names.keys().collect();
+        let mut warm_ps: Vec<_> = warm.postscript_names.keys().collect();
+        expected_ps.sort();
+        warm_ps.sort();
+        assert_eq!(expected_ps, warm_ps);
+
+        // Every font attribute should round-trip through the cache.
+        for (family_name, _) in summarize(&uncached) {
+            let expected = sorted_fonts(&uncached, &family_name);
+            let cached = sorted_fonts(&warm, &family_name);
+            assert_eq!(expected.len(), cached.len());
+            for (a, b) in expected.iter().zip(&cached) {
+                assert_eq!(a.index(), b.index());
+                assert_eq!(a.width(), b.width());
+                assert_eq!(a.style(), b.style());
+                assert_eq!(a.weight(), b.weight());
+                assert_eq!(a.charmap_index(), b.charmap_index());
+                assert_eq!(a.axes().len(), b.axes().len());
+                for (axis_a, axis_b) in a.axes().iter().zip(b.axes()) {
+                    assert_eq!(axis_a.tag, axis_b.tag);
+                    assert_eq!(axis_a.min, axis_b.min);
+                    assert_eq!(axis_a.max, axis_b.max);
+                    assert_eq!(axis_a.default, axis_b.default);
+                }
+                assert_eq!(a.has_weight_axis(), b.has_weight_axis());
+            }
+        }
+
+        // A changed file should be re-parsed: replace Roboto with Arimo
+        // (and ensure the modification time changes).
+        let replaced = fonts_dir.join("Roboto-Regular.ttf");
+        let arimo = Path::new(env!("CARGO_MANIFEST_DIR")).join(ASSETS[1]);
+        std::fs::copy(&arimo, &replaced).unwrap();
+        let old = std::time::SystemTime::now() - core::time::Duration::from_secs(1000);
+        std::fs::File::options()
+            .write(true)
+            .open(&replaced)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        let rescanned = ScannedCollection::from_paths_cached([&fonts_dir], 2, &cache_path);
+        assert!(
+            !rescanned
+                .families
+                .values()
+                .any(|family| family.name() == "Roboto"),
+            "stale cache entry for changed file"
+        );
+        assert_eq!(sorted_fonts(&rescanned, "Arimo").len(), 2);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

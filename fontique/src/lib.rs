@@ -49,6 +49,8 @@ mod generic;
 mod impl_fontconfig;
 mod matching;
 mod scan;
+#[cfg(feature = "std")]
+mod scan_cache;
 mod script;
 mod source;
 
