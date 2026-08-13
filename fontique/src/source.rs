@@ -93,8 +93,18 @@ pub struct SourcePathMap {
 
 #[cfg(feature = "std")]
 impl SourcePathMap {
+    /// Inserts an existing path-based source into the map.
+    pub(crate) fn insert(&mut self, source: &SourceInfo) {
+        if let SourceKind::Path(path) = &source.kind {
+            self.map
+                .entry(path.clone())
+                .or_insert_with(|| source.clone());
+        }
+    }
+
     /// Converts a path string into a font data object, creating it if it
     /// doesn't already exist.
+    #[allow(dead_code, reason = "only used by some system backends")]
     pub fn get_or_insert(&mut self, path: &Path) -> SourceInfo {
         if let Some(source) = self.map.get(path) {
             source.clone()
