@@ -45,6 +45,7 @@ This release has an [MSRV] of 1.88.
 
 - File system font scanning (used for system font enumeration on macOS and Android) now parses font files in parallel and reads only the metadata it needs instead of memory-mapping whole files. ([#3][] by [@nicoburns][])
 - System font scans on macOS are now cached in `~/Library/Caches/fontique`, keyed by file modification time and size, so unchanged font files aren't re-parsed on subsequent runs. ([#4][] by [@nicoburns][])
+- Directory scanning on macOS now uses the `getattrlistbulk` syscall to list directories and retrieve file metadata in bulk. ([#6][] by [@nicoburns][])
 
 ### Fixed
 
@@ -622,6 +623,7 @@ This release has an [MSRV][] of 1.70.
 [#213]: https://github.com/linebender/parley/pull/213
 [#3]: https://github.com/DioxusLabs/parley/pull/3
 [#4]: https://github.com/DioxusLabs/parley/pull/4
+[#6]: https://github.com/DioxusLabs/parley/pull/6
 [#215]: https://github.com/linebender/parley/pull/215
 [#223]: https://github.com/linebender/parley/pull/223
 [#224]: https://github.com/linebender/parley/pull/224

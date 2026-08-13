@@ -39,17 +39,17 @@ pub(crate) struct FileStamp {
 }
 
 impl FileStamp {
-    pub(crate) fn from_metadata(metadata: &std::fs::Metadata) -> Option<Self> {
-        let mtime = metadata
-            .modified()
-            .ok()?
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .ok()?;
+    pub(crate) fn new(modified: SystemTime, size: u64) -> Option<Self> {
+        let mtime = modified.duration_since(SystemTime::UNIX_EPOCH).ok()?;
         Some(Self {
             mtime_secs: mtime.as_secs(),
             mtime_nanos: mtime.subsec_nanos(),
-            size: metadata.len(),
+            size,
         })
+    }
+
+    pub(crate) fn from_metadata(metadata: &std::fs::Metadata) -> Option<Self> {
+        Self::new(metadata.modified().ok()?, metadata.len())
     }
 }
 

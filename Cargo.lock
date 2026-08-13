@@ -1289,6 +1289,7 @@ dependencies = [
 name = "fontique"
 version = "0.11.0"
 dependencies = [
+ "getattrlistbulk",
  "hashbrown 0.17.1",
  "linebender_resource_handle",
  "memmap2",
@@ -1409,6 +1410,16 @@ dependencies = [
  "futures-task",
  "pin-project-lite",
  "slab",
+]
+
+[[package]]
+name = "getattrlistbulk"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e65718dfbb192923baed0b86b0e5363103570fdc39d5a2f25c572aa75144b712"
+dependencies = [
+ "bitflags 2.13.0",
+ "libc",
 ]
 
 [[package]]

@@ -110,7 +110,10 @@ fn scan_collection(
     let files = collect_font_files(paths, max_depth);
     let records = match cache_path {
         Some(cache_path) => parse_files_cached(&files, cache_path),
-        None => parse_files(&files),
+        None => {
+            let paths: Vec<PathBuf> = files.into_iter().map(|(path, _)| path).collect();
+            parse_files(&paths)
+        }
     };
     let mut collection = ScannedCollection::default();
     let mut families: HashMap<FamilyId, (FamilyName, SmallVec<[FontInfo; 4]>)> = HashMap::default();
@@ -147,36 +150,101 @@ pub(crate) struct FontRecord {
     pub(crate) font: FontInfo,
 }
 
-/// Expands the given paths into a deduplicated list of files, walking
-/// directories up to `max_depth`.
+/// Expands the given paths into a deduplicated list of files (with their
+/// modification stamps, where cheaply available), walking directories up
+/// to `max_depth`.
 #[cfg(feature = "std")]
 fn collect_font_files(
     paths: impl IntoIterator<Item = impl AsRef<Path>>,
     max_depth: u32,
-) -> Vec<PathBuf> {
-    fn collect(path: &Path, max_depth: u32, depth: u32, seen: &mut HashSet<PathBuf>) {
-        let Ok(metadata) = path.metadata() else {
-            return;
-        };
-        if metadata.is_dir() {
-            if depth > max_depth {
-                return;
-            }
-            let Ok(entries) = std::fs::read_dir(path) else {
-                return;
-            };
-            for entry in entries.filter_map(|entry| entry.ok()) {
-                collect(entry.path().as_path(), max_depth, depth + 1, seen);
-            }
-        } else {
-            seen.insert(path.to_path_buf());
-        }
-    }
-    let mut seen = HashSet::default();
+) -> Vec<(PathBuf, Option<scan_cache::FileStamp>)> {
+    let mut seen = HashMap::default();
     for path in paths {
-        collect(path.as_ref(), max_depth, 0, &mut seen);
+        collect_path(path.as_ref(), max_depth, 0, &mut seen);
     }
     seen.into_iter().collect()
+}
+
+#[cfg(feature = "std")]
+fn collect_path(
+    path: &Path,
+    max_depth: u32,
+    depth: u32,
+    seen: &mut HashMap<PathBuf, Option<scan_cache::FileStamp>>,
+) {
+    let Ok(metadata) = path.metadata() else {
+        return;
+    };
+    if metadata.is_dir() {
+        if depth > max_depth {
+            return;
+        }
+        walk_dir(path, max_depth, depth, seen);
+    } else {
+        seen.entry(path.to_path_buf())
+            .or_insert_with(|| scan_cache::FileStamp::from_metadata(&metadata));
+    }
+}
+
+/// Collects the files in the directory at `path` (which is at `depth`),
+/// recursing into subdirectories up to `max_depth`.
+///
+/// On macOS, `getattrlistbulk` retrieves each entry's name, type, and
+/// modification stamp in a single batched syscall, avoiding a separate
+/// `stat` for every file.
+#[cfg(all(feature = "std", target_os = "macos"))]
+fn walk_dir(
+    path: &Path,
+    max_depth: u32,
+    depth: u32,
+    seen: &mut HashMap<PathBuf, Option<scan_cache::FileStamp>>,
+) {
+    use getattrlistbulk::{ObjectType, RequestedAttributes, read_dir};
+    let attrs = RequestedAttributes {
+        name: true,
+        object_type: true,
+        modified_time: true,
+        size: true,
+        ..Default::default()
+    };
+    let Ok(entries) = read_dir(path, attrs) else {
+        return;
+    };
+    for entry in entries.filter_map(|entry| entry.ok()) {
+        let child = path.join(&entry.name);
+        match entry.object_type {
+            Some(ObjectType::Directory) => {
+                if depth < max_depth {
+                    walk_dir(&child, max_depth, depth + 1, seen);
+                }
+            }
+            Some(ObjectType::Regular) => {
+                let stamp = entry
+                    .modified_time
+                    .zip(entry.size)
+                    .and_then(|(modified, size)| scan_cache::FileStamp::new(modified, size));
+                seen.entry(child).or_insert(stamp);
+            }
+            // Resolve symlinks (and anything unexpected) through the
+            // generic path, which follows them via `metadata`.
+            _ => collect_path(&child, max_depth, depth + 1, seen),
+        }
+    }
+}
+
+#[cfg(all(feature = "std", not(target_os = "macos")))]
+fn walk_dir(
+    path: &Path,
+    max_depth: u32,
+    depth: u32,
+    seen: &mut HashMap<PathBuf, Option<scan_cache::FileStamp>>,
+) {
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return;
+    };
+    for entry in entries.filter_map(|entry| entry.ok()) {
+        collect_path(entry.path().as_path(), max_depth, depth + 1, seen);
+    }
 }
 
 /// Reads and parses the given font files, distributing the work across
@@ -192,7 +260,10 @@ fn parse_files(files: &[PathBuf]) -> Vec<FontRecord> {
 /// As [`parse_files`], but reusing results from and refreshing the cache
 /// stored at `cache_path`.
 #[cfg(feature = "std")]
-fn parse_files_cached(files: &[PathBuf], cache_path: &Path) -> Vec<FontRecord> {
+fn parse_files_cached(
+    files: &[(PathBuf, Option<scan_cache::FileStamp>)],
+    cache_path: &Path,
+) -> Vec<FontRecord> {
     let mut cache = scan_cache::load(cache_path).unwrap_or_default();
     let cached_file_count = cache.len();
 
@@ -200,11 +271,13 @@ fn parse_files_cached(files: &[PathBuf], cache_path: &Path) -> Vec<FontRecord> {
     let mut results: Vec<(&Path, Option<scan_cache::FileStamp>, Vec<FontRecord>)> =
         Vec::with_capacity(files.len());
     let mut misses: Vec<(&Path, Option<scan_cache::FileStamp>)> = Vec::new();
-    for path in files {
-        let stamp = std::fs::metadata(path)
-            .ok()
-            .as_ref()
-            .and_then(scan_cache::FileStamp::from_metadata);
+    for (path, stamp) in files {
+        let stamp = stamp.or_else(|| {
+            std::fs::metadata(path)
+                .ok()
+                .as_ref()
+                .and_then(scan_cache::FileStamp::from_metadata)
+        });
         match cache.remove(path.as_path()) {
             Some(cached) if stamp == Some(cached.stamp) => {
                 results.push((path, stamp, cached.records));
