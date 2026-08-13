@@ -41,6 +41,10 @@ This release has an [MSRV] of 1.88.
   The union of the line-box and content bounds is close to the old `LineMetrics::block_{min,max}_coord` fields.
 - `parley::editing::Cursor::{previous,next}_logical_word` now land at the previous/next logical start of a word and skip over whitespace. ([#215][] by [@tomcur][])
 
+#### Fontique
+
+- File system font scanning (used for system font enumeration on macOS and Android) now parses font files in parallel and reads only the metadata it needs instead of memory-mapping whole files. ([#3][] by [@nicoburns][])
+
 ### Fixed
 
 #### Parley
@@ -615,6 +619,7 @@ This release has an [MSRV][] of 1.70.
 [#211]: https://github.com/linebender/parley/pull/211
 [#212]: https://github.com/linebender/parley/pull/212
 [#213]: https://github.com/linebender/parley/pull/213
+[#3]: https://github.com/DioxusLabs/parley/pull/3
 [#215]: https://github.com/linebender/parley/pull/215
 [#223]: https://github.com/linebender/parley/pull/223
 [#224]: https://github.com/linebender/parley/pull/224

@@ -21,6 +21,14 @@ use read_fonts::{
 use smallvec::SmallVec;
 #[cfg(feature = "std")]
 use {super::source::SourcePathMap, std::path::Path};
+#[cfg(feature = "std")]
+use {
+    super::source::{SourceId, SourceInfo, SourceKind},
+    core::sync::atomic::{AtomicUsize, Ordering},
+    hashbrown::HashSet,
+    std::path::PathBuf,
+    std::sync::Arc,
+};
 
 use alloc::vec::Vec;
 
@@ -83,65 +91,292 @@ fn scan_collection(
     paths: impl IntoIterator<Item = impl AsRef<Path>>,
     max_depth: u32,
 ) -> ScannedCollection {
+    let files = collect_font_files(paths, max_depth);
+    let records = parse_files(&files);
     let mut collection = ScannedCollection::default();
     let mut families: HashMap<FamilyId, (FamilyName, SmallVec<[FontInfo; 4]>)> = HashMap::default();
-    let mut postscript_name = String::default();
-    let mut name_pool = vec![];
-    let mut names = vec![];
-    scan_paths(paths, max_depth, |scanned_font| {
-        let Some(path) = &scanned_font.path else {
-            return;
+    for record in records {
+        let [first_name, other_names @ ..] = record.names.as_slice() else {
+            continue;
         };
-        name_pool.append(&mut names);
-        postscript_name.clear();
-        if !all_names(
-            &scanned_font.name_table,
-            NameId::TYPOGRAPHIC_FAMILY_NAME,
-            &mut name_pool,
-            &mut names,
-        ) && !all_names(
-            &scanned_font.name_table,
-            NameId::FAMILY_NAME,
-            &mut name_pool,
-            &mut names,
-        ) {
-            return;
-        }
-        let postscript_chars = scanned_font
-            .english_or_first_name(NameId::POSTSCRIPT_NAME)
-            .map(|name| name.chars());
-        if let Some(chars) = postscript_chars {
-            postscript_name.extend(chars);
-        } else {
-            return;
-        }
-        let data = collection.data_paths.get_or_insert(path);
-        let Some(font) = FontInfo::from_font_ref(&scanned_font.font, data, scanned_font.index)
-        else {
-            return;
-        };
-        let [first_name, other_names @ ..] = names.as_slice() else {
-            return;
-        };
+        collection.data_paths.insert(record.font.source());
         let name = collection.family_names.get_or_insert(first_name);
         for other_name in other_names {
             collection.family_names.add_alias(name.id(), other_name);
         }
         collection
             .postscript_names
-            .insert(postscript_name.clone(), name.id());
+            .insert(record.postscript_name, name.id());
         families
             .entry(name.id())
             .or_insert_with(|| (name.clone(), SmallVec::default()))
             .1
-            .push(font);
-    });
+            .push(record.font);
+    }
     collection.families.extend(
         families
             .drain()
             .map(|(id, (name, fonts))| (id, FamilyInfo::new(name, fonts))),
     );
     collection
+}
+
+#[cfg(feature = "std")]
+struct FontRecord {
+    names: Vec<String>,
+    postscript_name: String,
+    font: FontInfo,
+}
+
+/// Expands the given paths into a deduplicated list of files, walking
+/// directories up to `max_depth`.
+#[cfg(feature = "std")]
+fn collect_font_files(
+    paths: impl IntoIterator<Item = impl AsRef<Path>>,
+    max_depth: u32,
+) -> Vec<PathBuf> {
+    fn collect(path: &Path, max_depth: u32, depth: u32, seen: &mut HashSet<PathBuf>) {
+        let Ok(metadata) = path.metadata() else {
+            return;
+        };
+        if metadata.is_dir() {
+            if depth > max_depth {
+                return;
+            }
+            let Ok(entries) = std::fs::read_dir(path) else {
+                return;
+            };
+            for entry in entries.filter_map(|entry| entry.ok()) {
+                collect(entry.path().as_path(), max_depth, depth + 1, seen);
+            }
+        } else {
+            seen.insert(path.to_path_buf());
+        }
+    }
+    let mut seen = HashSet::default();
+    for path in paths {
+        collect(path.as_ref(), max_depth, 0, &mut seen);
+    }
+    seen.into_iter().collect()
+}
+
+/// Reads and parses the given font files, distributing the work across
+/// available CPU cores.
+#[cfg(feature = "std")]
+fn parse_files(files: &[PathBuf]) -> Vec<FontRecord> {
+    let num_threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .min(files.len());
+    if num_threads <= 1 {
+        let mut records = Vec::new();
+        for path in files {
+            parse_file(path, &mut records);
+        }
+        return records;
+    }
+    let cursor = AtomicUsize::new(0);
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..num_threads)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut records = Vec::new();
+                    loop {
+                        let index = cursor.fetch_add(1, Ordering::Relaxed);
+                        let Some(path) = files.get(index) else {
+                            break;
+                        };
+                        parse_file(path, &mut records);
+                    }
+                    records
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|handle| handle.join().unwrap_or_default())
+            .collect()
+    })
+}
+
+#[cfg(feature = "std")]
+fn parse_file(path: &Path, out: &mut Vec<FontRecord>) {
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return;
+    };
+    let Ok(file_len) = file.metadata().map(|metadata| metadata.len()) else {
+        return;
+    };
+    let Some((buffer, font_indices)) = read_font_metadata(&mut file, file_len) else {
+        return;
+    };
+    let mut source: Option<SourceInfo> = None;
+    let mut name_pool = vec![];
+    let mut names = vec![];
+    for index in font_indices {
+        let Ok(font) = FontRef::from_index(&buffer, index) else {
+            continue;
+        };
+        let Ok(name_table) = font.name() else {
+            continue;
+        };
+        name_pool.append(&mut names);
+        if !all_names(
+            &name_table,
+            NameId::TYPOGRAPHIC_FAMILY_NAME,
+            &mut name_pool,
+            &mut names,
+        ) && !all_names(&name_table, NameId::FAMILY_NAME, &mut name_pool, &mut names)
+        {
+            continue;
+        }
+        let Some(postscript_name) = english_or_first(&name_table, NameId::POSTSCRIPT_NAME)
+            .map(|name| name.chars().collect::<String>())
+        else {
+            continue;
+        };
+        let source = source
+            .get_or_insert_with(|| {
+                SourceInfo::new(SourceId::new(), SourceKind::Path(Arc::from(path)))
+            })
+            .clone();
+        let Some(font) = FontInfo::from_font_ref(&font, source, index) else {
+            continue;
+        };
+        out.push(FontRecord {
+            names: core::mem::take(&mut names),
+            postscript_name,
+            font,
+        });
+    }
+}
+
+/// Tables needed to build a [`FontRecord`] for a font.
+#[cfg(feature = "std")]
+const METADATA_TABLES: [Tag; 6] = [
+    Tag::new(b"OS/2"),
+    Tag::new(b"cmap"),
+    Tag::new(b"fvar"),
+    Tag::new(b"head"),
+    Tag::new(b"name"),
+    Tag::new(b"post"),
+];
+
+/// Reads the parts of a font file needed to build [`FontRecord`]s.
+///
+/// Rather than memory mapping the file (page faults on mapped memory
+/// serialize in the kernel, which defeats parallel scanning) or reading the
+/// whole file (font files can be very large), this reads only the table
+/// directories and metadata tables into a sparse buffer that preserves the
+/// original file offsets, so that offsets recorded during scanning (such as
+/// the [`CharmapIndex`](crate::CharmapIndex) subtable offset) remain valid
+/// for the full font data loaded later.
+///
+/// Returns the buffer along with the indices of the fonts to scan. Fonts
+/// with an `hvgl` table are excluded as we can't currently render them.
+#[cfg(feature = "std")]
+fn read_font_metadata(file: &mut std::fs::File, file_len: u64) -> Option<(Vec<u8>, Vec<u32>)> {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+
+    /// An implausible number of fonts or tables, used to reject junk files.
+    const SANITY_LIMIT: u32 = 4096;
+    const HVGL: Tag = Tag::new(b"hvgl");
+    const TTCF: Tag = Tag::new(b"ttcf");
+
+    fn read_at(file: &mut std::fs::File, offset: u64, buf: &mut [u8]) -> Option<()> {
+        file.seek(SeekFrom::Start(offset)).ok()?;
+        file.read_exact(buf).ok()
+    }
+
+    let mut header = [0_u8; 12];
+    read_at(file, 0, &mut header)?;
+
+    // Byte ranges of the file that we need to read.
+    let mut segments: Vec<(u64, u64)> = vec![(0, header.len() as u64)];
+
+    // Offsets of the table directory for each font in the file.
+    let dir_offsets: Vec<u64> = if Tag::new(&[header[0], header[1], header[2], header[3]]) == TTCF {
+        let num_fonts = u32::from_be_bytes([header[8], header[9], header[10], header[11]]);
+        if num_fonts > SANITY_LIMIT {
+            return None;
+        }
+        let mut offsets = vec![0_u8; num_fonts as usize * 4];
+        read_at(file, 12, &mut offsets)?;
+        segments.push((0, 12 + offsets.len() as u64));
+        offsets
+            .chunks_exact(4)
+            .map(|chunk| u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]) as u64)
+            .collect()
+    } else {
+        vec![0]
+    };
+
+    let mut font_indices = Vec::new();
+    let mut record_buf = Vec::new();
+    'fonts: for (font_index, dir_offset) in dir_offsets.iter().copied().enumerate() {
+        let mut dir_header = [0_u8; 12];
+        if read_at(file, dir_offset, &mut dir_header).is_none() {
+            continue;
+        }
+        let num_tables = u16::from_be_bytes([dir_header[4], dir_header[5]]);
+        if u32::from(num_tables) > SANITY_LIMIT {
+            continue;
+        }
+        record_buf.resize(usize::from(num_tables) * 16, 0);
+        if read_at(file, dir_offset + 12, &mut record_buf).is_none() {
+            continue;
+        }
+        let mut table_segments: SmallVec<[(u64, u64); 8]> = SmallVec::new();
+        for record in record_buf.chunks_exact(16) {
+            let tag = Tag::new(&[record[0], record[1], record[2], record[3]]);
+            if tag == HVGL {
+                // We can't currently render hvgl outlines so reject the font.
+                continue 'fonts;
+            }
+            if METADATA_TABLES.contains(&tag) {
+                let offset = u64::from(u32::from_be_bytes([
+                    record[8], record[9], record[10], record[11],
+                ]));
+                let len = u64::from(u32::from_be_bytes([
+                    record[12], record[13], record[14], record[15],
+                ]));
+                let end = offset + len;
+                if end > file_len {
+                    // Out of bounds table. Leave it unread so parsing treats
+                    // it as absent or invalid.
+                    continue;
+                }
+                table_segments.push((offset, end));
+            }
+        }
+        segments.push((dir_offset, dir_offset + 12 + record_buf.len() as u64));
+        segments.extend_from_slice(&table_segments);
+        font_indices.push(u32::try_from(font_index).ok()?);
+    }
+    if font_indices.is_empty() {
+        return None;
+    }
+
+    // Merge overlapping segments and read them into a sparse buffer sized to
+    // cover the furthest extent we need.
+    fn slice_range(buf: &mut [u8], (start, end): (u64, u64)) -> Option<&mut [u8]> {
+        buf.get_mut(usize::try_from(start).ok()?..usize::try_from(end).ok()?)
+    }
+    segments.sort_unstable();
+    let buffer_len = usize::try_from(segments.iter().map(|(_, end)| *end).max()?).ok()?;
+    let mut buffer = vec![0_u8; buffer_len];
+    let mut segments = segments.into_iter();
+    let mut current = segments.next()?;
+    for (start, end) in segments {
+        if start <= current.1 {
+            current.1 = current.1.max(end);
+        } else {
+            read_at(file, current.0, slice_range(&mut buffer, current)?)?;
+            current = (start, end);
+        }
+    }
+    read_at(file, current.0, slice_range(&mut buffer, current)?)?;
+    Some((buffer, font_indices))
 }
 
 #[cfg(feature = "std")]
