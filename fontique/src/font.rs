@@ -12,7 +12,7 @@ use core::fmt;
 use read_fonts::{FontRef, TableProvider as _, types::Tag};
 use smallvec::SmallVec;
 
-type AxisVec = SmallVec<[AxisInfo; 1]>;
+pub(crate) type AxisVec = SmallVec<[AxisInfo; 1]>;
 
 /// Representation of a single font in a family.
 #[derive(Clone, Debug)]
@@ -222,30 +222,21 @@ impl FontInfo {
         // a valid cmap so just bail here if we fail.
         let charmap_index = CharmapIndex::new(font)?;
         let (width, style, weight) = read_attributes(font);
-        let (axes, attr_axes) = if let Ok(fvar_axes) = font.fvar().and_then(|fvar| fvar.axes()) {
-            let mut axes = SmallVec::<[AxisInfo; 1]>::with_capacity(fvar_axes.len());
-            let mut attrs_axes = 0_u8;
+        let axes = if let Ok(fvar_axes) = font.fvar().and_then(|fvar| fvar.axes()) {
+            let mut axes = AxisVec::with_capacity(fvar_axes.len());
             for fvar_axis in fvar_axes {
-                let axis = AxisInfo {
+                axes.push(AxisInfo {
                     tag: fvar_axis.axis_tag(),
                     min: fvar_axis.min_value().to_f32(),
                     max: fvar_axis.max_value().to_f32(),
                     default: fvar_axis.default_value().to_f32(),
-                };
-                axes.push(axis);
-                match &axis.tag.to_be_bytes() {
-                    b"wght" => attrs_axes |= WEIGHT_AXIS,
-                    b"wdth" => attrs_axes |= WIDTH_AXIS,
-                    b"slnt" => attrs_axes |= SLANT_AXIS,
-                    b"ital" => attrs_axes |= ITALIC_AXIS,
-                    b"opsz" => attrs_axes |= OPTICAL_SIZE_AXIS,
-                    _ => {}
-                }
+                });
             }
-            (axes, attrs_axes)
+            axes
         } else {
-            (SmallVec::default(), 0)
+            AxisVec::default()
         };
+        let attr_axes = attr_axes_from_axes(&axes);
         Some(Self {
             source,
             index,
@@ -256,6 +247,32 @@ impl FontInfo {
             attr_axes,
             charmap_index,
         })
+    }
+
+    /// Recreates a font from parts previously obtained via the public
+    /// accessors, for example when loading from a scan cache.
+    #[cfg(feature = "std")]
+    pub(crate) fn from_parts(
+        source: SourceInfo,
+        index: u32,
+        width: FontWidth,
+        style: FontStyle,
+        weight: FontWeight,
+        axes: impl Into<AxisVec>,
+        charmap_index: CharmapIndex,
+    ) -> Self {
+        let axes = axes.into();
+        let attr_axes = attr_axes_from_axes(&axes);
+        Self {
+            source,
+            index,
+            width,
+            style,
+            weight,
+            axes,
+            attr_axes,
+            charmap_index,
+        }
     }
 
     #[allow(unused)]
@@ -296,6 +313,21 @@ impl FontInfo {
             }
         }
     }
+}
+
+fn attr_axes_from_axes(axes: &[AxisInfo]) -> u8 {
+    let mut attr_axes = 0_u8;
+    for axis in axes {
+        match &axis.tag.to_be_bytes() {
+            b"wght" => attr_axes |= WEIGHT_AXIS,
+            b"wdth" => attr_axes |= WIDTH_AXIS,
+            b"slnt" => attr_axes |= SLANT_AXIS,
+            b"ital" => attr_axes |= ITALIC_AXIS,
+            b"opsz" => attr_axes |= OPTICAL_SIZE_AXIS,
+            _ => {}
+        }
+    }
+    attr_axes
 }
 
 const WEIGHT_AXIS: u8 = 0x01;
