@@ -20,6 +20,26 @@ pub struct InlineBox {
     ///
     /// If `None`, the baseline is the box's bottom edge.
     pub baseline: Option<f32>,
+    /// How the box is aligned within its line box.
+    pub vertical_align: InlineBoxVerticalAlign,
+}
+
+/// How an [`InlineBox`] is aligned within its line box.
+#[derive(PartialEq, Eq, Debug, Clone, Copy, Default)]
+pub enum InlineBoxVerticalAlign {
+    /// The box's baseline is aligned with the line's baseline.
+    ///
+    /// This corresponds to `vertical-align: baseline` in CSS.
+    #[default]
+    Baseline,
+    /// The top of the box is aligned with the top of the line box.
+    ///
+    /// This corresponds to `vertical-align: top` in CSS.
+    Top,
+    /// The bottom of the box is aligned with the bottom of the line box.
+    ///
+    /// This corresponds to `vertical-align: bottom` in CSS.
+    Bottom,
 }
 
 /// Whether a box is in-flow (takes up space in the layout) or out-of-flow (e.g. absolutely positioned)

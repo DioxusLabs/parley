@@ -5,7 +5,10 @@ use crate::{
     test_name,
     util::{ColorBrush, TestEnv},
 };
-use parley::{Alignment, AlignmentOptions, InlineBox, InlineBoxKind, Layout, PositionedLayoutItem};
+use parley::{
+    Alignment, AlignmentOptions, InlineBox, InlineBoxKind, InlineBoxVerticalAlign, Layout,
+    PositionedLayoutItem,
+};
 
 #[test]
 fn out_of_flow_box_has_no_effect_on_layout() {
@@ -27,6 +30,7 @@ fn out_of_flow_box_has_no_effect_on_layout() {
         width: 9999.0,
         height: 9999.0,
         baseline: None,
+        vertical_align: InlineBoxVerticalAlign::default(),
     });
     let layout_oof = builder_oof.build(text);
     let widths_oof = layout_oof.calculate_content_widths();
