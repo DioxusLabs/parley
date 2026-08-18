@@ -30,7 +30,8 @@ pub use data::BreakReason;
 pub use layout::Layout;
 pub use line::{GlyphRun, Line, LineMetrics, PositionedInlineBox, PositionedLayoutItem};
 pub use line_break::{
-    BoxBreakData, BreakLines, BreakerState, LineBreakData, MaxHeightBreakData, YieldData,
+    BoxBreakData, BreakLines, BreakerState, InlineBoxAlignment, LineBreakData, MaxHeightBreakData,
+    YieldData,
 };
 pub use run::Run;
 
