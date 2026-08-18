@@ -5,7 +5,10 @@
 
 use crate::test_name;
 use crate::util::TestEnv;
-use parley::{Alignment, AlignmentOptions, PositionedLayoutItem, StyleProperty, TextWrapMode};
+use parley::{
+    Alignment, AlignmentOptions, InlineBox, InlineBoxKind, PositionedLayoutItem, StyleProperty,
+    TextWrapMode,
+};
 
 /// Test that rendering RTL text doesn't affect subsequent LTR layouts.
 /// See <https://github.com/linebender/parley/issues/489>.
@@ -112,5 +115,40 @@ Third line that ends with newlines\n\n";
     layout.break_all_lines(Some(content_widths.max));
     layout.align(Alignment::Start, AlignmentOptions::default());
     env.with_name("max_context_with_mandatory_breaks")
+        .check_layout_snapshot(&layout);
+}
+
+/// Test that inline boxes directly following a mandatory line break all
+/// contribute to the max content width of the line they end up on.
+#[test]
+fn inline_boxes_after_newline_max_content_width() {
+    let mut env = TestEnv::new(test_name!(), None);
+
+    // A newline followed by three inline boxes separated by spaces.
+    let text = "\n  ";
+    let mut builder = env.ranged_builder(text);
+    for (id, index) in [(0_u64, 1_usize), (1, 2), (2, 3)] {
+        builder.push_inline_box(InlineBox {
+            id,
+            kind: InlineBoxKind::InFlow,
+            index,
+            width: 14.0,
+            height: 30.0,
+            baseline: None,
+        });
+    }
+    let mut layout = builder.build(text);
+
+    let content_widths = layout.calculate_content_widths();
+
+    layout.break_all_lines(Some(content_widths.max));
+    layout.align(Alignment::Start, AlignmentOptions::default());
+    assert!(
+        layout.width() <= content_widths.max,
+        "Layout should never be wider than the max content width (width: {}, max: {})",
+        layout.width(),
+        content_widths.max
+    );
+    env.with_name("inline_boxes_after_newline")
         .check_layout_snapshot(&layout);
 }
