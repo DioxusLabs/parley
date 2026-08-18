@@ -453,10 +453,14 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         lines.swap(&mut layout.data);
         lines.lines.clear();
         lines.line_items.clear();
+        // Initialize the wrap mode from the layout's default wrap mode so that inline
+        // boxes which occur before any text cluster use the correct wrap mode.
+        let mut state = BreakerState::default();
+        state.line.text_wrap_mode = layout.data.default_text_wrap_mode;
         Self {
             layout,
             lines,
-            state: BreakerState::default(),
+            state,
             prev_state: None,
             done: false,
         }
@@ -680,8 +684,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             self.layout.data.quantize,
                         );
 
-                        // We can always line break after an inline box
-                        self.state.mark_line_break_opportunity();
+                        // We can line break after an inline box unless wrapping is disabled
+                        if self.state.line.text_wrap_mode == TextWrapMode::Wrap {
+                            self.state.mark_line_break_opportunity();
+                        }
                     } else {
                         // If we're at the start of the line, this box will never fit, so consume it and accept the overflow.
                         let reason = if self.state.line.x == 0.0 {

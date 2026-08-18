@@ -185,6 +185,10 @@ pub(crate) struct LayoutData<B: Brush> {
     // Output of style resolution (input to line breaking)
     pub(crate) styles: Vec<Style<B>>,
     pub(crate) inline_boxes: Vec<InlineBox>,
+    /// The wrap mode that applies before any text cluster has been processed. This is
+    /// used to determine whether line breaks are allowed around inline boxes that occur
+    /// before any text (or in layouts that contain no text at all).
+    pub(crate) default_text_wrap_mode: TextWrapMode,
 
     // Output of shaping (input to line breaking)
     pub(crate) shaped_text: ShapedText,
@@ -230,6 +234,7 @@ impl<B: Brush> Default for LayoutData<B> {
             height: 0.,
             styles: Vec::new(),
             inline_boxes: Vec::new(),
+            default_text_wrap_mode: TextWrapMode::Wrap,
             shaped_text: ShapedText::new(),
             runs: Vec::new(),
             items: Vec::new(),
@@ -256,6 +261,7 @@ impl<B: Brush> LayoutData<B> {
         self.height = 0.;
         self.styles.clear();
         self.inline_boxes.clear();
+        self.default_text_wrap_mode = TextWrapMode::Wrap;
         self.shaped_text.clear();
         self.runs.clear();
         self.items.clear();
@@ -370,7 +376,7 @@ impl<B: Brush> LayoutData<B> {
 
         let mut running_min_width = 0.0;
         let mut running_max_width = 0.0;
-        let mut text_wrap_mode = TextWrapMode::Wrap;
+        let mut text_wrap_mode = self.default_text_wrap_mode;
         // The whitespace class of the previous atom's first character, and the atom's advance.
         let mut prev_atom: Option<(Whitespace, f32)> = None;
         let is_rtl = self.base_level.is_rtl();
