@@ -167,7 +167,6 @@ impl<B: Brush> TreeStyleBuilder<B> {
             style_id: None,
         });
         self.current_span = self.tree.len() - 1;
-        self.is_span_first = true;
     }
 
     pub(crate) fn push_style_modification_span(
@@ -182,7 +181,7 @@ impl<B: Brush> TreeStyleBuilder<B> {
     }
 
     pub(crate) fn pop_style_span(&mut self) {
-        self.push_uncommitted_text(true);
+        self.push_uncommitted_text(false);
 
         self.current_span = self.tree[self.current_span]
             .parent
