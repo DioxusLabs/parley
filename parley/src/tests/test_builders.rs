@@ -13,7 +13,7 @@ use super::utils::{ColorBrush, asserts::assert_eq_layout_data};
 use crate::{
     BaseDirection, FontContext, FontFamily, FontFeatures, FontVariations, Layout, LayoutContext,
     LineHeight, OverflowWrap, RangedBuilder, StyleProperty, StyleRunBuilder, TextStyle,
-    TextWrapMode, TreeBuilder, WordBreak,
+    TextWrapMode, TreeBuilder, WhiteSpaceCollapse, WordBreak,
 };
 
 // TODO: `FONT_FAMILY_LIST`, `load_fonts`, and `create_font_context` are
@@ -646,6 +646,30 @@ fn builders_crlf_counts_as_single_line_break() {
     assert_eq!(
         trailing_cr, trailing_lf,
         "trailing CR should match trailing LF line count"
+    );
+}
+
+/// Whitespace collapsing must not remove whitespace at style span boundaries:
+/// a span's leading/trailing spaces are only trimmed when they are at the start
+/// of the text or follow existing whitespace.
+#[test]
+fn tree_builder_collapse_preserves_whitespace_at_span_boundaries() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let root_style = create_root_style();
+
+    let mut tb = lcx.tree_builder(&mut fcx, 1.0, false, &root_style);
+    tb.set_white_space_mode(WhiteSpaceCollapse::Collapse);
+    tb.push_text("  Singer-songwriter");
+    tb.push_style_modification_span(&[StyleProperty::FontSize(40.)]);
+    tb.push_text("\u{a0} · ");
+    tb.pop_style_span();
+    tb.push_text("actress");
+    let (_, text) = tb.build();
+
+    assert_eq!(
+        text, "Singer-songwriter\u{a0} · actress",
+        "spaces inside a style span must survive whitespace collapsing"
     );
 }
 
