@@ -7,7 +7,7 @@ use crate::layout::data::{LayoutItemKind, LineData};
 use crate::layout::layout::Layout;
 use crate::layout::run::Run;
 use crate::style::Brush;
-use crate::{InlineBox, InlineBoxKind};
+use crate::{InlineBox, InlineBoxKind, InlineBoxVerticalAlign};
 
 use core::ops::Range;
 use parley_engine::Glyph;
@@ -321,10 +321,19 @@ impl<'a, B: Brush> Iterator for GlyphRunIter<'a, B> {
                     if inline_box.kind == InlineBoxKind::InFlow {
                         self.offset += inline_box.width;
                     }
+                    let y = match inline_box.vertical_align {
+                        InlineBoxVerticalAlign::Baseline => {
+                            self.line.data.metrics.baseline
+                                - inline_box.baseline.unwrap_or(inline_box.height)
+                        }
+                        InlineBoxVerticalAlign::Top => self.line.data.metrics.block_min_coord,
+                        InlineBoxVerticalAlign::Bottom => {
+                            self.line.data.metrics.block_max_coord - inline_box.height
+                        }
+                    };
                     return Some(PositionedLayoutItem::InlineBox(PositionedInlineBox {
                         x,
-                        y: self.line.data.metrics.baseline
-                            - inline_box.baseline.unwrap_or(inline_box.height),
+                        y,
                         width: inline_box.width,
                         height: inline_box.height,
                         baseline: inline_box.baseline,

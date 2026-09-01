@@ -17,7 +17,7 @@ use crate::layout::{
     LineMetrics, Run,
 };
 use crate::style::Brush;
-use crate::{InlineBoxKind, OverflowWrap, TextWrapMode};
+use crate::{InlineBoxKind, InlineBoxVerticalAlign, OverflowWrap, TextWrapMode};
 
 use core::ops::Range;
 use parley_engine::shape::Whitespace;
@@ -90,6 +90,11 @@ struct LineBoxMetrics {
     ///
     /// Like [`Self::line_box`], these are in block flow direction.
     content_box: Extents,
+    /// The height of the tallest top- or bottom-aligned inline box on the line.
+    ///
+    /// Such boxes grow the line box if they are taller than it, but do not affect the
+    /// position of the baseline within it.
+    top_or_bottom_box_height: f32,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -117,6 +122,13 @@ impl Default for Extents {
 }
 
 impl Extents {
+    fn max(self, other: Self) -> Self {
+        Self {
+            over: self.over.max(other.over),
+            under: self.under.max(other.under),
+        }
+    }
+
     /// Resolve unset (default) extents to zero.
     fn or_zero(self) -> Self {
         if self.over == f32::NEG_INFINITY && self.under == f32::NEG_INFINITY {
@@ -130,12 +142,36 @@ impl Extents {
     }
 }
 
+/// Compute the extents of text over and under the baseline, distributing the leading
+/// (the difference between the line height and the text's ascent + descent) equally
+/// over and under the text (CSS 2 § 10.8.1). The leading (and thus the extents) may
+/// be negative when the line height is smaller than ascent + descent.
+fn text_extents(mut ascent: f32, mut descent: f32, line_height: f32, quantize: bool) -> Extents {
+    if quantize {
+        ascent = ascent.round();
+        descent = descent.round();
+    }
+    let half_leading = (line_height - (ascent + descent)) / 2.;
+    let over = if quantize {
+        ascent + half_leading.floor()
+    } else {
+        ascent + half_leading
+    };
+    // Note the `under` part is *not* quantized. This is such that the exact line height is
+    // reached. For determining the line box block, add this to the baseline and then quantize
+    // by rounding.
+    Extents {
+        over,
+        under: line_height - over,
+    }
+}
+
 impl LineBoxMetrics {
     /// The line height seen so far.
     #[inline(always)]
     fn line_height(self) -> f32 {
         let line_box = self.line_box.or_zero();
-        line_box.over + line_box.under
+        (line_box.over + line_box.under).max(self.top_or_bottom_box_height)
     }
 
     fn add_text(&mut self, metrics: &FontMetrics, line_height: f32, quantize: bool) {
@@ -174,6 +210,14 @@ impl LineBoxMetrics {
             self.content_box.over = self.content_box.over.max(ascent);
             self.content_box.under = self.content_box.under.max(descent);
         }
+    }
+
+    /// Add an inline box aligned to the top or bottom of the line box rather than to the
+    /// baseline. Such a box only grows the line if it is taller than the line's height; it
+    /// does not affect the baseline's position within the line.
+    fn add_top_or_bottom_aligned_inline_box(&mut self, height: f32, quantize: bool) {
+        let height = if quantize { height.round() } else { height };
+        self.top_or_bottom_box_height = self.top_or_bottom_box_height.max(height);
     }
 }
 
@@ -316,6 +360,18 @@ impl Default for BreakerState {
     }
 }
 
+/// How an inline box contributes to its line box's metrics, resolved from the box's
+/// [`vertical_align`](InlineBox::vertical_align) and [`baseline`](InlineBox::baseline).
+#[derive(Clone, Copy, Debug)]
+pub enum InlineBoxAlignment {
+    /// The box is aligned to the line's baseline: `ascent` extends over it and `descent`
+    /// under it.
+    Baseline { ascent: f32, descent: f32 },
+    /// The box is aligned to the top or bottom of the line box, growing the line to at
+    /// least `height` without affecting the baseline's position.
+    TopOrBottom { height: f32 },
+}
+
 impl BreakerState {
     /// Add the atom currently being evaluated to the current line.
     ///
@@ -347,22 +403,30 @@ impl BreakerState {
 
     /// Add an inline box to the line.
     ///
-    /// `ascent` and `descent` are the distances the box extends above and below the text baseline
-    /// respectively. A box with its bottom aligned to the baseline is simply one with a zero
-    /// descent. The box grows the line only insofar as it extends beyond the text.
+    /// `alignment` describes how the box contributes to the line's vertical metrics. Pass `None`
+    /// for boxes that should not affect them (e.g. out-of-flow boxes).
     pub fn append_inline_box_to_line(
         &mut self,
         next_x: f32,
-        ascent: f32,
-        descent: f32,
+        alignment: Option<InlineBoxAlignment>,
         quantize: bool,
     ) {
         self.item_idx += 1;
         self.line.items.end += 1;
         self.line.x = next_x;
-        self.line
-            .box_metrics
-            .add_inline_box(ascent, descent, quantize);
+        match alignment {
+            Some(InlineBoxAlignment::Baseline { ascent, descent }) => {
+                self.line
+                    .box_metrics
+                    .add_inline_box(ascent, descent, quantize);
+            }
+            Some(InlineBoxAlignment::TopOrBottom { height }) => {
+                self.line
+                    .box_metrics
+                    .add_top_or_bottom_aligned_inline_box(height, quantize);
+            }
+            None => {}
+        }
         self.update_max_height_exceeded();
     }
 
@@ -474,10 +538,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         lines.swap(&mut layout.data);
         lines.lines.clear();
         lines.line_items.clear();
+        let state = BreakerState::default();
         Self {
             layout,
             lines,
-            state: BreakerState::default(),
+            state,
             prev_state: None,
             done: false,
         }
@@ -657,26 +722,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     // and the portion below to its descent. By default (no explicit baseline) the
                     // bottom of the box is aligned with the text baseline, i.e. the box is all
                     // ascent and zero descent. Out-of-flow boxes contribute nothing.
-                    let (
-                        width_contribution,
-                        height_contribution,
-                        ascent_contribution,
-                        descent_contribution,
-                    ) = match inline_box.kind {
-                        InlineBoxKind::InFlow => {
-                            let baseline = inline_box.baseline.unwrap_or(inline_box.height);
-                            (
-                                inline_box.width,
-                                inline_box.height,
-                                baseline,
-                                inline_box.height - baseline,
-                            )
-                        }
-                        // Negative infinity extents are a no-op when maxed into the line's
-                        // extents, so out-of-flow boxes truly contribute nothing.
-                        InlineBoxKind::OutOfFlow => {
-                            (0.0, 0.0, f32::NEG_INFINITY, f32::NEG_INFINITY)
-                        }
+                    let (width_contribution, height_contribution) = match inline_box.kind {
+                        InlineBoxKind::InFlow => (inline_box.width, inline_box.height),
+                        InlineBoxKind::OutOfFlow => (0.0, 0.0),
                         // If the box is a `CustomOutOfFlow` box then we yield control flow back to the caller.
                         // It is then the caller's responsibility to handle placement of the box.
                         InlineBoxKind::CustomOutOfFlow => {
@@ -686,6 +734,25 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 advance: self.state.line.x,
                             }));
                         }
+                    };
+
+                    // Out-of-flow boxes do not contribute to the line's vertical metrics.
+                    let alignment = match inline_box.kind {
+                        InlineBoxKind::InFlow => Some(match inline_box.vertical_align {
+                            InlineBoxVerticalAlign::Baseline => {
+                                let baseline = inline_box.baseline.unwrap_or(height_contribution);
+                                InlineBoxAlignment::Baseline {
+                                    ascent: baseline,
+                                    descent: height_contribution - baseline,
+                                }
+                            }
+                            InlineBoxVerticalAlign::Top | InlineBoxVerticalAlign::Bottom => {
+                                InlineBoxAlignment::TopOrBottom {
+                                    height: height_contribution,
+                                }
+                            }
+                        }),
+                        _ => None,
                     };
 
                     // Compute the x position of the content being currently processed
@@ -706,8 +773,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                         self.state.append_inline_box_to_line(
                             next_x,
-                            ascent_contribution,
-                            descent_contribution,
+                            alignment,
                             self.layout.data.quantize,
                         );
 
@@ -719,8 +785,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             // println!("BOX EMERGENCY BREAK");
                             self.state.append_inline_box_to_line(
                                 next_x,
-                                ascent_contribution,
-                                descent_contribution,
+                                alignment,
                                 self.layout.data.quantize,
                             );
                             BreakReason::Emergency
@@ -972,8 +1037,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     if inline_box.kind != InlineBoxKind::InFlow {
                         self.state.append_inline_box_to_line(
                             self.state.line.x,
-                            f32::NEG_INFINITY,
-                            f32::NEG_INFINITY,
+                            None,
                             self.layout.data.quantize,
                         );
                         continue;
@@ -990,11 +1054,23 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let next_x = self.state.line.x + inline_box.width;
                     // The portion above the baseline is ascent, the rest descent. A box without an
                     // explicit baseline is bottom-aligned, i.e. all ascent and zero descent.
-                    let baseline = inline_box.baseline.unwrap_or(inline_box.height);
+                    let alignment = match inline_box.vertical_align {
+                        InlineBoxVerticalAlign::Baseline => {
+                            let baseline = inline_box.baseline.unwrap_or(inline_box.height);
+                            InlineBoxAlignment::Baseline {
+                                ascent: baseline,
+                                descent: inline_box.height - baseline,
+                            }
+                        }
+                        InlineBoxVerticalAlign::Top | InlineBoxVerticalAlign::Bottom => {
+                            InlineBoxAlignment::TopOrBottom {
+                                height: inline_box.height,
+                            }
+                        }
+                    };
                     self.state.append_inline_box_to_line(
                         next_x,
-                        baseline,
-                        inline_box.height - baseline,
+                        Some(alignment),
                         self.layout.data.quantize,
                     );
                     char_count += 1;
@@ -1119,8 +1195,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             if let YieldData::InlineBoxBreak(_) = yield_data {
                 self.state.append_inline_box_to_line(
                     self.state.line.x,
-                    0.0,
-                    0.0,
+                    None,
                     self.layout.data.quantize,
                 );
             }
@@ -1301,7 +1376,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         let quantize = self.layout.data.quantize;
 
         let mut line_box_extents = self.state.line.box_metrics.line_box;
-        let mut content_box_extents = self.state.line.box_metrics.content_box;
+        let content_box_extents = self.state.line.box_metrics.content_box;
 
         // Lines with content include the layout's strut (see `LayoutData::strut`): the extents
         // of a zero-width text run in the layout's root style. Lines without content (e.g. a
@@ -1310,12 +1385,19 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         if have_metrics && let Some(strut) = self.layout.data.strut {
             let strut_extents =
                 text_extents(strut.ascent, strut.descent, strut.line_height, quantize);
-            line_box_extents.over = line_box_extents.over.max(strut_extents.over);
-            line_box_extents.under = line_box_extents.under.max(strut_extents.under);
+            line_box_extents = line_box_extents.max(strut_extents);
         }
 
         let mut line_box_extents = line_box_extents.or_zero();
         let mut content_box_extents = content_box_extents.or_zero();
+
+        // Grow the line box to fit any top- or bottom-aligned inline boxes taller than it.
+        // The extra space is added below the baseline, keeping the baseline's position
+        // relative to the baseline-aligned content.
+        let top_or_bottom_box_height = self.state.line.box_metrics.top_or_bottom_box_height;
+        if line_box_extents.over + line_box_extents.under < top_or_bottom_box_height {
+            line_box_extents.under = top_or_bottom_box_height - line_box_extents.over;
+        }
         if !have_metrics
             && line.item_range.is_empty()
             && let Some(metrics) = prev_line_metrics
