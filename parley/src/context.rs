@@ -24,6 +24,8 @@ use crate::inline_box::InlineBox;
 /// This type is designed to be a global resource with only one per-application (or per-thread).
 pub struct LayoutContext<B: Brush = [u8; 4]> {
     pub(crate) rcx: ResolveContext,
+    /// The resolved root style of the current builder (if the builder has one).
+    pub(crate) root_style: Option<ResolvedStyle<B>>,
     pub(crate) style_table: Vec<ResolvedStyle<B>>,
     pub(crate) style_runs: Vec<StyleRun>,
     pub(crate) inline_boxes: Vec<InlineBox>,
@@ -49,6 +51,7 @@ impl<B: Brush> LayoutContext<B> {
     pub fn new() -> Self {
         Self {
             rcx: ResolveContext::default(),
+            root_style: None,
             style_table: vec![],
             style_runs: vec![],
             inline_boxes: vec![],
@@ -102,6 +105,7 @@ impl<B: Brush> LayoutContext<B> {
         self.begin();
 
         let resolved_root_style = self.resolve_style_set(fcx, scale, &TextStyle::default());
+        self.root_style = Some(resolved_root_style.clone());
         self.ranged_style_builder
             .begin(resolved_root_style, text.len());
 
@@ -171,6 +175,7 @@ impl<B: Brush> LayoutContext<B> {
         self.begin();
 
         let resolved_root_style = self.resolve_style_set(fcx, scale, root_style);
+        self.root_style = Some(resolved_root_style.clone());
         self.tree_style_builder.begin(resolved_root_style);
 
         fcx.source_cache.prune(128, false);
@@ -184,6 +189,7 @@ impl<B: Brush> LayoutContext<B> {
 
     fn begin(&mut self) {
         self.rcx.clear();
+        self.root_style = None;
         self.style_table.clear();
         self.style_runs.clear();
         self.inline_boxes.clear();

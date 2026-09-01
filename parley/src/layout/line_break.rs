@@ -1300,8 +1300,22 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         // Whether metrics should be quantized to pixel boundaries
         let quantize = self.layout.data.quantize;
 
-        let mut line_box_extents = self.state.line.box_metrics.line_box.or_zero();
-        let mut content_box_extents = self.state.line.box_metrics.content_box.or_zero();
+        let mut line_box_extents = self.state.line.box_metrics.line_box;
+        let mut content_box_extents = self.state.line.box_metrics.content_box;
+
+        // Lines with content include the layout's strut (see `LayoutData::strut`): the extents
+        // of a zero-width text run in the layout's root style. Lines without content (e.g. a
+        // trailing empty line after a newline, or a line holding only out-of-flow boxes) do not
+        // get the strut, matching CSS's treatment of line boxes with no inline-level content.
+        if have_metrics && let Some(strut) = self.layout.data.strut {
+            let strut_extents =
+                text_extents(strut.ascent, strut.descent, strut.line_height, quantize);
+            line_box_extents.over = line_box_extents.over.max(strut_extents.over);
+            line_box_extents.under = line_box_extents.under.max(strut_extents.under);
+        }
+
+        let mut line_box_extents = line_box_extents.or_zero();
+        let mut content_box_extents = content_box_extents.or_zero();
         if !have_metrics
             && line.item_range.is_empty()
             && let Some(metrics) = prev_line_metrics
