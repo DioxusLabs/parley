@@ -7,7 +7,8 @@ use super::test_builders::{FONT_FAMILY_LIST, create_font_context};
 use super::utils::ColorBrush;
 use crate::layout::style_metrics::StyleMetrics;
 use crate::{
-    FontFamily, Layout, LayoutContext, LineHeight, StyleProperty, TextStyle, VerticalAlign,
+    FontFamily, InlineBox, InlineBoxKind, Layout, LayoutContext, LineHeight, StyleProperty,
+    TextStyle, VerticalAlign,
 };
 
 fn root_style() -> TextStyle<'static, 'static, ColorBrush> {
@@ -157,4 +158,31 @@ fn quantized_metrics_are_whole_pixels() {
     assert_eq!(root.ascent.fract(), 0.);
     assert_eq!(root.descent.fract(), 0.);
     assert_eq!(root.over.fract(), 0.);
+}
+
+#[test]
+fn line_with_only_empty_inline_boxes_is_invisible() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let root = root_style();
+    let mut line_height = |height: f32, kind: InlineBoxKind| {
+        let mut builder = lcx.tree_builder(&mut fcx, 1., false, &root);
+        builder.push_inline_box(InlineBox {
+            id: 0,
+            kind,
+            index: 0,
+            width: 0.,
+            height,
+            baseline: None,
+            vertical_align: VerticalAlign::Baseline,
+        });
+        let (mut layout, _) = builder.build();
+        layout.break_all_lines(None);
+        layout.lines().next().unwrap().metrics().line_height
+    };
+    // Empty and out-of-flow boxes alone do not make the strut apply.
+    assert_eq!(line_height(0., InlineBoxKind::InFlow), 0.);
+    assert_eq!(line_height(10., InlineBoxKind::OutOfFlow), 0.);
+    // A non-empty in-flow box does.
+    assert_eq!(line_height(10., InlineBoxKind::InFlow), 30.);
 }

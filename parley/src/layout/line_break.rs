@@ -95,6 +95,9 @@ struct LineBoxMetrics {
     line_relative_top_height: f32,
     /// Height of the tallest `vertical-align: bottom` inline box.
     line_relative_bottom_height: f32,
+    /// Whether the line has any text or non-empty in-flow inline box. A line with only empty
+    /// inline boxes is treated as having zero height (an "invisible" line box).
+    has_content: bool,
 }
 
 /// Extents of one aligned subtree on the current line, measured from the subtree's own baseline.
@@ -183,6 +186,7 @@ impl LineBoxMetrics {
         self.contributed.clear();
         self.line_relative_top_height = 0.;
         self.line_relative_bottom_height = 0.;
+        self.has_content = false;
         let mut root = SubtreeExtents::new(0);
         if let Some(strut) = strut {
             root.line_box.add(0., strut.over, strut.under);
@@ -254,6 +258,7 @@ impl LineBoxMetrics {
         line_height: f32,
         quantize: bool,
     ) {
+        self.has_content = true;
         self.add_style(style_index, style_metrics);
         let (baseline_offset, aligned_subtree) = style_metrics
             .get(usize::from(style_index))
@@ -283,6 +288,9 @@ impl LineBoxMetrics {
         } else {
             (ascent, descent)
         };
+        if ascent + descent > 0. {
+            self.has_content = true;
+        }
         let subtree = self.subtree_mut(aligned_subtree);
         subtree.line_box.add(baseline_offset, ascent, descent);
         subtree.content_box.add(baseline_offset, ascent, descent);
@@ -292,6 +300,9 @@ impl LineBoxMetrics {
     /// box's height.
     fn add_line_relative_inline_box(&mut self, align: VerticalAlign, height: f32, quantize: bool) {
         let height = if quantize { height.round() } else { height };
+        if height > 0. {
+            self.has_content = true;
+        }
         let slot = match align {
             VerticalAlign::Bottom => &mut self.line_relative_bottom_height,
             _ => &mut self.line_relative_top_height,
@@ -690,7 +701,16 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             line_indent,
         );
 
-        let line_height = self.state.line.box_metrics.line_height();
+        // A line containing only empty inline boxes (and no text) is an invisible line box with
+        // zero height; the strut only applies once the line has content. The trailing empty line
+        // after a final newline has no items and keeps the strut so the cursor has a position.
+        let invisible = !self.state.line.box_metrics.has_content
+            && !self.lines.lines.last().unwrap().item_range.is_empty();
+        let line_height = if invisible {
+            0.
+        } else {
+            self.state.line.box_metrics.line_height()
+        };
         let line_y_start = self.state.line_y;
 
         self.state.items = self.lines.line_items.len();
@@ -700,7 +720,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
         // `finish_line` reads the line's accumulated vertical metrics from `self.state.line`, so
         // it must run before we reset the per-line running state.
-        self.finish_line(self.lines.lines.len() - 1, line_height);
+        self.finish_line(self.lines.lines.len() - 1, line_height, invisible);
         self.state
             .line
             .reset(self.layout.data.style_metrics.first());
@@ -1322,7 +1342,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         }
     }
 
-    fn finish_line(&mut self, line_idx: usize, line_height: f32) {
+    fn finish_line(&mut self, line_idx: usize, line_height: f32, invisible: bool) {
         let prev_line_metrics = match line_idx {
             0 => None,
             idx => Some(self.lines.lines[idx - 1].metrics),
@@ -1503,8 +1523,14 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         // (`top`) or upwards (`bottom`), which does not move the root baseline relative to the
         // root subtree's content.
         let box_metrics = &self.state.line.box_metrics;
-        let mut line_box_extents = box_metrics.root().line_box.or_zero();
-        let mut content_box_extents = box_metrics.root().content_box.or_zero();
+        let (mut line_box_extents, mut content_box_extents) = if invisible {
+            (Extents::default().or_zero(), Extents::default().or_zero())
+        } else {
+            (
+                box_metrics.root().line_box.or_zero(),
+                box_metrics.root().content_box.or_zero(),
+            )
+        };
 
         let mut top_height = box_metrics.line_relative_top_height;
         let mut bottom_height = box_metrics.line_relative_bottom_height;
