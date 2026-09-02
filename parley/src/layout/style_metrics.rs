@@ -41,6 +41,9 @@ pub(crate) struct StyleMetrics {
     ///
     /// [aligned subtree's]: Self::aligned_subtree
     pub(crate) baseline_offset: f32,
+    /// [`Self::baseline_offset`] before quantization. Children accumulate their shifts from this
+    /// so that rounding never compounds along the ancestor chain.
+    pub(crate) exact_baseline_offset: f32,
     /// Style index of the root of the aligned subtree this box belongs to: `0` for the root
     /// inline box, or the nearest ancestor (or self) with `vertical-align: top | bottom`.
     pub(crate) aligned_subtree: u16,
@@ -98,16 +101,19 @@ pub(crate) fn resolve_style_metrics<B: Brush>(
             // The root inline box (the strut).
             metrics.parent = index as u16;
             metrics.baseline_offset = 0.;
+            metrics.exact_baseline_offset = 0.;
             metrics.aligned_subtree = 0;
         } else {
             let parent = &out[parent_index];
             let align = style.vertical_align;
             if align.is_line_relative() {
                 metrics.baseline_offset = 0.;
+                metrics.exact_baseline_offset = 0.;
                 metrics.aligned_subtree = index as u16;
             } else {
-                let shift = shift_from_parent(align, metrics.over, metrics.under, parent, quantize);
-                metrics.baseline_offset = parent.baseline_offset + shift;
+                let shift = shift_from_parent(align, metrics.over, metrics.under, parent);
+                metrics.exact_baseline_offset = parent.exact_baseline_offset + shift;
+                metrics.baseline_offset = quantize_offset(metrics.exact_baseline_offset, quantize);
                 metrics.aligned_subtree = parent.aligned_subtree;
             }
         }
@@ -144,6 +150,7 @@ impl StyleMetrics {
             under,
             line_height,
             baseline_offset: 0.,
+            exact_baseline_offset: 0.,
             aligned_subtree: 0,
             parent: 0,
             font_size: 0.,
@@ -154,14 +161,12 @@ impl StyleMetrics {
 /// The baseline shift (positive upwards) of a box extending `over` above and `under` below its
 /// baseline, relative to the baseline of its `parent` inline box, for a parent-relative
 /// `vertical-align` value: the `alignment-baseline` offset plus the `baseline-shift`.
-/// Line-relative values (`top`, `bottom`) yield no shift. With `quantize` the shift is rounded
-/// to whole pixels so that shifted baselines stay pixel-aligned.
+/// Line-relative values (`top`, `bottom`) yield no shift.
 pub(crate) fn shift_from_parent(
     align: VerticalAlign,
     over: f32,
     under: f32,
     parent: &StyleMetrics,
-    quantize: bool,
 ) -> f32 {
     let alignment = match align.alignment {
         AlignmentBaseline::Baseline => 0.,
@@ -176,8 +181,13 @@ pub(crate) fn shift_from_parent(
         BaselineShift::Super => parent.font_size / 3.,
         BaselineShift::Top | BaselineShift::Bottom => 0.,
     };
-    let total = alignment + shift;
-    if quantize { total.round() } else { total }
+    alignment + shift
+}
+
+/// Round a baseline offset to whole pixels when `quantize` is set. Applied once to the
+/// accumulated offset (not per level) so the total error stays within half a pixel.
+pub(crate) fn quantize_offset(offset: f32, quantize: bool) -> f32 {
+    if quantize { offset.round() } else { offset }
 }
 
 /// Where an in-flow [`InlineBox`] sits relative to the baseline of its aligned subtree.
@@ -211,16 +221,10 @@ pub(crate) fn inline_box_placement(
         .get(usize::from(parent_style))
         .copied()
         .unwrap_or_default();
-    let shift = shift_from_parent(
-        inline_box.vertical_align,
-        ascent,
-        descent,
-        &parent,
-        quantize,
-    );
+    let shift = shift_from_parent(inline_box.vertical_align, ascent, descent, &parent);
     InlineBoxPlacement {
         aligned_subtree: parent.aligned_subtree,
-        baseline_offset: parent.baseline_offset + shift,
+        baseline_offset: quantize_offset(parent.exact_baseline_offset + shift, quantize),
         ascent,
         descent,
     }

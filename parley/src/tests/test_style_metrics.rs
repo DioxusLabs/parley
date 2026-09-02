@@ -245,6 +245,36 @@ fn quantized_shifted_baselines_are_whole_pixels() {
 }
 
 #[test]
+fn quantization_does_not_compound_along_ancestors() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let root = root_style();
+    let mut builder = lcx.tree_builder(&mut fcx, 1., true, &root);
+    builder.push_text("a");
+    for _ in 0..3 {
+        builder.push_style_span(TextStyle {
+            vertical_align: VerticalAlign::length(0.4),
+            ..root_style()
+        });
+    }
+    builder.push_text("b");
+    for _ in 0..3 {
+        builder.pop_style_span();
+    }
+    let (mut layout, _) = builder.build();
+    layout.break_all_lines(None);
+    let line = layout.lines().next().unwrap();
+    let mut baselines = line.items().filter_map(|item| match item {
+        crate::PositionedLayoutItem::GlyphRun(run) => Some(run.baseline()),
+        _ => None,
+    });
+    let a = baselines.next().unwrap();
+    let b = baselines.next().unwrap();
+    // 3 × 0.4 = 1.2 rounds to a 1px shift; rounding each level would give none.
+    assert_eq!(a - b, 1.);
+}
+
+#[test]
 fn quantized_metrics_are_whole_pixels() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
