@@ -132,7 +132,10 @@ fn vertical_align_inline_boxes() {
 fn vertical_align_tall_top_bottom() {
     let mut env = TestEnv::new(test_name!(), None);
 
-    for (align, name) in [(VerticalAlign::Top, "top"), (VerticalAlign::Bottom, "bottom")] {
+    for (align, name) in [
+        (VerticalAlign::Top, "top"),
+        (VerticalAlign::Bottom, "bottom"),
+    ] {
         let mut builder = env.tree_builder();
         builder.push_style_modification_span(&[StyleProperty::FontSize(12.)]);
         builder.push_text("Hx");
