@@ -28,7 +28,7 @@ fn out_of_flow_box_has_no_effect_on_layout() {
         width: 9999.0,
         height: 9999.0,
         baseline: None,
-        vertical_align: VerticalAlign::Baseline,
+        vertical_align: VerticalAlign::BASELINE,
     });
     let layout_oof = builder_oof.build(text);
     let widths_oof = layout_oof.calculate_content_widths();

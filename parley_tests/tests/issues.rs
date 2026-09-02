@@ -137,7 +137,7 @@ fn issue_752() {
         width: 10.0,
         height: 10.0,
         baseline: None,
-        vertical_align: VerticalAlign::Baseline,
+        vertical_align: VerticalAlign::BASELINE,
     });
     let mut layout = builder.build(text);
     layout.break_all_lines(Some(100.0));

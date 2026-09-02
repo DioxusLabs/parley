@@ -142,7 +142,7 @@ fn build_layout<A: Into<Option<f32>>>(
         width: 50.0,
         height: 5.0,
         baseline: None,
-        vertical_align: VerticalAlign::Baseline,
+        vertical_align: VerticalAlign::BASELINE,
     });
     builder.push_inline_box(InlineBox {
         id: 1,
@@ -151,7 +151,7 @@ fn build_layout<A: Into<Option<f32>>>(
         width: 50.0,
         height: 3.0,
         baseline: None,
-        vertical_align: VerticalAlign::Baseline,
+        vertical_align: VerticalAlign::BASELINE,
     });
 
     let mut layout = builder.build(TEXT);
@@ -530,7 +530,7 @@ fn lines_negative_leading_inline_box_grows_line_box() {
         width: 12.0,
         height: box_height,
         baseline: None,
-        vertical_align: VerticalAlign::Baseline,
+        vertical_align: VerticalAlign::BASELINE,
     });
     let mut layout: Layout<ColorBrush> = builder.build(text);
     layout.break_all_lines(None);

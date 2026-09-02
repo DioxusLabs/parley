@@ -15,16 +15,16 @@ fn vertical_align_keywords() {
     let mut env = TestEnv::new(test_name!(), None);
 
     for (align, name) in [
-        (VerticalAlign::Baseline, "baseline"),
-        (VerticalAlign::Sub, "sub"),
-        (VerticalAlign::Super, "super"),
-        (VerticalAlign::TextTop, "text_top"),
-        (VerticalAlign::TextBottom, "text_bottom"),
-        (VerticalAlign::Middle, "middle"),
-        (VerticalAlign::Top, "top"),
-        (VerticalAlign::Bottom, "bottom"),
-        (VerticalAlign::Length(6.), "length_pos"),
-        (VerticalAlign::Length(-6.), "length_neg"),
+        (VerticalAlign::BASELINE, "baseline"),
+        (VerticalAlign::SUB, "sub"),
+        (VerticalAlign::SUPER, "super"),
+        (VerticalAlign::TEXT_TOP, "text_top"),
+        (VerticalAlign::TEXT_BOTTOM, "text_bottom"),
+        (VerticalAlign::MIDDLE, "middle"),
+        (VerticalAlign::TOP, "top"),
+        (VerticalAlign::BOTTOM, "bottom"),
+        (VerticalAlign::length(6.), "length_pos"),
+        (VerticalAlign::length(-6.), "length_neg"),
     ] {
         let mut builder = env.tree_builder();
         builder.push_style_modification_span(&[StyleProperty::FontSize(24.)]);
@@ -55,12 +55,12 @@ fn vertical_align_nested_super() {
     builder.push_text("x");
     builder.push_style_modification_span(&[
         StyleProperty::FontSize(16.),
-        StyleProperty::VerticalAlign(VerticalAlign::Super),
+        StyleProperty::VerticalAlign(VerticalAlign::SUPER),
     ]);
     builder.push_text("2");
     builder.push_style_modification_span(&[
         StyleProperty::FontSize(10.),
-        StyleProperty::VerticalAlign(VerticalAlign::Super),
+        StyleProperty::VerticalAlign(VerticalAlign::SUPER),
     ]);
     builder.push_text("n");
     builder.pop_style_span();
@@ -98,11 +98,11 @@ fn vertical_align_inline_boxes() {
     let mut env = TestEnv::new(test_name!(), None);
 
     for (align, name) in [
-        (VerticalAlign::Baseline, "baseline"),
-        (VerticalAlign::Middle, "middle"),
-        (VerticalAlign::TextTop, "text_top"),
-        (VerticalAlign::Top, "top"),
-        (VerticalAlign::Bottom, "bottom"),
+        (VerticalAlign::BASELINE, "baseline"),
+        (VerticalAlign::MIDDLE, "middle"),
+        (VerticalAlign::TEXT_TOP, "text_top"),
+        (VerticalAlign::TOP, "top"),
+        (VerticalAlign::BOTTOM, "bottom"),
     ] {
         let mut builder = env.tree_builder();
         builder.push_style_modification_span(&[StyleProperty::FontSize(24.)]);
@@ -133,8 +133,8 @@ fn vertical_align_tall_top_bottom() {
     let mut env = TestEnv::new(test_name!(), None);
 
     for (align, name) in [
-        (VerticalAlign::Top, "top"),
-        (VerticalAlign::Bottom, "bottom"),
+        (VerticalAlign::TOP, "top"),
+        (VerticalAlign::BOTTOM, "bottom"),
     ] {
         let mut builder = env.tree_builder();
         builder.push_style_modification_span(&[StyleProperty::FontSize(12.)]);

@@ -7,8 +7,8 @@ use super::test_builders::{FONT_FAMILY_LIST, create_font_context};
 use super::utils::ColorBrush;
 use crate::layout::style_metrics::StyleMetrics;
 use crate::{
-    FontFamily, InlineBox, InlineBoxKind, Layout, LayoutContext, LineHeight, StyleProperty,
-    TextStyle, VerticalAlign,
+    AlignmentBaseline, BaselineShift, FontFamily, InlineBox, InlineBoxKind, Layout, LayoutContext,
+    LineHeight, StyleProperty, TextStyle, VerticalAlign,
 };
 
 fn root_style() -> TextStyle<'static, 'static, ColorBrush> {
@@ -36,15 +36,15 @@ fn build() -> Layout<ColorBrush> {
     builder.push_style_span(TextStyle {
         font_size: 10.,
         line_height: LineHeight::Absolute(20.),
-        vertical_align: VerticalAlign::Super,
+        vertical_align: VerticalAlign::SUPER,
         ..root_style()
     });
     builder.push_text("B");
     builder.pop_style_span();
     builder.pop_style_span();
-    builder.push_style_modification_span(&[StyleProperty::VerticalAlign(VerticalAlign::Top)]);
+    builder.push_style_modification_span(&[StyleProperty::VerticalAlign(VerticalAlign::TOP)]);
     builder
-        .push_style_modification_span(&[StyleProperty::VerticalAlign(VerticalAlign::Length(3.))]);
+        .push_style_modification_span(&[StyleProperty::VerticalAlign(VerticalAlign::length(3.))]);
     builder.push_text("D");
     builder.pop_style_span();
     builder.pop_style_span();
@@ -117,9 +117,9 @@ fn text_top_middle_and_text_bottom() {
     let root = root_style();
     let mut builder = lcx.tree_builder(&mut fcx, 1., false, &root);
     for align in [
-        VerticalAlign::TextTop,
-        VerticalAlign::Middle,
-        VerticalAlign::TextBottom,
+        VerticalAlign::TEXT_TOP,
+        VerticalAlign::MIDDLE,
+        VerticalAlign::TEXT_BOTTOM,
     ] {
         builder.push_style_span(TextStyle {
             font_size: 10.,
@@ -141,6 +141,33 @@ fn text_top_middle_and_text_bottom() {
     assert!((mid - root.x_height / 2.).abs() < 1e-4);
     // The box bottom sits at the parent's content descent.
     assert!((text_bottom.baseline_offset - text_bottom.under + root.descent).abs() < 1e-4);
+}
+
+#[test]
+fn alignment_baseline_and_baseline_shift_compose() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let root = root_style();
+    let mut builder = lcx.tree_builder(&mut fcx, 1., false, &root);
+    for align in [
+        VerticalAlign::TEXT_TOP,
+        VerticalAlign::new(AlignmentBaseline::TextTop, BaselineShift::Length(-4.)),
+        VerticalAlign::new(AlignmentBaseline::TextTop, BaselineShift::Super),
+    ] {
+        builder.push_style_span(TextStyle {
+            font_size: 10.,
+            vertical_align: align,
+            ..root_style()
+        });
+        builder.push_text("x");
+        builder.pop_style_span();
+    }
+    let (layout, _) = builder.build();
+    let m = metrics(&layout);
+    // `vertical-align: text-top -4px` is `text-top` lowered by 4px ...
+    assert!((m[2].baseline_offset - (m[1].baseline_offset - 4.)).abs() < 1e-4);
+    // ... and `text-top super` is `text-top` raised by a third of the parent font size.
+    assert!((m[3].baseline_offset - (m[1].baseline_offset + m[0].font_size / 3.)).abs() < 1e-4);
 }
 
 #[test]
@@ -174,7 +201,7 @@ fn line_with_only_empty_inline_boxes_is_invisible() {
             width: 0.,
             height,
             baseline: None,
-            vertical_align: VerticalAlign::Baseline,
+            vertical_align: VerticalAlign::BASELINE,
         });
         let (mut layout, _) = builder.build();
         layout.break_all_lines(None);

@@ -18,7 +18,7 @@ use crate::layout::{
     LineMetrics, Run,
 };
 use crate::style::Brush;
-use crate::{InlineBox, InlineBoxKind, OverflowWrap, TextWrapMode, VerticalAlign};
+use crate::{BaselineShift, InlineBox, InlineBoxKind, OverflowWrap, TextWrapMode, VerticalAlign};
 
 use core::ops::Range;
 use parley_engine::shape::Whitespace;
@@ -303,8 +303,8 @@ impl LineBoxMetrics {
         if height > 0. {
             self.has_content = true;
         }
-        let slot = match align {
-            VerticalAlign::Bottom => &mut self.line_relative_bottom_height,
+        let slot = match align.shift {
+            BaselineShift::Bottom => &mut self.line_relative_bottom_height,
             _ => &mut self.line_relative_top_height,
         };
         *slot = slot.max(height);
@@ -521,24 +521,21 @@ impl BreakerState {
         self.item_idx += 1;
         self.line.items.end += 1;
         self.line.x = next_x;
-        match inline_box.vertical_align {
-            align @ (VerticalAlign::Top | VerticalAlign::Bottom) => {
-                self.line.box_metrics.add_line_relative_inline_box(
-                    align,
-                    inline_box.height,
-                    quantize,
-                );
-            }
-            _ => {
-                let placement = inline_box_placement(inline_box, parent_style, style_metrics);
-                self.line.box_metrics.add_inline_box(
-                    placement.aligned_subtree,
-                    placement.baseline_offset,
-                    placement.ascent,
-                    placement.descent,
-                    quantize,
-                );
-            }
+        if inline_box.vertical_align.is_line_relative() {
+            self.line.box_metrics.add_line_relative_inline_box(
+                inline_box.vertical_align,
+                inline_box.height,
+                quantize,
+            );
+        } else {
+            let placement = inline_box_placement(inline_box, parent_style, style_metrics);
+            self.line.box_metrics.add_inline_box(
+                placement.aligned_subtree,
+                placement.baseline_offset,
+                placement.ascent,
+                placement.descent,
+                quantize,
+            );
         }
         self.update_max_height_exceeded();
     }
@@ -1536,8 +1533,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         let mut bottom_height = box_metrics.line_relative_bottom_height;
         for subtree in &box_metrics.subtrees[1..] {
             let height = subtree.line_box.height();
-            match self.layout.data.styles[usize::from(subtree.root)].vertical_align {
-                VerticalAlign::Bottom => bottom_height = bottom_height.max(height),
+            match self.layout.data.styles[usize::from(subtree.root)]
+                .vertical_align
+                .shift
+            {
+                BaselineShift::Bottom => bottom_height = bottom_height.max(height),
                 _ => top_height = top_height.max(height),
             }
         }
@@ -1553,8 +1553,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         line.aligned_subtree_offsets.clear();
         for subtree in &box_metrics.subtrees[1..] {
             let extents = subtree.line_box.or_zero();
-            let offset = match self.layout.data.styles[usize::from(subtree.root)].vertical_align {
-                VerticalAlign::Bottom => extents.under - line_box_extents.under,
+            let offset = match self.layout.data.styles[usize::from(subtree.root)]
+                .vertical_align
+                .shift
+            {
+                BaselineShift::Bottom => extents.under - line_box_extents.under,
                 _ => line_box_extents.over - extents.over,
             };
             line.aligned_subtree_offsets.push((subtree.root, offset));

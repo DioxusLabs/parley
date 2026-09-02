@@ -60,7 +60,7 @@ fn float_simple() {
             width: 0.0,
             height: 0.0,
             baseline: None,
-            vertical_align: VerticalAlign::Baseline,
+            vertical_align: VerticalAlign::BASELINE,
         });
     }
 

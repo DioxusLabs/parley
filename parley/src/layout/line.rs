@@ -8,7 +8,7 @@ use crate::layout::layout::Layout;
 use crate::layout::run::Run;
 use crate::layout::style_metrics::inline_box_placement;
 use crate::style::Brush;
-use crate::{InlineBox, InlineBoxKind, VerticalAlign};
+use crate::{BaselineShift, InlineBox, InlineBoxKind};
 
 use core::ops::Range;
 use parley_engine::Glyph;
@@ -83,9 +83,9 @@ impl<'a, B: Brush> Line<'a, B> {
     /// Block-axis coordinate of the top edge of the layout's inline box `index`.
     pub(crate) fn inline_box_top(&self, index: usize) -> f32 {
         let inline_box = &self.layout.data.inline_boxes[index];
-        match inline_box.vertical_align {
-            VerticalAlign::Top => self.data.metrics.block_min_coord,
-            VerticalAlign::Bottom => self.data.metrics.block_max_coord - inline_box.height,
+        match inline_box.vertical_align.shift {
+            BaselineShift::Top => self.data.metrics.block_min_coord,
+            BaselineShift::Bottom => self.data.metrics.block_max_coord - inline_box.height,
             _ => {
                 let parent_style = self
                     .layout

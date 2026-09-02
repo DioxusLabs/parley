@@ -94,7 +94,7 @@ fn main() {
         width: 50.0,
         height: 50.0,
         baseline: None,
-        vertical_align: VerticalAlign::Baseline,
+        vertical_align: VerticalAlign::BASELINE,
     });
 
     // Build the builder into a Layout

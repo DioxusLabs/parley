@@ -208,7 +208,7 @@ pub fn build_rich_layout(
         width: 50.0,
         height: 50.0,
         baseline: None,
-        vertical_align: VerticalAlign::Baseline,
+        vertical_align: VerticalAlign::BASELINE,
     });
 
     let mut layout = builder.build(&config.text);

@@ -278,7 +278,7 @@ fn create_root_style() -> TextStyle<'static, 'static, ColorBrush> {
         line_height: LineHeight::Absolute(30.),
         // Parent-relative, so it compounds through nested tree spans but not through ranged
         // styles; keep it at the default so both builders agree.
-        vertical_align: VerticalAlign::Baseline,
+        vertical_align: VerticalAlign::BASELINE,
         word_spacing: 2.,
         letter_spacing: 1.5,
         word_break: WordBreak::BreakAll,
@@ -313,7 +313,7 @@ fn set_root_style(rb: &mut RangedBuilder<'_, ColorBrush>) {
         palette::css::BEIGE,
     ))));
     rb.push_default(LineHeight::Absolute(30.));
-    rb.push_default(VerticalAlign::Baseline);
+    rb.push_default(VerticalAlign::BASELINE);
     rb.push_default(StyleProperty::WordSpacing(2.));
     rb.push_default(StyleProperty::LetterSpacing(1.5));
     rb.push_default(StyleProperty::WordBreak(WordBreak::BreakAll));
