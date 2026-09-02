@@ -68,6 +68,54 @@ impl LineHeight {
     }
 }
 
+/// Vertical alignment of an inline box (a styled span of text or an [`InlineBox`]) within its
+/// line. This mirrors the CSS `vertical-align` property.
+///
+/// All values except [`Top`](Self::Top) and [`Bottom`](Self::Bottom) are relative to the
+/// *parent* inline box (the enclosing style span, or the root style for top-level content).
+///
+/// [`InlineBox`]: crate::InlineBox
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum VerticalAlign {
+    /// Align the baseline of the box with the baseline of the parent box.
+    #[default]
+    Baseline,
+    /// Lower the baseline of the box to the proper position for subscripts of the parent box.
+    Sub,
+    /// Raise the baseline of the box to the proper position for superscripts of the parent box.
+    Super,
+    /// Align the top of the box with the top of the parent's content area (font ascent).
+    TextTop,
+    /// Align the bottom of the box with the bottom of the parent's content area (font descent).
+    TextBottom,
+    /// Align the vertical midpoint of the box with the baseline of the parent box plus half the
+    /// x-height of the parent.
+    Middle,
+    /// Align the top of the box (and its descendants) with the top of the line box.
+    Top,
+    /// Align the bottom of the box (and its descendants) with the bottom of the line box.
+    Bottom,
+    /// Raise the baseline of the box by the given distance (in layout units) above the baseline of
+    /// the parent box. Negative values lower the baseline.
+    Length(f32),
+}
+
+impl VerticalAlign {
+    pub(crate) fn nearly_eq(self, other: Self) -> bool {
+        match (self, other) {
+            (Self::Length(a), Self::Length(b)) => nearly_eq(a, b),
+            _ => self == other,
+        }
+    }
+
+    pub(crate) fn scale(self, scale: f32) -> Self {
+        match self {
+            Self::Length(value) => Self::Length(value * scale),
+            value => value,
+        }
+    }
+}
+
 /// Properties that define a style.
 #[derive(Clone, PartialEq, Debug)]
 pub enum StyleProperty<'a, B: Brush> {
@@ -107,6 +155,8 @@ pub enum StyleProperty<'a, B: Brush> {
     StrikethroughBrush(Option<B>),
     /// Line height.
     LineHeight(LineHeight),
+    /// Vertical alignment within the line.
+    VerticalAlign(VerticalAlign),
     /// Extra spacing between words.
     WordSpacing(f32),
     /// Extra spacing between letters.
@@ -158,6 +208,8 @@ pub struct TextStyle<'family, 'settings, B: Brush> {
     pub strikethrough_brush: Option<B>,
     /// Line height.
     pub line_height: LineHeight,
+    /// Vertical alignment within the line.
+    pub vertical_align: VerticalAlign,
     /// Extra spacing between words.
     pub word_spacing: f32,
     /// Extra spacing between letters.
@@ -191,6 +243,7 @@ impl<B: Brush> Default for TextStyle<'static, 'static, B> {
             strikethrough_size: None,
             strikethrough_brush: None,
             line_height: LineHeight::default(),
+            vertical_align: VerticalAlign::default(),
             word_spacing: 0.0,
             letter_spacing: 0.0,
             word_break: WordBreak::default(),
@@ -239,6 +292,12 @@ impl<B: Brush> From<GenericFamily> for StyleProperty<'_, B> {
 impl<B: Brush> From<LineHeight> for StyleProperty<'_, B> {
     fn from(value: LineHeight) -> Self {
         StyleProperty::LineHeight(value)
+    }
+}
+
+impl<B: Brush> From<VerticalAlign> for StyleProperty<'_, B> {
+    fn from(value: VerticalAlign) -> Self {
+        StyleProperty::VerticalAlign(value)
     }
 }
 
