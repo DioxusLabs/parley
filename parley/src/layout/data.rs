@@ -59,9 +59,32 @@ pub(crate) struct LineData {
     pub(crate) justification: Justification,
     /// Text indent applied to this line.
     pub(crate) indent: f32,
+    /// Block-axis offset from the line's (root) baseline to the baseline of each aligned subtree
+    /// rooted at a `vertical-align: top | bottom` style on this line, keyed by the style index of
+    /// the subtree root. Empty for lines with only baseline-relative content.
+    pub(crate) aligned_subtree_offsets: Vec<(u16, f32)>,
 }
 
 impl LineData {
+    /// Offset from the line's baseline to the baseline of the aligned subtree rooted at style
+    /// `root` (positive upwards).
+    pub(crate) fn aligned_subtree_offset(&self, root: u16) -> f32 {
+        if root == 0 {
+            return 0.;
+        }
+        self.aligned_subtree_offsets
+            .iter()
+            .find(|(r, _)| *r == root)
+            .map_or(0., |(_, offset)| *offset)
+    }
+
+    /// Block-axis coordinate of the baseline of the given style's inline box.
+    pub(crate) fn style_baseline(&self, metrics: &StyleMetrics) -> f32 {
+        self.metrics.baseline
+            - self.aligned_subtree_offset(metrics.aligned_subtree)
+            - metrics.baseline_offset
+    }
+
     pub(crate) fn size(&self) -> f32 {
         self.metrics.line_height
     }
@@ -196,6 +219,9 @@ pub(crate) struct LayoutData<B: Brush> {
     /// Inline box metrics of each entry of `styles`.
     pub(crate) style_metrics: Vec<StyleMetrics>,
     pub(crate) inline_boxes: Vec<InlineBox>,
+    /// Style index of the inline box (span) containing each entry of `inline_boxes`. This is the
+    /// parent against which the box's `vertical_align` is resolved.
+    pub(crate) inline_box_styles: Vec<u16>,
 
     // Output of shaping (input to line breaking)
     pub(crate) shaped_text: ShapedText,
@@ -240,6 +266,7 @@ impl<B: Brush> Default for LayoutData<B> {
             styles: Vec::new(),
             style_metrics: Vec::new(),
             inline_boxes: Vec::new(),
+            inline_box_styles: Vec::new(),
             shaped_text: ShapedText::new(),
             runs: Vec::new(),
             items: Vec::new(),
@@ -266,6 +293,7 @@ impl<B: Brush> LayoutData<B> {
         self.styles.clear();
         self.style_metrics.clear();
         self.inline_boxes.clear();
+        self.inline_box_styles.clear();
         self.shaped_text.clear();
         self.runs.clear();
         self.items.clear();
