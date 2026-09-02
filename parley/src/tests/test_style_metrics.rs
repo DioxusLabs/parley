@@ -171,6 +171,34 @@ fn alignment_baseline_and_baseline_shift_compose() {
 }
 
 #[test]
+fn trailing_line_after_newline_keeps_newline_style() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let root = TextStyle {
+        line_height: LineHeight::Absolute(10.),
+        ..root_style()
+    };
+    let mut builder = lcx.tree_builder(&mut fcx, 1., false, &root);
+    builder.push_style_span(TextStyle {
+        font_size: 40.,
+        line_height: LineHeight::Absolute(40.),
+        ..root_style()
+    });
+    builder.push_text("x\n");
+    builder.pop_style_span();
+    let (mut layout, _) = builder.build();
+    layout.break_all_lines(None);
+    let mut lines = layout.lines();
+    let first = lines.next().unwrap();
+    let last = lines.next().unwrap();
+    assert!(lines.next().is_none());
+    assert_eq!(first.metrics().line_height, 40.);
+    assert_eq!(last.metrics().line_height, 40.);
+    assert_eq!(last.metrics().block_min_coord, 40.);
+    assert_eq!(layout.height(), 80.);
+}
+
+#[test]
 fn quantized_metrics_are_whole_pixels() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();

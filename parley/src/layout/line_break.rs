@@ -718,6 +718,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         // `finish_line` reads the line's accumulated vertical metrics from `self.state.line`, so
         // it must run before we reset the per-line running state.
         self.finish_line(self.lines.lines.len() - 1, line_height, invisible);
+        // `finish_line` may grow the line (e.g. the trailing line after a final newline).
+        let line_height = self.lines.lines.last().unwrap().metrics.line_height;
         self.state
             .line
             .reset(self.layout.data.style_metrics.first());
@@ -1499,6 +1501,19 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                 let grapheme =
                     count_graphemes(self.layout.data.shaped_text.run_slice(index as u32));
                 let text = run.range.byte_range.end;
+                // The empty run carries the style of the newline that produced this line, so the
+                // line is sized by that style's inline box (and its ancestors), not just the strut.
+                let style_index = self.layout.data.shaped_text.shaped_clusters()
+                    [cluster as usize - 1]
+                    .style_index;
+                self.state.line.box_metrics.add_text(
+                    style_index,
+                    &self.layout.data.style_metrics,
+                    &run.font_metrics,
+                    self.layout.data.runs[index].line_height,
+                    quantize,
+                );
+                line.metrics.line_height = self.state.line.box_metrics.line_height();
                 self.lines.line_items.push(LineItemData {
                     kind: LayoutItemKind::TextRun,
                     index,
