@@ -199,6 +199,52 @@ fn trailing_line_after_newline_keeps_newline_style() {
 }
 
 #[test]
+fn quantized_shifted_baselines_are_whole_pixels() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let root = root_style();
+    let mut builder = lcx.tree_builder(&mut fcx, 1., true, &root);
+    builder.push_text("a");
+    for align in [
+        VerticalAlign::length(0.5),
+        VerticalAlign::MIDDLE,
+        VerticalAlign::SUPER,
+    ] {
+        builder.push_style_span(TextStyle {
+            font_size: 13.,
+            line_height: LineHeight::Absolute(15.5),
+            vertical_align: align,
+            ..root_style()
+        });
+        builder.push_text("b");
+        builder.pop_style_span();
+    }
+    builder.push_style_span(TextStyle {
+        vertical_align: VerticalAlign::BOTTOM,
+        ..root_style()
+    });
+    builder.push_style_span(TextStyle {
+        font_size: 13.,
+        vertical_align: VerticalAlign::length(0.5),
+        ..root_style()
+    });
+    builder.push_text("c");
+    builder.pop_style_span();
+    builder.pop_style_span();
+    let (mut layout, _) = builder.build();
+    layout.break_all_lines(None);
+    let line = layout.lines().next().unwrap();
+    let mut runs = 0;
+    for item in line.items() {
+        if let crate::PositionedLayoutItem::GlyphRun(run) = item {
+            assert_eq!(run.baseline(), run.baseline().round());
+            runs += 1;
+        }
+    }
+    assert_eq!(runs, 5);
+}
+
+#[test]
 fn quantized_metrics_are_whole_pixels() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();

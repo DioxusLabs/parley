@@ -528,7 +528,7 @@ impl BreakerState {
                 quantize,
             );
         } else {
-            let placement = inline_box_placement(inline_box, parent_style, style_metrics);
+            let placement = inline_box_placement(inline_box, parent_style, style_metrics, quantize);
             self.line.box_metrics.add_inline_box(
                 placement.aligned_subtree,
                 placement.baseline_offset,
@@ -1575,6 +1575,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                 BaselineShift::Bottom => extents.under - line_box_extents.under,
                 _ => line_box_extents.over - extents.over,
             };
+            let offset = if quantize { offset.round() } else { offset };
             line.aligned_subtree_offsets.push((subtree.root, offset));
             let content = subtree.content_box.or_zero();
             content_box_extents.add(offset, content.over, content.under);

@@ -94,8 +94,12 @@ impl<'a, B: Brush> Line<'a, B> {
                     .get(index)
                     .copied()
                     .unwrap_or(0);
-                let placement =
-                    inline_box_placement(inline_box, parent_style, &self.layout.data.style_metrics);
+                let placement = inline_box_placement(
+                    inline_box,
+                    parent_style,
+                    &self.layout.data.style_metrics,
+                    self.layout.data.quantize,
+                );
                 self.data.metrics.baseline
                     - self.data.aligned_subtree_offset(placement.aligned_subtree)
                     - placement.baseline_offset

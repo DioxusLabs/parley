@@ -106,7 +106,7 @@ pub(crate) fn resolve_style_metrics<B: Brush>(
                 metrics.baseline_offset = 0.;
                 metrics.aligned_subtree = index as u16;
             } else {
-                let shift = shift_from_parent(align, metrics.over, metrics.under, parent);
+                let shift = shift_from_parent(align, metrics.over, metrics.under, parent, quantize);
                 metrics.baseline_offset = parent.baseline_offset + shift;
                 metrics.aligned_subtree = parent.aligned_subtree;
             }
@@ -154,12 +154,14 @@ impl StyleMetrics {
 /// The baseline shift (positive upwards) of a box extending `over` above and `under` below its
 /// baseline, relative to the baseline of its `parent` inline box, for a parent-relative
 /// `vertical-align` value: the `alignment-baseline` offset plus the `baseline-shift`.
-/// Line-relative values (`top`, `bottom`) yield no shift.
+/// Line-relative values (`top`, `bottom`) yield no shift. With `quantize` the shift is rounded
+/// to whole pixels so that shifted baselines stay pixel-aligned.
 pub(crate) fn shift_from_parent(
     align: VerticalAlign,
     over: f32,
     under: f32,
     parent: &StyleMetrics,
+    quantize: bool,
 ) -> f32 {
     let alignment = match align.alignment {
         AlignmentBaseline::Baseline => 0.,
@@ -174,7 +176,8 @@ pub(crate) fn shift_from_parent(
         BaselineShift::Super => parent.font_size / 3.,
         BaselineShift::Top | BaselineShift::Bottom => 0.,
     };
-    alignment + shift
+    let total = alignment + shift;
+    if quantize { total.round() } else { total }
 }
 
 /// Where an in-flow [`InlineBox`] sits relative to the baseline of its aligned subtree.
@@ -200,6 +203,7 @@ pub(crate) fn inline_box_placement(
     inline_box: &InlineBox,
     parent_style: u16,
     style_metrics: &[StyleMetrics],
+    quantize: bool,
 ) -> InlineBoxPlacement {
     let ascent = inline_box.baseline.unwrap_or(inline_box.height);
     let descent = inline_box.height - ascent;
@@ -207,7 +211,13 @@ pub(crate) fn inline_box_placement(
         .get(usize::from(parent_style))
         .copied()
         .unwrap_or_default();
-    let shift = shift_from_parent(inline_box.vertical_align, ascent, descent, &parent);
+    let shift = shift_from_parent(
+        inline_box.vertical_align,
+        ascent,
+        descent,
+        &parent,
+        quantize,
+    );
     InlineBoxPlacement {
         aligned_subtree: parent.aligned_subtree,
         baseline_offset: parent.baseline_offset + shift,
