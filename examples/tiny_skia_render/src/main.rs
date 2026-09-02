@@ -11,7 +11,8 @@
 
 use parley::{
     Alignment, AlignmentOptions, FontContext, FontWeight, GenericFamily, GlyphRun, InlineBox,
-    InlineBoxKind, Layout, LayoutContext, LineHeight, PositionedLayoutItem, StyleProperty,
+    InlineBoxKind, InlineBoxVerticalAlign, Layout, LayoutContext, LineHeight, PositionedLayoutItem,
+    StyleProperty,
 };
 use skrifa::{
     GlyphId, MetadataProvider, OutlineGlyph,
@@ -93,6 +94,7 @@ fn main() {
         width: 50.0,
         height: 50.0,
         baseline: None,
+        vertical_align: InlineBoxVerticalAlign::default(),
     });
 
     // Build the builder into a Layout

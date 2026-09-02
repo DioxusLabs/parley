@@ -6,8 +6,8 @@
 use crate::test_name;
 use crate::util::TestEnv;
 use parley::{
-    Alignment, AlignmentOptions, FontFamily, InlineBox, InlineBoxKind, PositionedLayoutItem,
-    StyleProperty, TextWrapMode,
+    Alignment, AlignmentOptions, FontFamily, InlineBox, InlineBoxKind, InlineBoxVerticalAlign,
+    PositionedLayoutItem, StyleProperty, TextWrapMode,
 };
 
 /// Test that rendering RTL text doesn't affect subsequent LTR layouts.
@@ -136,6 +136,7 @@ fn issue_752() {
         width: 10.0,
         height: 10.0,
         baseline: None,
+        vertical_align: InlineBoxVerticalAlign::default(),
     });
     let mut layout = builder.build(text);
     layout.break_all_lines(Some(100.0));
