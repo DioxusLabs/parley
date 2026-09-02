@@ -24,6 +24,9 @@ pub(crate) struct RunData {
     pub(crate) synthesis: fontique::Synthesis,
     /// The line height
     pub line_height: f32,
+    /// The run's own inline box (from the shaped font, which may be a fallback font, and the
+    /// style's `line-height`), as added to a line's extents by each of its atoms.
+    pub(crate) box_metrics: StyleMetrics,
     /// Additional spacing inserted between this run's atoms.
     ///
     /// TODO: Letter spacing in the form of gaps should not be applied between cursive scripts, see
@@ -348,6 +351,11 @@ impl<B: Brush> LayoutData<B> {
             },
             synthesis: font.synthesis,
             line_height,
+            box_metrics: StyleMetrics::from_font(
+                &shaped_run.font_metrics,
+                line_height,
+                self.quantize,
+            ),
             spacing,
         };
 

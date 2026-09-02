@@ -10,8 +10,8 @@
 
 use alloc::vec::Vec;
 
-use fontique::{Query, QueryFamily};
-use parley_engine::{FontInstance, FontMetrics};
+use fontique::{FontStyle, FontWeight, FontWidth, Query, QueryFamily};
+use parley_engine::{FontInstance, FontMetrics, ShapedText};
 
 use crate::resolve::{ResolveContext, ResolvedStyle};
 use crate::style::Brush;
@@ -56,11 +56,13 @@ pub(crate) struct StyleMetrics {
 /// Resolve the [`StyleMetrics`] of every style in `styles`, in table order.
 ///
 /// Relies on the style table being ordered parent-first (`style.parent <= index`), which both
-/// style builders guarantee.
+/// style builders guarantee. `shaped_text` is the already shaped text of the layout, whose run
+/// metrics are reused where a style's primary font was also used for shaping.
 pub(crate) fn resolve_style_metrics<B: Brush>(
     rcx: &ResolveContext,
     fcx: &mut FontContext,
     styles: &[ResolvedStyle<B>],
+    shaped_text: &ShapedText,
     quantize: bool,
     out: &mut Vec<StyleMetrics>,
 ) {
@@ -68,17 +70,33 @@ pub(crate) fn resolve_style_metrics<B: Brush>(
     out.reserve(styles.len());
 
     let mut query = fcx.collection.query(&mut fcx.source_cache);
+    // Styles that differ only in properties that do not affect font selection (brush, decoration,
+    // spacing, ...) share one font lookup. The parent is checked first as it most often matches.
+    let mut font_keys: Vec<FontKey> = Vec::with_capacity(styles.len());
 
     for (index, style) in styles.iter().enumerate() {
-        let font_metrics = primary_font(&mut query, rcx, style)
-            .and_then(|font| {
-                FontMetrics::from_variations(
-                    &font,
-                    style.font_size,
-                    rcx.variations(style.font_variations).unwrap_or(&[]),
-                )
-            })
-            .unwrap_or_else(|| fallback_metrics(style.font_size));
+        let key = FontKey::new(style);
+        let parent_index = usize::from(style.parent);
+        let cached = if parent_index < index && font_keys[parent_index] == key {
+            Some(parent_index)
+        } else {
+            font_keys.iter().position(|k| *k == key)
+        };
+        let font_metrics = match cached {
+            Some(cached) => font_keys[cached].metrics,
+            None => primary_font(&mut query, rcx, style)
+                .and_then(|font| {
+                    let variations = rcx.variations(style.font_variations).unwrap_or(&[]);
+                    shaped_run_metrics(shaped_text, &font, style.font_size, variations).or_else(
+                        || FontMetrics::from_variations(&font, style.font_size, variations),
+                    )
+                })
+                .unwrap_or_else(|| fallback_metrics(style.font_size)),
+        };
+        font_keys.push(FontKey {
+            metrics: font_metrics,
+            ..key
+        });
 
         let line_height = match style.line_height {
             LineHeight::Absolute(value) => value,
@@ -92,7 +110,6 @@ pub(crate) fn resolve_style_metrics<B: Brush>(
         metrics.parent = style.parent;
         metrics.font_size = style.font_size;
 
-        let parent_index = usize::from(style.parent);
         debug_assert!(
             parent_index <= index,
             "style table must be ordered parent-first"
@@ -119,6 +136,71 @@ pub(crate) fn resolve_style_metrics<B: Brush>(
         }
 
         out.push(metrics);
+    }
+}
+
+/// The properties of a style that determine its primary font and that font's metrics, together
+/// with the metrics resolved for them.
+#[derive(Clone, Copy)]
+struct FontKey {
+    family: usize,
+    variations: usize,
+    size: u32,
+    width: FontWidth,
+    weight: FontWeight,
+    style: FontStyle,
+    metrics: FontMetrics,
+}
+
+impl FontKey {
+    fn new<B: Brush>(style: &ResolvedStyle<B>) -> Self {
+        Self {
+            family: style.font_family.id(),
+            variations: style.font_variations.id(),
+            size: style.font_size.to_bits(),
+            width: style.font_width,
+            weight: style.font_weight,
+            style: style.font_style,
+            metrics: fallback_metrics(0.),
+        }
+    }
+}
+
+/// The metrics of a shaped run using `font` at `font_size`, if any: the shaper has then already
+/// computed the metrics this style needs. Only used at the font's default variation location,
+/// which covers the common non-variable-font case without re-resolving axes.
+fn shaped_run_metrics(
+    shaped_text: &ShapedText,
+    font: &FontInstance,
+    font_size: f32,
+    variations: &[crate::FontVariation],
+) -> Option<FontMetrics> {
+    if !variations.is_empty() || !font.synthesis.variation_settings().is_empty() {
+        return None;
+    }
+    let font_index = shaped_text.fonts().iter().position(|f| f == font)?;
+    let coords = shaped_text.normalized_coords();
+    shaped_text
+        .runs()
+        .iter()
+        .find(|run| {
+            run.font_index == font_index
+                && run.font_size.to_bits() == font_size.to_bits()
+                && coords[run.normalized_coords_range.clone()]
+                    .iter()
+                    .all(|c| c.to_bits() == 0)
+        })
+        .map(|run| run.font_metrics)
+}
+
+impl PartialEq for FontKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.family == other.family
+            && self.variations == other.variations
+            && self.size == other.size
+            && self.width == other.width
+            && self.weight == other.weight
+            && self.style == other.style
     }
 }
 

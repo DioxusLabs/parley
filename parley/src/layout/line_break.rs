@@ -22,7 +22,7 @@ use crate::{BaselineShift, InlineBox, InlineBoxKind, OverflowWrap, TextWrapMode,
 
 use core::ops::Range;
 use parley_engine::shape::Whitespace;
-use parley_engine::{Atom, Boundary, FontMetrics};
+use parley_engine::{Atom, Boundary};
 use smallvec::SmallVec;
 
 #[derive(Default)]
@@ -98,6 +98,8 @@ struct LineBoxMetrics {
     /// Whether the line has any text or non-empty in-flow inline box. A line with only empty
     /// inline boxes is treated as having zero height (an "invisible" line box).
     has_content: bool,
+    /// The layout item and style of the last text atom added, whose boxes are already on the line.
+    last_text: (usize, u16),
 }
 
 /// Extents of one aligned subtree on the current line, measured from the subtree's own baseline.
@@ -187,6 +189,7 @@ impl LineBoxMetrics {
         self.line_relative_top_height = 0.;
         self.line_relative_bottom_height = 0.;
         self.has_content = false;
+        self.last_text = (usize::MAX, 0);
         let mut root = SubtreeExtents::new(0);
         if let Some(strut) = strut {
             root.line_box.add(0., strut.over, strut.under);
@@ -201,7 +204,11 @@ impl LineBoxMetrics {
         &self.subtrees[0]
     }
 
+    #[inline]
     fn subtree_mut(&mut self, root: u16) -> &mut SubtreeExtents {
+        if root == 0 {
+            return &mut self.subtrees[0];
+        }
         let index = match self.subtrees.iter().position(|s| s.root == root) {
             Some(index) => index,
             None => {
@@ -213,10 +220,13 @@ impl LineBoxMetrics {
     }
 
     /// The line height seen so far.
+    #[inline]
     fn line_height(&self) -> f32 {
         let mut height = self.root().line_box.height();
-        for subtree in &self.subtrees[1..] {
-            height = height.max(subtree.line_box.height());
+        if self.subtrees.len() > 1 {
+            for subtree in &self.subtrees[1..] {
+                height = height.max(subtree.line_box.height());
+            }
         }
         height
             .max(self.line_relative_top_height)
@@ -246,24 +256,32 @@ impl LineBoxMetrics {
         }
     }
 
-    /// Add the glyphs of a text atom of `style_index`, shaped with a font with `metrics`.
+    /// Add the glyphs of a text atom of `style_index` in layout item `item_idx`, a run whose own
+    /// box is `run_box` (see `RunData::box_metrics`).
     ///
-    /// This adds both the run's own box (the glyph font may be a fallback font and differ from the
+    /// This adds both the run's box (the glyph font may be a fallback font and differ from the
     /// style's primary font) and the style's inline box together with its ancestors.
+    #[inline]
     fn add_text(
         &mut self,
+        item_idx: usize,
         style_index: u16,
         style_metrics: &[StyleMetrics],
-        metrics: &FontMetrics,
-        line_height: f32,
-        quantize: bool,
+        run_box: &StyleMetrics,
     ) {
         self.has_content = true;
-        self.add_style(style_index, style_metrics);
+        // Consecutive atoms almost always come from the same run and style, whose boxes are then
+        // already on the line.
+        if self.last_text == (item_idx, style_index) {
+            return;
+        }
+        self.last_text = (item_idx, style_index);
+        if self.contributed.last() != Some(&style_index) {
+            self.add_style(style_index, style_metrics);
+        }
         let (baseline_offset, aligned_subtree) = style_metrics
             .get(usize::from(style_index))
             .map_or((0., 0), |m| (m.baseline_offset, m.aligned_subtree));
-        let run_box = StyleMetrics::from_font(metrics, line_height, quantize);
         let subtree = self.subtree_mut(aligned_subtree);
         subtree
             .line_box
@@ -453,22 +471,16 @@ impl Default for BreakerState {
 impl BreakerState {
     /// Add the atom currently being evaluated to the current line.
     ///
-    /// `font_metrics` provides the raw font ascent and descent of the atom (i.e. the distances
-    /// it extends above and below the baseline, *not* including leading) as well as the intrinsic
-    /// line height of the atom (i.e. including the full leading), which may be smaller than
-    /// `ascent + descent` when the leading is negative. `style_index` is the atom's style, whose
-    /// inline box (and those of its ancestors) is added to the line too.
+    /// `run_box` is the box of the atom's run (see `RunData::box_metrics`). `style_index` is the
+    /// atom's style, whose inline box (and those of its ancestors) is added to the line too.
     #[inline]
-    #[allow(clippy::too_many_arguments)]
     fn append_atom_to_line(
         &mut self,
         atom: &Atom<'_>,
         next_x: f32,
         style_index: u16,
         style_metrics: &[StyleMetrics],
-        font_metrics: &FontMetrics,
-        line_height: f32,
-        quantize: bool,
+        run_box: &StyleMetrics,
     ) {
         if atom.characters()[0].info.whitespace().is_space_or_nbsp() {
             self.line.num_spaces += 1;
@@ -477,13 +489,9 @@ impl BreakerState {
         self.line.clusters.end = atom.shaped_clusters_range().end;
         self.cluster_idx = atom.shaped_clusters_range().end;
         self.line.x = next_x;
-        self.line.box_metrics.add_text(
-            style_index,
-            style_metrics,
-            font_metrics,
-            line_height,
-            quantize,
-        );
+        self.line
+            .box_metrics
+            .add_text(self.item_idx, style_index, style_metrics, run_box);
         self.update_max_height_exceeded();
     }
 
@@ -572,7 +580,8 @@ impl BreakerState {
 
     #[inline(always)]
     fn update_max_height_exceeded(&mut self) {
-        self.line.max_height_exceeded = self.line.box_metrics.line_height() > self.line_max_height;
+        self.line.max_height_exceeded = self.line_max_height != f32::MAX
+            && self.line.box_metrics.line_height() > self.line_max_height;
     }
 
     /// Get the max-advance of the entire layout
@@ -934,7 +943,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         let is_newline = whitespace == Whitespace::Newline;
                         let is_space = whitespace.is_space_or_nbsp();
                         let boundary = first_character.info.boundary();
-                        let metrics = run.font_metrics();
+                        let run_box = &run.data.box_metrics;
                         let line_height = run.data.line_height;
                         let max_height_exceeded = self.state.line.max_height_exceeded;
                         let style_index = first_character.style_index;
@@ -993,9 +1002,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 self.state.line.x,
                                 style_index,
                                 &self.layout.data.style_metrics,
-                                metrics,
-                                line_height,
-                                self.layout.data.quantize,
+                                run_box,
                             );
 
                             if is_cr_before_lf {
@@ -1038,9 +1045,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 next_x,
                                 style_index,
                                 &self.layout.data.style_metrics,
-                                metrics,
-                                line_height,
-                                self.layout.data.quantize,
+                                run_box,
                             );
                         }
                         // Else we attempt to line break:
@@ -1061,9 +1066,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                     next_x,
                                     style_index,
                                     &self.layout.data.style_metrics,
-                                    metrics,
-                                    line_height,
-                                    self.layout.data.quantize,
+                                    run_box,
                                 );
                                 return self.start_new_line(
                                     BreakReason::Regular,
@@ -1112,9 +1115,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                     next_x,
                                     style_index,
                                     &self.layout.data.style_metrics,
-                                    metrics,
-                                    line_height,
-                                    self.layout.data.quantize,
+                                    run_box,
                                 );
                             }
                         }
@@ -1223,15 +1224,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         } else {
                             self.state.line.x + advance
                         };
-                        let metrics = run.font_metrics();
                         self.state.append_atom_to_line(
                             &atom,
                             next_x,
                             first_character.style_index,
                             &self.layout.data.style_metrics,
-                            metrics,
-                            run.data.line_height,
-                            self.layout.data.quantize,
+                            &run.data.box_metrics,
                         );
                         char_count += atom.char_range().len() as u32;
 
@@ -1507,11 +1505,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     [cluster as usize - 1]
                     .style_index;
                 self.state.line.box_metrics.add_text(
+                    index,
                     style_index,
                     &self.layout.data.style_metrics,
-                    &run.font_metrics,
-                    self.layout.data.runs[index].line_height,
-                    quantize,
+                    &self.layout.data.runs[index].box_metrics,
                 );
                 line.metrics.line_height = self.state.line.box_metrics.line_height();
                 self.lines.line_items.push(LineItemData {
