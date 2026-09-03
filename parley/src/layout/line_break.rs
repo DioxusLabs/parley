@@ -306,7 +306,9 @@ impl LineBoxMetrics {
         } else {
             (ascent, descent)
         };
-        if ascent + descent > 0. {
+        // Negative margins can make the reserved space negative; the box is still content.
+        // Out-of-flow boxes have infinitely negative extents and are not.
+        if (ascent != 0. || descent != 0.) && ascent.is_finite() && descent.is_finite() {
             self.has_content = true;
         }
         let subtree = self.subtree_mut(aligned_subtree);
@@ -941,7 +943,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         let first_character = &atom.characters()[0];
                         let whitespace = first_character.info.whitespace();
                         let is_newline = whitespace == Whitespace::Newline;
-                        let is_space = whitespace.is_space_or_nbsp();
+                        let is_space = whitespace == Whitespace::Space;
                         let boundary = first_character.info.boundary();
                         let run_box = &run.data.box_metrics;
                         let line_height = run.data.line_height;

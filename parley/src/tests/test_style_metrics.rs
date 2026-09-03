@@ -317,3 +317,57 @@ fn line_with_only_empty_inline_boxes_is_invisible() {
     // A non-empty in-flow box does.
     assert_eq!(line_height(10., InlineBoxKind::InFlow), 30.);
 }
+
+/// A box whose reserved space is negative (e.g. an atomic inline with a large negative
+/// `margin-top`) is still content: the strut applies and the line keeps its height.
+#[test]
+fn line_with_negative_height_inline_box_is_not_invisible() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let root = root_style();
+    let mut builder = lcx.tree_builder(&mut fcx, 1., false, &root);
+    builder.push_inline_box(InlineBox {
+        id: 0,
+        kind: InlineBoxKind::InFlow,
+        index: 0,
+        width: 10.,
+        height: -300.,
+        baseline: Some(-305.),
+        vertical_align: VerticalAlign::BASELINE,
+    });
+    let (mut layout, _) = builder.build();
+    layout.break_all_lines(None);
+    let line = layout.lines().next().unwrap();
+    assert_eq!(line.metrics().line_height, 30.);
+    let inline_box = line
+        .items()
+        .find_map(|item| match item {
+            crate::PositionedLayoutItem::InlineBox(inline_box) => Some(inline_box),
+            _ => None,
+        })
+        .unwrap();
+    // The box's own baseline coincides with the line's baseline.
+    assert_eq!(
+        inline_box.y + inline_box.baseline.unwrap(),
+        line.metrics().baseline
+    );
+}
+
+/// No-break spaces are neither collapsible nor hangable (css-text-3 §4.1.1, §4.1.3), so a
+/// line of only NBSPs keeps its width and never wraps at its own max-content width.
+#[test]
+fn no_break_spaces_are_not_hanging_whitespace() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let root = root_style();
+    let mut builder = lcx.tree_builder(&mut fcx, 1., false, &root);
+    builder.push_text("\u{a0}\u{a0}\u{a0}");
+    let (mut layout, _) = builder.build();
+    let content_widths = layout.calculate_content_widths();
+    assert!(content_widths.max > 0.);
+    assert_eq!(content_widths.min, content_widths.max);
+    layout.break_all_lines(Some(content_widths.max));
+    assert_eq!(layout.len(), 1);
+    let line = layout.lines().next().unwrap();
+    assert_eq!(line.metrics().advance, content_widths.max);
+}

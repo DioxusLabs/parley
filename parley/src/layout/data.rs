@@ -371,7 +371,7 @@ impl<B: Brush> LayoutData<B> {
     #[expect(clippy::cast_possible_truncation, reason = "deferred")]
     pub(crate) fn calculate_content_widths(&self) -> ContentWidths {
         fn whitespace_advance(atom: Option<(Whitespace, f32)>) -> f32 {
-            atom.filter(|(whitespace, _)| whitespace.is_space_or_nbsp())
+            atom.filter(|(whitespace, _)| *whitespace == Whitespace::Space)
                 .map_or(0.0, |(_, advance)| advance)
         }
 
