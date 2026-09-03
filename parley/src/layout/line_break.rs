@@ -1068,6 +1068,18 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                     &self.layout.data.style_metrics,
                                     run_box,
                                 );
+                                // Consecutive hanging spaces stay on this line, and trailing
+                                // spaces at the end of the layout do not start an empty line.
+                                let is_last_item = self.state.item_idx + 1 >= item_count;
+                                let keep_hanging = slice
+                                    .atoms_from(atom.shaped_clusters_range().end)
+                                    .next()
+                                    .map_or(is_last_item, |next| {
+                                        next.characters()[0].info.whitespace().is_space_or_nbsp()
+                                    });
+                                if keep_hanging {
+                                    continue;
+                                }
                                 return self.start_new_line(
                                     BreakReason::Regular,
                                     max_advance,
