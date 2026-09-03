@@ -1087,6 +1087,39 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                     &self.layout.data.style_metrics,
                                     run_box,
                                 );
+                                // Consecutive hanging spaces stay on this line (also across
+                                // run boundaries), and trailing spaces at the end of the layout
+                                // do not start an empty line. An inline box following the
+                                // space still starts a new line.
+                                let next_is_text = if atom.shaped_clusters_range().end < cluster_end
+                                {
+                                    Some(true)
+                                } else {
+                                    self.layout
+                                        .data
+                                        .items
+                                        .get(self.state.item_idx + 1)
+                                        .map(|item| item.kind == LayoutItemKind::TextRun)
+                                };
+                                let keep_hanging = match next_is_text {
+                                    None => true,
+                                    Some(false) => false,
+                                    Some(true) => self
+                                        .layout
+                                        .data
+                                        .shaped_text
+                                        .characters()
+                                        .get(atom.char_range().end as usize)
+                                        .is_some_and(|next| {
+                                            matches!(
+                                                next.info.whitespace(),
+                                                Whitespace::Space | Whitespace::Tab
+                                            )
+                                        }),
+                                };
+                                if keep_hanging {
+                                    continue;
+                                }
                                 return self.start_new_line(
                                     BreakReason::Regular,
                                     max_advance,
