@@ -154,3 +154,49 @@ fn vertical_align_tall_top_bottom() {
         env.with_name(name).check_layout_snapshot(&layout);
     }
 }
+
+/// `Line::style_baseline` gives the baseline of any style on the line, including ancestors with
+/// no glyphs of their own, and `Style::parent` exposes the style tree needed to find them.
+#[test]
+fn vertical_align_style_baseline() {
+    let mut env = TestEnv::new(test_name!(), None);
+
+    let mut builder = env.tree_builder();
+    builder.push_style_modification_span(&[StyleProperty::FontSize(16.)]);
+    builder.push_style_modification_span(&[StyleProperty::VerticalAlign(VerticalAlign::SUPER)]);
+    builder.push_text("sup");
+    builder.pop_style_span();
+    builder.pop_style_span();
+    let (mut layout, _) = builder.build();
+    layout.break_all_lines(None);
+    layout.align(Alignment::Start, AlignmentOptions::default());
+
+    let line = layout.get(0).unwrap();
+    let run = line
+        .items()
+        .find_map(|item| match item {
+            parley::PositionedLayoutItem::GlyphRun(run) => Some(run),
+            _ => None,
+        })
+        .unwrap();
+    let styles = layout.styles();
+    let sup = run.style_index();
+    let span = styles[usize::from(sup)].parent();
+    assert_ne!(span, sup);
+    assert_eq!(styles[0].parent(), 0);
+
+    assert_eq!(line.style_baseline(sup), run.baseline());
+    // Every unshifted ancestor, up to the root, sits on the line's baseline.
+    let mut ancestor = span;
+    loop {
+        assert_eq!(line.style_baseline(ancestor), line.metrics().baseline);
+        let parent = styles[usize::from(ancestor)].parent();
+        if parent == ancestor {
+            break;
+        }
+        ancestor = parent;
+    }
+    assert_eq!(ancestor, 0);
+    // `super` raises the baseline by a third of the font size.
+    assert!((run.baseline() - (line.metrics().baseline - 16. / 3.)).abs() < 1.);
+}
