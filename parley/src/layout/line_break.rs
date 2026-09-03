@@ -301,11 +301,9 @@ impl LineBoxMetrics {
         descent: f32,
         quantize: bool,
     ) {
-        let (ascent, descent) = if quantize {
-            (ascent.round(), descent.round())
-        } else {
-            (ascent, descent)
-        };
+        // Inline box extents are exact box sizes supplied by the caller, not font metrics;
+        // rounding them would change the space the box reserves relative to its height.
+        let _ = quantize;
         // Negative margins can make the reserved space negative; the box is still content.
         // Out-of-flow boxes have infinitely negative extents and are not.
         if (ascent != 0. || descent != 0.) && ascent.is_finite() && descent.is_finite() {

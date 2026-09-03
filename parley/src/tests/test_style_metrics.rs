@@ -318,6 +318,31 @@ fn line_with_only_empty_inline_boxes_is_invisible() {
     assert_eq!(line_height(10., InlineBoxKind::InFlow), 30.);
 }
 
+/// With quantization, an inline box's fractional height must not be rounded up twice (once for
+/// the ascent and once for the descent): the line reserves exactly the box's height.
+#[test]
+fn quantized_inline_box_extents_are_not_rounded_separately() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let root = root_style();
+    let mut builder = lcx.tree_builder(&mut fcx, 1., true, &root);
+    // Baseline splits the box into 40.5 above and 40.5 below the baseline; rounding each
+    // separately would reserve 82px for an 81px box.
+    builder.push_inline_box(InlineBox {
+        id: 0,
+        kind: InlineBoxKind::InFlow,
+        index: 0,
+        width: 10.,
+        height: 81.,
+        baseline: Some(40.5),
+        vertical_align: VerticalAlign::BASELINE,
+    });
+    let (mut layout, _) = builder.build();
+    layout.break_all_lines(None);
+    let line = layout.lines().next().unwrap();
+    assert_eq!(line.metrics().line_height, 81.);
+}
+
 /// A box whose reserved space is negative (e.g. an atomic inline with a large negative
 /// `margin-top`) is still content: the strut applies and the line keeps its height.
 #[test]
