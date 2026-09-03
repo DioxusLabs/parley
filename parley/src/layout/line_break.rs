@@ -941,7 +941,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         let first_character = &atom.characters()[0];
                         let whitespace = first_character.info.whitespace();
                         let is_newline = whitespace == Whitespace::Newline;
-                        let is_space = whitespace == Whitespace::Space;
+                        let is_space = whitespace.is_space_or_nbsp();
                         let boundary = first_character.info.boundary();
                         let run_box = &run.data.box_metrics;
                         let line_height = run.data.line_height;
