@@ -1094,7 +1094,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                     .atoms_from(atom.shaped_clusters_range().end)
                                     .next()
                                     .map_or(is_last_item, |next| {
-                                        next.characters()[0].info.whitespace() == Whitespace::Space
+                                        matches!(
+                                            next.characters()[0].info.whitespace(),
+                                            Whitespace::Space | Whitespace::Tab
+                                        )
                                     });
                                 if keep_hanging {
                                     continue;
