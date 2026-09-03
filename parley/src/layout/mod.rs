@@ -75,6 +75,14 @@ pub struct Style<B: Brush> {
     pub(crate) locale: Option<fontique::Language>,
 }
 
+impl<B: Brush> Style<B> {
+    /// Index of the style of the enclosing span in [`Layout::styles`]. The root style (index 0)
+    /// refers to itself.
+    pub fn parent(&self) -> u16 {
+        self.parent
+    }
+}
+
 /// Underline or strikethrough decoration.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Decoration<B: Brush> {
