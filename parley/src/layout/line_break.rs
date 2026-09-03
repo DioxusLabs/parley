@@ -10,29 +10,46 @@ use alloc::vec::Vec;
 use core_maths::CoreFloat;
 use parlance::BidiLevel;
 
-use crate::layout::data::count_graphemes;
-use crate::layout::spacing::{EffectiveSpacing, Justification};
+use crate::layout::data::{AlignedSubtreeOffset, RunData, count_graphemes};
+use crate::layout::spacing::{EffectiveSpacing, Justification, is_word_separator};
+use crate::layout::style_metrics::{StyleMetrics, inline_box_placement};
 use crate::layout::{
     BreakReason, Layout, LayoutData, LayoutItem, LayoutItemKind, LineData, LineItemData,
     LineMetrics, Run,
 };
 use crate::style::Brush;
-use crate::{InlineBoxKind, OverflowWrap, TextWrapMode};
+use crate::{BaselineShift, InlineBox, InlineBoxKind, OverflowWrap, TextWrapMode, VerticalAlign};
 
 use core::ops::Range;
 use parley_engine::shape::Whitespace;
-use parley_engine::{Atom, Boundary, FontMetrics};
+use parley_engine::{Atom, Boundary, ShapedRun};
+use smallvec::SmallVec;
 
 #[derive(Default)]
 struct LineLayout {
     lines: Vec<LineData>,
     line_items: Vec<LineItemData>,
+    aligned_subtree_offsets: Vec<AlignedSubtreeOffset>,
 }
 
 impl LineLayout {
     fn swap<B: Brush>(&mut self, layout: &mut LayoutData<B>) {
         core::mem::swap(&mut self.lines, &mut layout.lines);
         core::mem::swap(&mut self.line_items, &mut layout.line_items);
+        core::mem::swap(
+            &mut self.aligned_subtree_offsets,
+            &mut layout.aligned_subtree_offsets,
+        );
+    }
+
+    /// Drops the lines from `len` onwards, along with their aligned subtree offsets.
+    fn truncate(&mut self, len: usize) {
+        self.lines.truncate(len);
+        let offsets = self
+            .lines
+            .last()
+            .map_or(0, |line| line.aligned_subtree_offsets.end as usize);
+        self.aligned_subtree_offsets.truncate(offsets);
     }
 }
 
@@ -43,7 +60,6 @@ struct LineState {
     /// The line's shaped clusters, as a range into [`parley_engine::ShapedText::shaped_clusters`].
     /// The bounds are atom-aligned.
     clusters: Range<u32>,
-    num_spaces: usize,
     box_metrics: LineBoxMetrics,
     /// This is set to true if we encounter something on the line (either a glyph or an inline box)
     /// that is taller than the `line_max_height`. When in this state `break_next` should yield control
@@ -59,9 +75,11 @@ struct LineState {
 
 impl LineState {
     /// Reset the per-line running state in preparation for building a new line.
-    fn reset(&mut self) {
+    ///
+    /// The line starts out containing the root inline box (the "strut", CSS 2 §10.8).
+    fn reset(&mut self, strut: Option<&StyleMetrics>) {
         self.x = 0.0;
-        self.box_metrics = LineBoxMetrics::default();
+        self.box_metrics.reset(strut);
     }
 }
 
@@ -71,18 +89,47 @@ impl LineState {
 /// and can hold multiple text runs and inline boxes.
 ///
 /// Following CSS 2.2 § 10.8 (line height calculations in "Visual formatting model details"), line
-/// boxes are sized to fit the line's inline content. Inline content is first aligned to each other
-/// (we currently only align content by their baselines). We model this as the inline content being
-/// aligned to the line box's own "baseline," and carry the line box's height over and under that
-/// baseline. See <https://www.w3.org/TR/CSS22/visudet.html#line-height>.
-#[derive(Clone, Copy, Debug, Default)]
+/// boxes are sized to fit the line's inline content. Inline boxes with a parent-relative
+/// `vertical-align` are first aligned to each other relative to the baseline of their parent inline
+/// box; each chain of such boxes forms an [aligned subtree], rooted either at the root inline box
+/// or at a box with `vertical-align: top | bottom`. Each subtree's extents are tracked relative to
+/// its own baseline in [`Self::subtrees`]; the subtrees are only positioned against each other once
+/// the line is complete (see `BreakLines::finish_line`).
+/// See <https://www.w3.org/TR/CSS22/visudet.html#line-height>.
+///
+/// [aligned subtree]: crate::layout::style_metrics#aligned-subtrees
+#[derive(Clone, Debug, Default)]
 struct LineBoxMetrics {
-    /// The extents from the line box's baseline.
+    /// Extents of each aligned subtree with content on this line. The first entry is always the
+    /// root subtree (root style index `0`).
+    subtrees: SmallVec<[SubtreeExtents; 2]>,
+    /// Style indices whose inline box has already been added to this line, so that ancestors
+    /// shared by several runs contribute only once.
+    contributed: SmallVec<[u16; 8]>,
+    /// Height of the tallest `vertical-align: top` inline box, which is positioned against the
+    /// line box rather than a baseline.
+    line_relative_top_height: f32,
+    /// Height of the tallest `vertical-align: bottom` inline box.
+    line_relative_bottom_height: f32,
+    /// Whether the line has any text or non-empty in-flow inline box. A line with only empty
+    /// inline boxes is treated as having zero height (an "invisible" line box).
+    has_content: bool,
+    /// The layout item and style of the last text atom added, whose boxes are already on the line.
+    last_text: (usize, u16),
+}
+
+/// Extents of one aligned subtree on the current line, measured from the subtree's own baseline.
+#[derive(Clone, Copy, Debug)]
+struct SubtreeExtents {
+    /// Style index of the subtree root: `0` for the root inline box, otherwise a style with
+    /// `vertical-align: top | bottom`.
+    root: u16,
+    /// The line-height expanded extents.
     ///
     /// The extents are in block flow direction; i.e., for horizontal text, these are vertical, and
     /// for vertical text, these are horizontal.
     line_box: Extents,
-    /// The content extents from the line box's baseline.
+    /// The content extents.
     ///
     /// This covers, roughly, the glyphs and inline boxes. This does not take into account
     /// typographic leading, but only the typographic ascent and descent. In case of negative
@@ -94,9 +141,9 @@ struct LineBoxMetrics {
 
 #[derive(Clone, Copy, Debug)]
 struct Extents {
-    /// The space over the line box's baseline.
+    /// The space over the baseline.
     over: f32,
-    /// The space under the line box's baseline.
+    /// The space under the baseline.
     under: f32,
 }
 
@@ -104,11 +151,9 @@ impl Default for Extents {
     fn default() -> Self {
         // Content with small line heights and/or with inline boxes sitting entirely above or
         // below the baseline can cause the baseline to fall outside the line box; i.e., extents
-        // can be negative. Hence, we initialize the space over and under the line box's
-        // baseline to negative infinity. Lines with no contributing content resolve to zero via
-        // [`Self::or_zero`], keeping the sentinel internal.
-        //
-        // Ideally, a line's initial extents should be sourced from the primary font.
+        // can be negative. Hence, we initialize the space over and under the baseline to negative
+        // infinity. Lines with no contributing content resolve to zero via [`Self::or_zero`],
+        // keeping the sentinel internal.
         Self {
             over: f32::NEG_INFINITY,
             under: f32::NEG_INFINITY,
@@ -128,52 +173,175 @@ impl Extents {
             self
         }
     }
+
+    /// Grow to include a box extending `over` above and `under` below a baseline that is itself
+    /// `baseline_offset` above the extents' baseline.
+    #[inline(always)]
+    fn add(&mut self, baseline_offset: f32, over: f32, under: f32) {
+        self.over = self.over.max(baseline_offset + over);
+        self.under = self.under.max(under - baseline_offset);
+    }
+
+    fn height(self) -> f32 {
+        let this = self.or_zero();
+        this.over + this.under
+    }
+}
+
+impl SubtreeExtents {
+    fn new(root: u16) -> Self {
+        Self {
+            root,
+            line_box: Extents::default(),
+            content_box: Extents::default(),
+        }
+    }
 }
 
 impl LineBoxMetrics {
-    /// The line height seen so far.
-    #[inline(always)]
-    fn line_height(self) -> f32 {
-        let line_box = self.line_box.or_zero();
-        line_box.over + line_box.under
-    }
-
-    fn add_text(&mut self, metrics: &FontMetrics, line_height: f32, quantize: bool) {
-        // TODO: perhaps precompute these run metrics and store in `RunMetrics`.
-        let (ascent, descent) = if quantize {
-            (metrics.ascent.round(), metrics.descent.round())
-        } else {
-            (metrics.ascent, metrics.descent)
-        };
-        let half_leading = (line_height - (ascent + descent)) / 2.;
-        let over = if quantize {
-            ascent + half_leading.floor()
-        } else {
-            ascent + half_leading
-        };
-        // Note the `under` part is *not* quantized. This is such that the exact line height is
-        // reached. For determining the line box block, add this to the baseline and then quantize
-        // by rounding.
-        let under = line_height - over;
-
-        self.line_box.over = self.line_box.over.max(over);
-        self.line_box.under = self.line_box.under.max(under);
-        self.content_box.over = self.content_box.over.max(ascent);
-        self.content_box.under = self.content_box.under.max(descent);
-    }
-
-    fn add_inline_box(&mut self, ascent: f32, descent: f32, quantize: bool) {
-        if quantize {
-            self.line_box.over = self.line_box.over.max(ascent.round());
-            self.line_box.under = self.line_box.under.max(descent.round());
-            self.content_box.over = self.content_box.over.max(ascent.round());
-            self.content_box.under = self.content_box.under.max(descent.round());
-        } else {
-            self.line_box.over = self.line_box.over.max(ascent);
-            self.line_box.under = self.line_box.under.max(descent);
-            self.content_box.over = self.content_box.over.max(ascent);
-            self.content_box.under = self.content_box.under.max(descent);
+    fn reset(&mut self, strut: Option<&StyleMetrics>) {
+        self.subtrees.clear();
+        self.contributed.clear();
+        self.line_relative_top_height = 0.;
+        self.line_relative_bottom_height = 0.;
+        self.has_content = false;
+        self.last_text = (usize::MAX, 0);
+        let mut root = SubtreeExtents::new(0);
+        if let Some(strut) = strut {
+            root.line_box.add(0., strut.over, strut.under);
+            root.content_box.add(0., strut.ascent, strut.descent);
+            self.contributed.push(0);
         }
+        self.subtrees.push(root);
+    }
+
+    /// The extents of the root aligned subtree.
+    fn root(&self) -> &SubtreeExtents {
+        &self.subtrees[0]
+    }
+
+    #[inline]
+    fn subtree_mut(&mut self, root: u16) -> &mut SubtreeExtents {
+        if root == 0 {
+            return &mut self.subtrees[0];
+        }
+        let index = match self.subtrees.iter().position(|s| s.root == root) {
+            Some(index) => index,
+            None => {
+                self.subtrees.push(SubtreeExtents::new(root));
+                self.subtrees.len() - 1
+            }
+        };
+        &mut self.subtrees[index]
+    }
+
+    /// The line height seen so far.
+    #[inline]
+    fn line_height(&self) -> f32 {
+        let mut height = self.root().line_box.height();
+        if self.subtrees.len() > 1 {
+            for subtree in &self.subtrees[1..] {
+                height = height.max(subtree.line_box.height());
+            }
+        }
+        height
+            .max(self.line_relative_top_height)
+            .max(self.line_relative_bottom_height)
+    }
+
+    /// Add the inline box generated by `style_index`, and those of any of its ancestors that are
+    /// not yet on the line.
+    fn add_style(&mut self, style_index: u16, style_metrics: &[StyleMetrics]) {
+        let mut index = style_index;
+        while !self.contributed.contains(&index) {
+            self.contributed.push(index);
+            let Some(metrics) = style_metrics.get(usize::from(index)) else {
+                return;
+            };
+            let subtree = self.subtree_mut(metrics.aligned_subtree);
+            subtree
+                .line_box
+                .add(metrics.baseline_offset, metrics.over, metrics.under);
+            subtree
+                .content_box
+                .add(metrics.baseline_offset, metrics.ascent, metrics.descent);
+            if metrics.parent == index {
+                return;
+            }
+            index = metrics.parent;
+        }
+    }
+
+    /// Add the glyphs of a text atom of `style_index` in layout item `item_idx`, a run whose own
+    /// box is `run_box` (see [`run_box_metrics`]).
+    ///
+    /// This adds both the run's box (the glyph font may be a fallback font and differ from the
+    /// style's first available font) and the style's inline box together with its ancestors.
+    #[inline]
+    fn add_text(
+        &mut self,
+        item_idx: usize,
+        style_index: u16,
+        style_metrics: &[StyleMetrics],
+        run_box: &StyleMetrics,
+    ) {
+        self.has_content = true;
+        // Consecutive atoms almost always come from the same run and style, whose boxes are then
+        // already on the line.
+        if self.last_text == (item_idx, style_index) {
+            return;
+        }
+        self.last_text = (item_idx, style_index);
+        if self.contributed.last() != Some(&style_index) {
+            self.add_style(style_index, style_metrics);
+        }
+        let (baseline_offset, aligned_subtree) = style_metrics
+            .get(usize::from(style_index))
+            .map_or((0., 0), |m| (m.baseline_offset, m.aligned_subtree));
+        let subtree = self.subtree_mut(aligned_subtree);
+        subtree
+            .line_box
+            .add(baseline_offset, run_box.over, run_box.under);
+        subtree
+            .content_box
+            .add(baseline_offset, run_box.ascent, run_box.descent);
+    }
+
+    /// Add an inline box extending `ascent` above and `descent` below a baseline that is
+    /// `baseline_offset` above the baseline of the `aligned_subtree` root.
+    fn add_inline_box(
+        &mut self,
+        aligned_subtree: u16,
+        baseline_offset: f32,
+        ascent: f32,
+        descent: f32,
+        quantize: bool,
+    ) {
+        // Inline box extents are exact box sizes supplied by the caller, not font metrics;
+        // rounding them would change the space the box reserves relative to its height.
+        let _ = quantize;
+        // Negative margins can make the reserved space negative; the box is still content.
+        // Out-of-flow boxes have infinitely negative extents and are not.
+        if (ascent != 0. || descent != 0.) && ascent.is_finite() && descent.is_finite() {
+            self.has_content = true;
+        }
+        let subtree = self.subtree_mut(aligned_subtree);
+        subtree.line_box.add(baseline_offset, ascent, descent);
+        subtree.content_box.add(baseline_offset, ascent, descent);
+    }
+
+    /// Add an inline box with `vertical-align: top | bottom`, which only constrains the line
+    /// box's height.
+    fn add_line_relative_inline_box(&mut self, align: VerticalAlign, height: f32, quantize: bool) {
+        let height = if quantize { height.round() } else { height };
+        if height > 0. {
+            self.has_content = true;
+        }
+        let slot = match align.shift {
+            BaselineShift::Bottom => &mut self.line_relative_bottom_height,
+            _ => &mut self.line_relative_top_height,
+        };
+        *slot = slot.max(height);
     }
 }
 
@@ -319,37 +487,32 @@ impl Default for BreakerState {
 impl BreakerState {
     /// Add the atom currently being evaluated to the current line.
     ///
-    /// `font_metrics` provides the raw font ascent and descent of the atom (i.e. the distances
-    /// it extends above and below the baseline, *not* including leading) as well as the intrinsic
-    /// line height of the atom (i.e. including the full leading), which may be smaller than
-    /// `ascent + descent` when the leading is negative.
+    /// `run_box` is the box of the atom's run (see [`run_box_metrics`]). `style_index` is the
+    /// atom's style, whose inline box (and those of its ancestors) is added to the line too.
     #[inline]
     fn append_atom_to_line(
         &mut self,
         atom: &Atom<'_>,
         next_x: f32,
-        font_metrics: &FontMetrics,
-        line_height: f32,
-        quantize: bool,
+        style_index: u16,
+        style_metrics: &[StyleMetrics],
+        run_box: &StyleMetrics,
     ) {
-        if atom.characters()[0].info.whitespace().is_space_or_nbsp() {
-            self.line.num_spaces += 1;
-        }
         self.line.items.end = self.item_idx + 1;
         self.line.clusters.end = atom.shaped_clusters_range().end;
         self.cluster_idx = atom.shaped_clusters_range().end;
         self.line.x = next_x;
         self.line
             .box_metrics
-            .add_text(font_metrics, line_height, quantize);
+            .add_text(self.item_idx, style_index, style_metrics, run_box);
         self.update_max_height_exceeded();
     }
 
     /// Add an inline box to the line.
     ///
-    /// `ascent` and `descent` are the distances the box extends above and below the text baseline
-    /// respectively. A box with its bottom aligned to the baseline is simply one with a zero
-    /// descent. The box grows the line only insofar as it extends beyond the text.
+    /// `ascent` and `descent` are the distances the box extends above and below the line's root
+    /// baseline respectively. A box with its bottom aligned to the baseline is simply one with a
+    /// zero descent. The box grows the line only insofar as it extends beyond the text.
     pub fn append_inline_box_to_line(
         &mut self,
         next_x: f32,
@@ -362,7 +525,39 @@ impl BreakerState {
         self.line.x = next_x;
         self.line
             .box_metrics
-            .add_inline_box(ascent, descent, quantize);
+            .add_inline_box(0, 0., ascent, descent, quantize);
+        self.update_max_height_exceeded();
+    }
+
+    /// Add an in-flow inline box to the line, aligned according to its `vertical_align` relative
+    /// to the inline box of its containing style `parent_style`.
+    fn append_aligned_inline_box_to_line(
+        &mut self,
+        next_x: f32,
+        inline_box: &InlineBox,
+        parent_style: u16,
+        style_metrics: &[StyleMetrics],
+        quantize: bool,
+    ) {
+        self.item_idx += 1;
+        self.line.items.end += 1;
+        self.line.x = next_x;
+        if inline_box.vertical_align.is_line_relative() {
+            self.line.box_metrics.add_line_relative_inline_box(
+                inline_box.vertical_align,
+                inline_box.height,
+                quantize,
+            );
+        } else {
+            let placement = inline_box_placement(inline_box, parent_style, style_metrics, quantize);
+            self.line.box_metrics.add_inline_box(
+                placement.aligned_subtree,
+                placement.baseline_offset,
+                placement.ascent,
+                placement.descent,
+                quantize,
+            );
+        }
         self.update_max_height_exceeded();
     }
 
@@ -398,7 +593,8 @@ impl BreakerState {
 
     #[inline(always)]
     fn update_max_height_exceeded(&mut self) {
-        self.line.max_height_exceeded = self.line.box_metrics.line_height() > self.line_max_height;
+        self.line.max_height_exceeded = self.line_max_height != f32::MAX
+            && self.line.box_metrics.line_height() > self.line_max_height;
     }
 
     /// Get the max-advance of the entire layout
@@ -474,12 +670,38 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         lines.swap(&mut layout.data);
         lines.lines.clear();
         lines.line_items.clear();
+        lines.aligned_subtree_offsets.clear();
+        let mut state = BreakerState::default();
+        state.line.reset(layout.data.style_metrics.first());
         Self {
             layout,
             lines,
-            state: BreakerState::default(),
+            state,
             prev_state: None,
             done: false,
+        }
+    }
+
+    /// Add the layout's inline box `index` to the current line. Out-of-flow boxes contribute
+    /// nothing to the line's metrics.
+    fn append_layout_inline_box(&mut self, index: usize, next_x: f32) {
+        let inline_box = &self.layout.data.inline_boxes[index];
+        if inline_box.kind == InlineBoxKind::InFlow {
+            let parent_style = self.layout.data.inline_box_styles[index];
+            self.state.append_aligned_inline_box_to_line(
+                next_x,
+                inline_box,
+                parent_style,
+                &self.layout.data.style_metrics,
+                self.layout.data.quantize,
+            );
+        } else {
+            self.state.append_inline_box_to_line(
+                next_x,
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY,
+                self.layout.data.quantize,
+            );
         }
     }
 
@@ -499,7 +721,16 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             line_indent,
         );
 
-        let line_height = self.state.line.box_metrics.line_height();
+        // A line containing only empty inline boxes (and no text) is an invisible line box with
+        // zero height; the strut only applies once the line has content. The trailing empty line
+        // after a final newline has no items and keeps the strut so the cursor has a position.
+        let invisible = !self.state.line.box_metrics.has_content
+            && !self.lines.lines.last().unwrap().item_range.is_empty();
+        let line_height = if invisible {
+            0.
+        } else {
+            self.state.line.box_metrics.line_height()
+        };
         let line_y_start = self.state.line_y;
 
         self.state.items = self.lines.line_items.len();
@@ -509,8 +740,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
         // `finish_line` reads the line's accumulated vertical metrics from `self.state.line`, so
         // it must run before we reset the per-line running state.
-        self.finish_line(self.lines.lines.len() - 1, line_height);
-        self.state.line.reset();
+        self.finish_line(self.lines.lines.len() - 1, line_height, invisible);
+        // `finish_line` may grow the line (e.g. the trailing line after a final newline).
+        let line_height = self.lines.lines.last().unwrap().metrics.line_height;
+        self.state
+            .line
+            .reset(self.layout.data.style_metrics.first());
 
         self.state.line_y += line_height as f64;
 
@@ -571,7 +806,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
     /// Reverts the to an externally saved state.
     pub fn revert_to(&mut self, state: BreakerState) {
         self.state = state;
-        self.lines.lines.truncate(self.state.lines);
+        self.lines.truncate(self.state.lines);
         self.lines.line_items.truncate(self.state.items);
         self.done = false;
     }
@@ -653,30 +888,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                 LayoutItemKind::InlineBox => {
                     let inline_box = &self.layout.data.inline_boxes[item.index];
 
-                    // The portion of the box above the baseline contributes to the line's ascent
-                    // and the portion below to its descent. By default (no explicit baseline) the
-                    // bottom of the box is aligned with the text baseline, i.e. the box is all
-                    // ascent and zero descent. Out-of-flow boxes contribute nothing.
-                    let (
-                        width_contribution,
-                        height_contribution,
-                        ascent_contribution,
-                        descent_contribution,
-                    ) = match inline_box.kind {
-                        InlineBoxKind::InFlow => {
-                            let baseline = inline_box.baseline.unwrap_or(inline_box.height);
-                            (
-                                inline_box.width,
-                                inline_box.height,
-                                baseline,
-                                inline_box.height - baseline,
-                            )
-                        }
-                        // Negative infinity extents are a no-op when maxed into the line's
-                        // extents, so out-of-flow boxes truly contribute nothing.
-                        InlineBoxKind::OutOfFlow => {
-                            (0.0, 0.0, f32::NEG_INFINITY, f32::NEG_INFINITY)
-                        }
+                    // In-flow boxes are aligned relative to their containing style's inline box
+                    // (see `append_aligned_inline_box_to_line`); out-of-flow boxes contribute
+                    // nothing.
+                    let (width_contribution, height_contribution) = match inline_box.kind {
+                        InlineBoxKind::InFlow => (inline_box.width, inline_box.height),
+                        InlineBoxKind::OutOfFlow => (0.0, 0.0),
                         // If the box is a `CustomOutOfFlow` box then we yield control flow back to the caller.
                         // It is then the caller's responsibility to handle placement of the box.
                         InlineBoxKind::CustomOutOfFlow => {
@@ -704,12 +921,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     {
                         // println!("BOX FITS");
 
-                        self.state.append_inline_box_to_line(
-                            next_x,
-                            ascent_contribution,
-                            descent_contribution,
-                            self.layout.data.quantize,
-                        );
+                        self.append_layout_inline_box(item.index, next_x);
 
                         // We can always line break after an inline box
                         self.state.mark_line_break_opportunity();
@@ -717,12 +929,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         // If we're at the start of the line, this box will never fit, so consume it and accept the overflow.
                         let reason = if self.state.line.x == 0.0 {
                             // println!("BOX EMERGENCY BREAK");
-                            self.state.append_inline_box_to_line(
-                                next_x,
-                                ascent_contribution,
-                                descent_contribution,
-                                self.layout.data.quantize,
-                            );
+                            self.append_layout_inline_box(item.index, next_x);
                             BreakReason::Emergency
                         } else {
                             // println!("BOX BREAK");
@@ -738,6 +945,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let run = Run::new(self.layout, 0, 0, run_idx, None);
                     let slice = run.full_slice();
                     let cluster_end = shaped_run.shaped_clusters_range.end;
+                    let run_box = &run_box_metrics(shaped_run, run.data, self.layout.data.quantize);
 
                     // Additional spacing to apply between atoms.
                     let spacing = EffectiveSpacing::new(run.data.spacing, Justification::NONE);
@@ -748,12 +956,17 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         let first_character = &atom.characters()[0];
                         let whitespace = first_character.info.whitespace();
                         let is_newline = whitespace == Whitespace::Newline;
-                        let is_space = whitespace.is_space_or_nbsp();
+                        // Whether this is a space that is allowed to hang past the line. NBSP is
+                        // not included.
+                        let is_space = matches!(
+                            whitespace,
+                            Whitespace::Space | Whitespace::Tab | Whitespace::Newline
+                        );
                         let boundary = first_character.info.boundary();
-                        let metrics = run.font_metrics();
                         let line_height = run.data.line_height;
                         let max_height_exceeded = self.state.line.max_height_exceeded;
-                        let style = &self.layout.data.styles[first_character.style_index as usize];
+                        let style_index = first_character.style_index;
+                        let style = &self.layout.data.styles[style_index as usize];
 
                         // Lag text_wrap_mode style by one atom
                         let text_wrap_mode = self.state.line.text_wrap_mode;
@@ -806,9 +1019,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             self.state.append_atom_to_line(
                                 &atom,
                                 self.state.line.x,
-                                metrics,
-                                line_height,
-                                self.layout.data.quantize,
+                                style_index,
+                                &self.layout.data.style_metrics,
+                                run_box,
                             );
 
                             if is_cr_before_lf {
@@ -849,9 +1062,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             self.state.append_atom_to_line(
                                 &atom,
                                 next_x,
-                                metrics,
-                                line_height,
-                                self.layout.data.quantize,
+                                style_index,
+                                &self.layout.data.style_metrics,
+                                run_box,
                             );
                         }
                         // Else we attempt to line break:
@@ -870,9 +1083,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 self.state.append_atom_to_line(
                                     &atom,
                                     next_x,
-                                    metrics,
-                                    line_height,
-                                    self.layout.data.quantize,
+                                    style_index,
+                                    &self.layout.data.style_metrics,
+                                    run_box,
                                 );
                                 return self.start_new_line(
                                     BreakReason::Regular,
@@ -919,9 +1132,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 self.state.append_atom_to_line(
                                     &atom,
                                     next_x,
-                                    metrics,
-                                    line_height,
-                                    self.layout.data.quantize,
+                                    style_index,
+                                    &self.layout.data.style_metrics,
+                                    run_box,
                                 );
                             }
                         }
@@ -970,12 +1183,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let inline_box = &self.layout.data.inline_boxes[item.index];
 
                     if inline_box.kind != InlineBoxKind::InFlow {
-                        self.state.append_inline_box_to_line(
-                            self.state.line.x,
-                            f32::NEG_INFINITY,
-                            f32::NEG_INFINITY,
-                            self.layout.data.quantize,
-                        );
+                        self.append_layout_inline_box(item.index, self.state.line.x);
                         continue;
                     }
 
@@ -988,15 +1196,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                     // Compute the x position for the line width tracking
                     let next_x = self.state.line.x + inline_box.width;
-                    // The portion above the baseline is ascent, the rest descent. A box without an
-                    // explicit baseline is bottom-aligned, i.e. all ascent and zero descent.
-                    let baseline = inline_box.baseline.unwrap_or(inline_box.height);
-                    self.state.append_inline_box_to_line(
-                        next_x,
-                        baseline,
-                        inline_box.height - baseline,
-                        self.layout.data.quantize,
-                    );
+                    self.append_layout_inline_box(item.index, next_x);
                     char_count += 1;
 
                     // Check if we've reached the limit after adding this box
@@ -1023,6 +1223,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let slice = run.full_slice();
                     let spacing = run.line_spacing();
                     let cluster_end = shaped_run.shaped_clusters_range.end;
+                    let run_box = &run_box_metrics(shaped_run, run.data, self.layout.data.quantize);
 
                     for atom in slice.atoms_from(self.state.cluster_idx) {
                         // Check if we should break before this atom
@@ -1043,13 +1244,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         } else {
                             self.state.line.x + advance
                         };
-                        let metrics = run.font_metrics();
                         self.state.append_atom_to_line(
                             &atom,
                             next_x,
-                            metrics,
-                            run.data.line_height,
-                            self.layout.data.quantize,
+                            first_character.style_index,
+                            &self.layout.data.style_metrics,
+                            run_box,
                         );
                         char_count += atom.char_range().len() as u32;
 
@@ -1159,7 +1359,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         }
     }
 
-    fn finish_line(&mut self, line_idx: usize, line_height: f32) {
+    fn finish_line(&mut self, line_idx: usize, line_height: f32, invisible: bool) {
         let prev_line_metrics = match line_idx {
             0 => None,
             idx => Some(self.lines.lines[idx - 1].metrics),
@@ -1175,14 +1375,19 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         if line.item_range.is_empty() {
             line.text_range = self.layout.data.text_len..self.layout.data.text_len;
         }
-        // Walk the line's items to compute text ranges, per-run advances and bidi ordering. The
-        // vertical metrics (ascent/descent/line-height and inline box extents) are *not* computed
-        // here: they were already accumulated into `self.state.line` as the line was built and are
-        // read from there below. `have_metrics` records whether the line has any non-whitespace
-        // content (text or an in-flow box), which distinguishes a genuinely empty line from a
-        // whitespace-only one.
-        let mut have_metrics = false;
+
+        // Walk the line's items to compute text ranges, per-run advances, bidi ordering, and
+        // hanging whitespace. The vertical metrics (ascent/descent/line-height and inline box
+        // extents) are *not* computed here: they were already accumulated into `self.state.line` as
+        // the line was built and are read from there below.
         let mut needs_reorder = false;
+        let mut hanging = true;
+        let mut hanging_whitespace_advance = 0.;
+        let mut num_justification_opportunities = 0;
+        // One past the justified region: atoms with shaped clusters before this index may be
+        // stretched by justification.
+        let mut justified_end = u32::MAX;
+
         for line_item in self.lines.line_items[line.item_range.clone()]
             .iter_mut()
             .rev()
@@ -1193,12 +1398,18 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                     // Advance is already computed in "commit line" for items
                     if item.kind == InlineBoxKind::InFlow {
-                        // Mark us as having seen non-whitespace content on this line
-                        have_metrics = true;
+                        // Inline boxes don't hang.
+                        hanging = false;
                     }
                 }
                 LayoutItemKind::TextRun => {
-                    line_item.compute_whitespace_properties(&self.layout.data);
+                    // Trailing whitespace can only hang if it ends up at the line's end edge after
+                    // bidi reordering. We don't currently apply UAX #9 L1 (resetting trailing
+                    // whitespace to paragraph level), so only logically-last items that match the
+                    // paragraph level are guaranteed to be at that edge.
+                    if hanging && line_item.bidi_level != self.layout.data.base_level {
+                        hanging = false;
+                    }
 
                     // Compute the text range for the line
                     // Q: Can we not simplify this computation by assuming that items are in order?
@@ -1235,17 +1446,80 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         EffectiveSpacing::new(spacing, Justification::NONE).slice_advance(slice)
                     };
 
-                    // Ignore trailing whitespace when deciding whether the line has content
-                    // (we are iterating backwards so trailing whitespace comes first)
-                    if !have_metrics && line_item.is_whitespace {
-                        continue;
-                    }
+                    // Ignore trailing whitespace for the line's content advance calculation
+                    // (we are iterating backwards so trailing whitespace comes first).
+                    let slice = self
+                        .layout
+                        .data
+                        .shaped_text
+                        .run_slice(line_item.index as u32)
+                        .narrow(line_item.shaped_cluster_range.clone());
+                    let effective_spacing = EffectiveSpacing::new(spacing, Justification::NONE);
+                    for atom in slice.atoms_end().rev() {
+                        if hanging {
+                            // An atom can hang partially: e.g., a prepend character followed by a
+                            // space is a single atom (as it's a grapheme), but may consist of
+                            // multiple shaped clusters. We can hang the advance of the space's
+                            // shaped cluster. In case of such partial hanging, if the atom has any
+                            // additional spacing (e.g., through word spacing), only the logically
+                            // last spacing is hung.
+                            let mut last_cluster = true;
+                            let (gap_start, gap_end) = {
+                                let gaps = effective_spacing.gaps(&atom);
+                                if line_item.is_rtl() {
+                                    (gaps.after, gaps.before)
+                                } else {
+                                    (gaps.before, gaps.after)
+                                }
+                            };
+                            for (cluster, cluster_idx) in atom
+                                .shaped_clusters()
+                                .iter()
+                                .zip(atom.shaped_clusters_range())
+                                .rev()
+                            {
+                                let cluster_hangs =
+                                    slice.characters_in(cluster.chars_range()).iter().all(|c| {
+                                        let whitespace = c.info.whitespace();
+                                        // Note non-breaking spaces don't hang: CSS Text 4 § 4.3.2
+                                        // hangs only spaces, tabs, segment breaks, and "other space
+                                        // separators." We don't currently handle "other space
+                                        // separators".
+                                        matches!(
+                                            whitespace,
+                                            Whitespace::Space
+                                                | Whitespace::Tab
+                                                | Whitespace::Newline
+                                        )
+                                    });
+                                if !cluster_hangs {
+                                    hanging = false;
+                                    break;
+                                }
+                                if last_cluster {
+                                    hanging_whitespace_advance += gap_end;
+                                    last_cluster = false;
+                                }
+                                hanging_whitespace_advance += cluster.advance;
+                                justified_end = cluster_idx;
+                            }
 
-                    // Mark us as having seen non-whitespace content on this line
-                    have_metrics = true;
+                            if hanging {
+                                hanging_whitespace_advance += gap_start;
+                            } else {
+                                justified_end = atom.shaped_clusters_range().start;
+                            }
+                        } else if is_word_separator(atom.characters()[0].info.whitespace()) {
+                            num_justification_opportunities += 1;
+                        }
+                    }
                 }
             }
         }
+
+        line.metrics.hanging_advance = hanging_whitespace_advance;
+        line.justification_opportunities = num_justification_opportunities;
+        line.justification.justified_end_cluster = justified_end;
 
         // Reorder the items within the line (if required). Reordering is required if the line contains
         // a mix of bidi levels (a mix of LTR and RTL text)
@@ -1254,70 +1528,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             reorder_line_items(&mut self.lines.line_items[line.item_range.clone()]);
         }
 
-        // Compute size of line's trailing whitespace. "Trailing" is considered the right edge
-        // for LTR text and the left edge for RTL text.
-        let run = if self.layout.is_rtl() {
-            self.lines.line_items[line.item_range.clone()].first()
-        } else {
-            self.lines.line_items[line.item_range.clone()].last()
-        };
-        line.metrics.trailing_whitespace = run
-            .filter(|item| item.is_text_run() && item.has_trailing_whitespace)
-            .map(|run| {
-                fn whitespace_advance<'a>(
-                    spacing: EffectiveSpacing,
-                    atoms: impl Iterator<Item = Atom<'a>>,
-                ) -> f32 {
-                    atoms
-                        .take_while(|atom| {
-                            atom.characters()
-                                .iter()
-                                .all(|character| character.info.whitespace() != Whitespace::None)
-                        })
-                        .map(|atom| spacing.atom_advance(&atom))
-                        .sum()
-                }
-
-                let slice = self
-                    .layout
-                    .data
-                    .shaped_text
-                    .run_slice(run.index as u32)
-                    .narrow(run.shaped_cluster_range.clone());
-                let spacing = EffectiveSpacing::new(
-                    self.layout.data.runs[run.index].spacing,
-                    Justification::NONE,
-                );
-
-                if run.is_rtl() {
-                    whitespace_advance(spacing, slice.atoms_start())
-                } else {
-                    whitespace_advance(spacing, slice.atoms_end().rev())
-                }
-            })
-            .unwrap_or(0.0);
-
         // Whether metrics should be quantized to pixel boundaries
         let quantize = self.layout.data.quantize;
 
-        let mut line_box_extents = self.state.line.box_metrics.line_box.or_zero();
-        let mut content_box_extents = self.state.line.box_metrics.content_box.or_zero();
-        if !have_metrics
-            && line.item_range.is_empty()
-            && let Some(metrics) = prev_line_metrics
-        {
-            // HACK: copy metrics from previous line if we don't have
-            // any; this should only occur for an empty line following
-            // a newline at the end of a layout
-            line.metrics = metrics;
-            line_box_extents = Extents {
-                over: metrics.baseline - metrics.block_min_coord,
-                under: metrics.block_max_coord - metrics.baseline,
-            };
-            content_box_extents = Extents {
-                over: metrics.baseline - metrics.content_block_min_coord,
-                under: metrics.content_block_max_coord - metrics.baseline,
-            };
+        if line.item_range.is_empty() && prev_line_metrics.is_some() {
             // If we have no items on this line, it must be the last (empty)
             // line in a layout following a newline. Commit an empty run so
             // that AccessKit has a node with which to identify the visual
@@ -1336,19 +1550,105 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                 let grapheme =
                     count_graphemes(self.layout.data.shaped_text.run_slice(index as u32));
                 let text = run.range.byte_range.end;
+                // The empty run carries the style of the newline that produced this line, so the
+                // line is sized by that style's inline box (and its ancestors), not just the strut.
+                let style_index = self.layout.data.shaped_text.shaped_clusters()
+                    [cluster as usize - 1]
+                    .style_index;
+                let run_box = run_box_metrics(
+                    &self.layout.data.shaped_text.runs()[index],
+                    &self.layout.data.runs[index],
+                    self.layout.data.quantize,
+                );
+                self.state.line.box_metrics.add_text(
+                    index,
+                    style_index,
+                    &self.layout.data.style_metrics,
+                    &run_box,
+                );
+                line.metrics.line_height = self.state.line.box_metrics.line_height();
                 self.lines.line_items.push(LineItemData {
                     kind: LayoutItemKind::TextRun,
                     index,
                     bidi_level: BidiLevel::new(0),
                     advance: 0.,
-                    is_whitespace: false,
-                    has_trailing_whitespace: false,
                     shaped_cluster_range: cluster..cluster,
                     grapheme_range: grapheme..grapheme,
                     text_range: text..text,
                 });
                 line.item_range = run_index..run_index + 1;
             }
+        }
+
+        // Position the aligned subtrees against each other (CSS 2.2 §10.8.1). The root subtree
+        // determines the line's baseline. `top`/`bottom` subtrees are flush with the line box's
+        // top/bottom edge; if taller than the root subtree they grow the line box downwards
+        // (`top`) or upwards (`bottom`), which does not move the root baseline relative to the
+        // root subtree's content.
+        let box_metrics = &self.state.line.box_metrics;
+        let (mut line_box_extents, mut content_box_extents) = if invisible {
+            (Extents::default().or_zero(), Extents::default().or_zero())
+        } else {
+            (
+                box_metrics.root().line_box.or_zero(),
+                box_metrics.root().content_box.or_zero(),
+            )
+        };
+
+        let mut top_height = box_metrics.line_relative_top_height;
+        let mut bottom_height = box_metrics.line_relative_bottom_height;
+        for subtree in &box_metrics.subtrees[1..] {
+            let height = subtree.line_box.height();
+            match self.layout.data.styles[usize::from(subtree.root)]
+                .vertical_align
+                .shift
+            {
+                BaselineShift::Bottom => bottom_height = bottom_height.max(height),
+                _ => top_height = top_height.max(height),
+            }
+        }
+        let root_height = line_box_extents.over + line_box_extents.under;
+        if top_height > root_height {
+            line_box_extents.under += top_height - root_height;
+        }
+        let root_height = line_box_extents.over + line_box_extents.under;
+        if bottom_height > root_height {
+            line_box_extents.over += bottom_height - root_height;
+        }
+
+        let offsets = &mut self.lines.aligned_subtree_offsets;
+        line.aligned_subtree_offsets.start = offsets.len() as u32;
+        for subtree in &box_metrics.subtrees[1..] {
+            let extents = subtree.line_box.or_zero();
+            let offset = match self.layout.data.styles[usize::from(subtree.root)]
+                .vertical_align
+                .shift
+            {
+                BaselineShift::Bottom => extents.under - line_box_extents.under,
+                _ => line_box_extents.over - extents.over,
+            };
+            let offset = if quantize { offset.round() } else { offset };
+            offsets.push(AlignedSubtreeOffset {
+                root: subtree.root,
+                baseline_offset: offset,
+            });
+            let content = subtree.content_box.or_zero();
+            content_box_extents.add(offset, content.over, content.under);
+        }
+        line.aligned_subtree_offsets.end = offsets.len() as u32;
+        if box_metrics.line_relative_top_height > 0. {
+            content_box_extents.add(
+                0.,
+                line_box_extents.over,
+                box_metrics.line_relative_top_height - line_box_extents.over,
+            );
+        }
+        if box_metrics.line_relative_bottom_height > 0. {
+            content_box_extents.add(
+                0.,
+                box_metrics.line_relative_bottom_height - line_box_extents.under,
+                line_box_extents.under,
+            );
         }
 
         let top = if quantize {
@@ -1388,7 +1688,7 @@ impl<B: Brush> Drop for BreakLines<'_, B> {
             let indent_extra = line.indent.max(0.0);
             let line_max = line.metrics.inline_min_coord + line.metrics.advance + indent_extra;
             layout_full_width = layout_full_width.max(line_max);
-            layout_width = layout_width.max(line_max - line.metrics.trailing_whitespace);
+            layout_width = layout_width.max(line_max - line.metrics.hanging_advance);
             height += line.metrics.line_height as f64;
         }
 
@@ -1472,8 +1772,6 @@ fn commit_line<B: Brush>(
                     advance: inline_box.width,
 
                     // These properties are ignored for inline boxes. So we just put a dummy value.
-                    is_whitespace: false,
-                    has_trailing_whitespace: false,
                     shaped_cluster_range: 0..0,
                     grapheme_range: 0..0,
                     text_range: 0..0,
@@ -1553,8 +1851,6 @@ fn commit_line<B: Brush>(
                     index: item.index,
                     bidi_level: shaped_run.bidi_level,
                     advance: 0.,
-                    is_whitespace: false,
-                    has_trailing_whitespace: false,
                     shaped_cluster_range: cluster_range,
                     grapheme_range,
                     text_range,
@@ -1565,29 +1861,12 @@ fn commit_line<B: Brush>(
     // let end_run_idx = lines.line_items.last().map(|item| item.index).unwrap_or(0);
     let end_item_idx = lines.line_items.len();
 
-    // Exclude the trailing space from justification space count. Only subtract if the line actually
-    // ends with an atom starting with a space: with `WordBreak::BreakAll`, regular breaks can land
-    // between non-space graphemes, in which case there is no trailing space to exclude.
-    let mut num_spaces = state.num_spaces;
-    let mut justification = Justification::NONE;
-    if break_reason == BreakReason::Regular
-        && state.clusters.start < state.clusters.end
-        && shaped_text
-            .run_slice(items_to_commit[last_run_pos].index as u32)
-            .atoms_from(state.clusters.end)
-            .prev()
-            .is_some_and(|atom| atom.characters()[0].info.whitespace().is_space_or_nbsp())
-    {
-        num_spaces = num_spaces.saturating_sub(1);
-        justification.line_end_cluster = state.clusters.end;
-    }
-
     lines.lines.push(LineData {
         item_range: start_item_idx..end_item_idx,
         max_advance,
         break_reason,
-        num_spaces,
-        justification,
+        justification_opportunities: 0,
+        justification: Justification::NONE,
         indent: line_indent,
         metrics: LineMetrics {
             advance: state.x,
@@ -1597,7 +1876,6 @@ fn commit_line<B: Brush>(
     });
 
     // Reset state for the new line
-    state.num_spaces = 0;
     if committed_text_run {
         state.clusters.start = state.clusters.end;
     }
@@ -1618,6 +1896,14 @@ fn commit_line<B: Brush>(
 }
 
 /// Reorder items within line according to the bidi levels of the items
+/// The inline box of a run: the box of its shaped font (which may be a fallback font and differ
+/// from the style's first available font) expanded to the style's `line-height`. Each of the
+/// run's atoms adds it to a line's extents.
+#[inline]
+fn run_box_metrics(shaped_run: &ShapedRun, run: &RunData, quantize: bool) -> StyleMetrics {
+    StyleMetrics::from_font(&shaped_run.font_metrics, run.line_height, quantize)
+}
+
 fn reorder_line_items(runs: &mut [LineItemData]) {
     let run_count = runs.len();
 

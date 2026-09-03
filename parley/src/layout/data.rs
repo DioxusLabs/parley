@@ -3,6 +3,7 @@
 
 use crate::inline_box::InlineBox;
 use crate::layout::spacing::{EffectiveSpacing, Justification, Spacing};
+use crate::layout::style_metrics::StyleMetrics;
 use crate::layout::{ContentWidths, LineMetrics, Style};
 use crate::resolve::ResolvedStyle;
 use crate::style::Brush;
@@ -54,13 +55,57 @@ pub(crate) struct LineData {
     /// Maximum advance for the line.
     pub(crate) max_advance: f32,
     /// Number of justified clusters on the line.
-    pub(crate) num_spaces: usize,
+    pub(crate) justification_opportunities: usize,
     pub(crate) justification: Justification,
     /// Text indent applied to this line.
     pub(crate) indent: f32,
+    /// This line's entries in [`LayoutData::aligned_subtree_offsets`]. Empty for lines with only
+    /// baseline-relative content.
+    pub(crate) aligned_subtree_offsets: Range<u32>,
+}
+
+/// Position of an [aligned subtree] (rooted at a `vertical-align: top | bottom` style) on a line.
+///
+/// [aligned subtree]: crate::layout::style_metrics#aligned-subtrees
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct AlignedSubtreeOffset {
+    /// Style index of the subtree root.
+    pub(crate) root: u16,
+    /// Offset from the line's baseline to the subtree's baseline (positive upwards).
+    pub(crate) baseline_offset: f32,
 }
 
 impl LineData {
+    /// Offset from the line's baseline to the baseline of the aligned subtree rooted at style
+    /// `root` (positive upwards). `offsets` is [`LayoutData::aligned_subtree_offsets`].
+    pub(crate) fn aligned_subtree_offset(
+        &self,
+        offsets: &[AlignedSubtreeOffset],
+        root: u16,
+    ) -> f32 {
+        if root == 0 {
+            return 0.;
+        }
+        let range =
+            self.aligned_subtree_offsets.start as usize..self.aligned_subtree_offsets.end as usize;
+        offsets[range]
+            .iter()
+            .find(|subtree| subtree.root == root)
+            .map_or(0., |subtree| subtree.baseline_offset)
+    }
+
+    /// Block-axis coordinate of the baseline of the given style's inline box. `offsets` is
+    /// [`LayoutData::aligned_subtree_offsets`].
+    pub(crate) fn style_baseline(
+        &self,
+        offsets: &[AlignedSubtreeOffset],
+        metrics: &StyleMetrics,
+    ) -> f32 {
+        self.metrics.baseline
+            - self.aligned_subtree_offset(offsets, metrics.aligned_subtree)
+            - metrics.baseline_offset
+    }
+
     pub(crate) fn size(&self) -> f32 {
         self.metrics.line_height
     }
@@ -83,10 +128,6 @@ pub(crate) struct LineItemData {
 
     // Fields that only apply to text runs (Ignored for boxes)
     // TODO: factor this out?
-    /// True if the run is composed entirely of whitespace.
-    pub(crate) is_whitespace: bool,
-    /// True if the run ends in whitespace.
-    pub(crate) has_trailing_whitespace: bool,
     /// Range of the source text.
     pub(crate) text_range: Range<usize>,
     /// This run's shaped clusters on this line, as a range into [`ShapedText::shaped_clusters`].
@@ -106,48 +147,6 @@ impl LineItemData {
     #[inline(always)]
     pub(crate) fn is_rtl(&self) -> bool {
         self.bidi_level.is_rtl()
-    }
-
-    /// If the item is a text run
-    ///   - Determine if it consists entirely of whitespace (`is_whitespace` property)
-    ///   - Determine if it has trailing whitespace (`has_trailing_whitespace` property)
-    pub(crate) fn compute_whitespace_properties<B: Brush>(&mut self, layout_data: &LayoutData<B>) {
-        // Skip items which are not text runs
-        if self.kind != LayoutItemKind::TextRun {
-            return;
-        }
-
-        let clusters = layout_data.shaped_text.shaped_clusters();
-        let range = self.shaped_cluster_range.clone();
-        let char_range = if range.is_empty() {
-            0..0
-        } else {
-            clusters[range.start as usize].chars_range().start as usize
-                ..clusters[range.end as usize - 1].chars_range().end as usize
-        };
-        let characters = &layout_data.shaped_text.characters()[char_range];
-
-        self.is_whitespace = true;
-        if self.is_rtl() {
-            // RTL runs check for "trailing" whitespace at the front.
-            for character in characters {
-                if character.info.is_whitespace() {
-                    self.has_trailing_whitespace = true;
-                } else {
-                    self.is_whitespace = false;
-                    break;
-                }
-            }
-        } else {
-            for character in characters.iter().rev() {
-                if character.info.is_whitespace() {
-                    self.has_trailing_whitespace = true;
-                } else {
-                    self.is_whitespace = false;
-                    break;
-                }
-            }
-        }
     }
 }
 
@@ -192,7 +191,12 @@ pub(crate) struct LayoutData<B: Brush> {
 
     // Output of style resolution (input to line breaking)
     pub(crate) styles: Vec<Style<B>>,
+    /// Inline box metrics of each entry of `styles`.
+    pub(crate) style_metrics: Vec<StyleMetrics>,
     pub(crate) inline_boxes: Vec<InlineBox>,
+    /// Style index of the inline box (span) containing each entry of `inline_boxes`. This is the
+    /// parent against which the box's `vertical_align` is resolved.
+    pub(crate) inline_box_styles: Vec<u16>,
 
     // Output of shaping (input to line breaking)
     pub(crate) shaped_text: ShapedText,
@@ -204,11 +208,15 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) lines: Vec<LineData>,
     /// Items within each line
     pub(crate) line_items: Vec<LineItemData>,
+    /// Position of each aligned subtree rooted at a `vertical-align: top | bottom` style on each
+    /// line. Each line owns a contiguous range ([`LineData::aligned_subtree_offsets`]), in line
+    /// order.
+    pub(crate) aligned_subtree_offsets: Vec<AlignedSubtreeOffset>,
     /// The width constraint that was used to line break the layout
     pub(crate) layout_max_advance: f32,
-    /// The computed width of the layout excluding trailing whitespace
+    /// The computed width of the layout excluding hanging whitespace
     pub(crate) width: f32,
-    /// The computed width of the layout including trailing whitespace
+    /// The computed width of the layout including hanging whitespace
     pub(crate) full_width: f32,
     /// The computed height of the layout
     pub(crate) height: f32,
@@ -235,12 +243,15 @@ impl<B: Brush> Default for LayoutData<B> {
             full_width: 0.,
             height: 0.,
             styles: Vec::new(),
+            style_metrics: Vec::new(),
             inline_boxes: Vec::new(),
+            inline_box_styles: Vec::new(),
             shaped_text: ShapedText::new(),
             runs: Vec::new(),
             items: Vec::new(),
             lines: Vec::new(),
             line_items: Vec::new(),
+            aligned_subtree_offsets: Vec::new(),
             #[cfg(feature = "accesskit")]
             alignment: None,
             layout_max_advance: 0.0,
@@ -260,12 +271,15 @@ impl<B: Brush> LayoutData<B> {
         self.full_width = 0.;
         self.height = 0.;
         self.styles.clear();
+        self.style_metrics.clear();
         self.inline_boxes.clear();
+        self.inline_box_styles.clear();
         self.shaped_text.clear();
         self.runs.clear();
         self.items.clear();
         self.lines.clear();
         self.line_items.clear();
+        self.aligned_subtree_offsets.clear();
     }
 
     /// Push an inline box to the list of items
@@ -329,9 +343,14 @@ impl<B: Brush> LayoutData<B> {
     // TODO: this method does not handle mixed direction text at all.
     #[expect(clippy::cast_possible_truncation, reason = "deferred")]
     pub(crate) fn calculate_content_widths(&self) -> ContentWidths {
-        fn whitespace_advance(atom: Option<(Whitespace, f32)>) -> f32 {
-            atom.filter(|(whitespace, _)| whitespace.is_space_or_nbsp())
-                .map_or(0.0, |(_, advance)| advance)
+        fn hanging_whitespace_advance(atom: Option<(Whitespace, f32)>) -> f32 {
+            atom.filter(|(whitespace, _)| {
+                matches!(
+                    whitespace,
+                    Whitespace::Space | Whitespace::Tab | Whitespace::Newline
+                )
+            })
+            .map_or(0.0, |(_, advance)| advance)
         }
 
         let mut min_width = 0.0_f32;
@@ -366,11 +385,11 @@ impl<B: Brush> LayoutData<B> {
                                 && (boundary == Boundary::Line
                                     || style.overflow_wrap == OverflowWrap::Anywhere))
                         {
-                            let trailing_whitespace = whitespace_advance(prev_atom);
-                            min_width = min_width.max(running_min_width - trailing_whitespace);
+                            let hanging_whitespace = hanging_whitespace_advance(prev_atom);
+                            min_width = min_width.max(running_min_width - hanging_whitespace);
                             running_min_width = 0.0;
                             if boundary == Boundary::Mandatory {
-                                max_width = max_width.max(running_max_width - trailing_whitespace);
+                                max_width = max_width.max(running_max_width - hanging_whitespace);
                                 running_max_width = 0.0;
                             }
                         }
@@ -381,16 +400,16 @@ impl<B: Brush> LayoutData<B> {
                             prev_atom = Some((character.info.whitespace(), advance));
                         }
                     }
-                    let trailing_whitespace = whitespace_advance(prev_atom);
-                    min_width = min_width.max(running_min_width - trailing_whitespace);
+                    let hanging_whitespace = hanging_whitespace_advance(prev_atom);
+                    min_width = min_width.max(running_min_width - hanging_whitespace);
                 }
                 LayoutItemKind::InlineBox => {
                     let ibox = &self.inline_boxes[item.index];
                     if ibox.kind == InlineBoxKind::InFlow {
                         running_max_width += ibox.width;
                         if text_wrap_mode == TextWrapMode::Wrap {
-                            let trailing_whitespace = whitespace_advance(prev_atom);
-                            min_width = min_width.max(running_min_width - trailing_whitespace);
+                            let hanging_whitespace = hanging_whitespace_advance(prev_atom);
+                            min_width = min_width.max(running_min_width - hanging_whitespace);
                             min_width = min_width.max(ibox.width);
                             running_min_width = 0.0;
                         } else {
@@ -400,12 +419,12 @@ impl<B: Brush> LayoutData<B> {
                     prev_atom = None;
                 }
             }
-            let trailing_whitespace = whitespace_advance(prev_atom);
-            max_width = max_width.max(running_max_width - trailing_whitespace);
+            let hanging_whitespace = hanging_whitespace_advance(prev_atom);
+            max_width = max_width.max(running_max_width - hanging_whitespace);
         }
 
-        let trailing_whitespace = whitespace_advance(prev_atom);
-        min_width = min_width.max(running_min_width - trailing_whitespace);
+        let hanging_whitespace = hanging_whitespace_advance(prev_atom);
+        min_width = min_width.max(running_min_width - hanging_whitespace);
 
         ContentWidths {
             min: min_width,

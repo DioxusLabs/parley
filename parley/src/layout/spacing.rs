@@ -103,16 +103,18 @@ pub(crate) struct Justification {
     /// The amount of additional spacing to apply per justification opportunity.
     pub(crate) amount_per_opportunity: f32,
 
-    /// One past the line's logically last shaped cluster, i.e., the line's end. This may be
-    /// trailing whitespace where justification should not be applied.
-    pub(crate) line_end_cluster: u32,
+    /// One past the line's logically last shaped cluster eligible for justification. Shaped
+    /// clusters at or beyond this index are not justified, as they hang past the line's end, or are
+    /// part of the last atom that doesn't fully hang (e.g., an NBSP doesn't hang, but if it closes
+    /// the line, it shouldn't get justified).
+    pub(crate) justified_end_cluster: u32,
 }
 
 impl Justification {
     /// No justification.
     pub(crate) const NONE: Self = Self {
         amount_per_opportunity: 0.,
-        line_end_cluster: 0,
+        justified_end_cluster: u32::MAX,
     };
 }
 
@@ -163,7 +165,7 @@ impl EffectiveSpacing {
         if is_word_separator(whitespace) {
             gaps.after += self.spacing.word;
 
-            if atom.shaped_clusters_range().end != self.justification.line_end_cluster {
+            if atom.shaped_clusters_range().end <= self.justification.justified_end_cluster {
                 gaps.after += self.justification.amount_per_opportunity;
             }
         }

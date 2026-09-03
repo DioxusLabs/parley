@@ -5,6 +5,7 @@
 
 use crate::util::TestEnv;
 use crate::{test_name, util::ColorBrush};
+use parley::VerticalAlign;
 use parley::{
     Alignment, AlignmentOptions, BreakReason, ContentWidths, FontFamily, InlineBox, InlineBoxKind,
     Layout, LineHeight, PositionedLayoutItem, StyleProperty, TextStyle, WhiteSpaceCollapse,
@@ -71,6 +72,7 @@ fn placing_inboxes() {
             width: 10.0,
             height: 10.0,
             baseline: None,
+            vertical_align: VerticalAlign::BASELINE,
         });
         let mut layout = builder.build(text);
         layout.break_all_lines(None);
@@ -93,6 +95,7 @@ fn only_inboxes_wrap() {
             width: 10.0,
             height: 10.0,
             baseline: None,
+            vertical_align: VerticalAlign::BASELINE,
         });
     }
     let mut layout = builder.build(text);
@@ -116,6 +119,7 @@ fn full_width_inbox() {
             width: 10.,
             height: 10.0,
             baseline: None,
+            vertical_align: VerticalAlign::BASELINE,
         });
         builder.push_inline_box(InlineBox {
             id: 1,
@@ -124,6 +128,7 @@ fn full_width_inbox() {
             width,
             height: 10.0,
             baseline: None,
+            vertical_align: VerticalAlign::BASELINE,
         });
         builder.push_inline_box(InlineBox {
             id: 2,
@@ -132,6 +137,7 @@ fn full_width_inbox() {
             width,
             height: 10.0,
             baseline: None,
+            vertical_align: VerticalAlign::BASELINE,
         });
         let mut layout = builder.build(text);
         layout.break_all_lines(Some(100.));
@@ -152,6 +158,7 @@ fn inbox_separated_by_whitespace() {
         width: 10.,
         height: 10.0,
         baseline: None,
+        vertical_align: VerticalAlign::BASELINE,
     });
     builder.push_text(" ");
     builder.push_inline_box(InlineBox {
@@ -161,6 +168,7 @@ fn inbox_separated_by_whitespace() {
         width: 10.0,
         height: 10.0,
         baseline: None,
+        vertical_align: VerticalAlign::BASELINE,
     });
     builder.push_text(" ");
     builder.push_inline_box(InlineBox {
@@ -170,6 +178,7 @@ fn inbox_separated_by_whitespace() {
         width: 10.0,
         height: 10.0,
         baseline: None,
+        vertical_align: VerticalAlign::BASELINE,
     });
     builder.push_text(" ");
     builder.push_inline_box(InlineBox {
@@ -179,6 +188,7 @@ fn inbox_separated_by_whitespace() {
         width: 10.0,
         height: 10.0,
         baseline: None,
+        vertical_align: VerticalAlign::BASELINE,
     });
     let (mut layout, _text) = builder.build();
     layout.break_all_lines(Some(100.));
@@ -208,6 +218,7 @@ fn inbox_with_baseline() {
             width: 20.0,
             height: 30.0,
             baseline: Some(baseline),
+            vertical_align: VerticalAlign::BASELINE,
         });
         let mut layout = builder.build(text);
         layout.break_all_lines(None);
@@ -232,6 +243,7 @@ fn inboxes_with_matching_baselines() {
         width: 15.0,
         height: 15.0,
         baseline: Some(10.0),
+        vertical_align: VerticalAlign::BASELINE,
     });
     builder.push_inline_box(InlineBox {
         id: 1,
@@ -240,6 +252,7 @@ fn inboxes_with_matching_baselines() {
         width: 15.0,
         height: 40.0,
         baseline: Some(10.0),
+        vertical_align: VerticalAlign::BASELINE,
     });
     let mut layout = builder.build(text);
     layout.break_all_lines(None);
@@ -269,6 +282,7 @@ fn inboxes_with_large_ascent_and_descent() {
         width: 15.0,
         height: 40.0,
         baseline: Some(38.0),
+        vertical_align: VerticalAlign::BASELINE,
     });
     // Large descent: the baseline is near the top of the box, so most of it is below the baseline.
     builder.push_inline_box(InlineBox {
@@ -278,6 +292,7 @@ fn inboxes_with_large_ascent_and_descent() {
         width: 15.0,
         height: 40.0,
         baseline: Some(2.0),
+        vertical_align: VerticalAlign::BASELINE,
     });
     let mut layout = builder.build(text);
     layout.break_all_lines(None);
@@ -309,6 +324,7 @@ fn inbox_below_baseline_keeps_grid() {
         width: 20.0,
         height: 15.0,
         baseline: Some(0.0),
+        vertical_align: VerticalAlign::BASELINE,
     });
     let mut layout = builder.build(text);
     layout.break_all_lines(None);
@@ -598,6 +614,64 @@ fn justify_with_overflowing_trailing_space() {
 }
 
 #[test]
+fn justify_with_multiple_trailing_spaces() {
+    let mut env = TestEnv::new(test_name!(), None);
+
+    // The first line breaks after "CC   ", leaving three trailing spaces. All of them should hang
+    // past the line box unstretched, while justification distributes the line's free space over the
+    // two inter-word spaces only.
+    let text = "AA BB CC   DD EE";
+    let max_advance = 95.0;
+    let mut builder = env.ranged_builder(text);
+
+    // This should also correctly hang the whitespace when the spaces are not in the same run (e.g.,
+    // because of a font size change).
+    builder.push(StyleProperty::FontSize(15.9), 10..11);
+    let mut layout = builder.build(text);
+    layout.break_all_lines(Some(max_advance));
+    layout.align(Alignment::Justify, AlignmentOptions::default());
+    env.check_cluster_snapshot(&layout, text, 12.0);
+}
+
+#[test]
+fn trailing_nbsp_doesnt_hang_but_also_doesnt_justify_ltr() {
+    let mut env = TestEnv::new(test_name!(), None);
+
+    // The first line breaks after "CC\u{a0} " (with `\u{a0}` being a non-breaking space). That last
+    // space hangs, but the non-breaking space doesn't. As it ends the line, the non-breaking space
+    // should not get a justification stretch applied.
+    let text = "AA BB CC\u{a0} DD EE";
+    let max_advance = 95.0;
+    let builder = env.ranged_builder(text);
+
+    let mut layout = builder.build(text);
+    layout.break_all_lines(Some(max_advance));
+    layout.align(Alignment::Justify, AlignmentOptions::default());
+    env.check_cluster_snapshot(&layout, text, 12.0);
+}
+
+#[test]
+fn trailing_nbsp_doesnt_hang_but_also_doesnt_justify_rtl() {
+    let mut env = TestEnv::new(test_name!(), None);
+
+    // The first line breaks after "ججج\u{a0} " (with `\u{a0}` being a non-breaking space). The last
+    // space hangs (on the left side of the line, as the paragraph is RTL), but the non-breaking
+    // space doesn't. As it ends the line, the non-breaking space should not get a justification
+    // stretch applied, but does get word-spacing.
+    let text = "ااا ببب ججج\u{a0} ددد";
+    let max_advance = 143.0;
+    let mut builder = env.ranged_builder(text);
+
+    // Add some word spacing to also test interaction with spacing.
+    builder.push_default(StyleProperty::WordSpacing(12.0));
+
+    let mut layout = builder.build(text);
+    layout.break_all_lines(Some(max_advance));
+    layout.align(Alignment::Justify, AlignmentOptions::default());
+    env.check_cluster_snapshot(&layout, text, 12.0);
+}
+
+#[test]
 fn content_widths() {
     let mut env = TestEnv::new(test_name!(), None);
 
@@ -661,6 +735,7 @@ fn inbox_content_width() {
             width: 100.0,
             height: 10.0,
             baseline: None,
+            vertical_align: VerticalAlign::BASELINE,
         });
         let mut layout = builder.build(text);
         let ContentWidths {
@@ -683,6 +758,7 @@ fn inbox_content_width() {
             width: 10.0,
             height: 10.0,
             baseline: None,
+            vertical_align: VerticalAlign::BASELINE,
         });
         let mut layout = builder.build(text);
         let ContentWidths {
