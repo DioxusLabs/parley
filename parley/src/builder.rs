@@ -290,6 +290,8 @@ impl<'b, B: Brush> TreeBuilder<'b, B> {
 
     #[inline]
     pub fn build_into(self, layout: &mut Layout<B>) -> String {
+        let root_text_wrap_mode = self.lcx.tree_style_builder.root_text_wrap_mode();
+
         // Apply TreeStyleBuilder styles to LayoutContext.
         let text = self
             .lcx
@@ -298,6 +300,11 @@ impl<'b, B: Brush> TreeBuilder<'b, B> {
 
         // Call generic layout builder method
         build_into_layout(layout, &text, self.lcx, self.fcx, self.options);
+
+        // The tree builder knows its root style, which is a better source for the default
+        // wrap mode than the first entry of the style table (which may be a synthesized
+        // default style when the layout contains no text).
+        layout.data.default_text_wrap_mode = root_text_wrap_mode;
 
         text
     }
@@ -357,6 +364,13 @@ fn build_into_layout<B: Brush>(
         .data
         .styles
         .extend(lcx.style_table.iter().map(|s| s.as_layout_style()));
+
+    // Record the wrap mode which applies at the start of the text
+    layout.data.default_text_wrap_mode = lcx
+        .style_table
+        .first()
+        .map(|s| s.text_wrap_mode)
+        .unwrap_or_default();
 
     // Sort the inline boxes as subsequent code assumes that they are in text index order.
     // Note: It's important that this is a stable sort to allow users to control the order of contiguous inline boxes

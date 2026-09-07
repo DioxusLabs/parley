@@ -4,7 +4,7 @@
 //! Hierarchical tree based style application.
 use alloc::{string::String, vec::Vec};
 
-use crate::style::WhiteSpaceCollapse;
+use crate::style::{TextWrapMode, WhiteSpaceCollapse};
 
 use super::{Brush, ResolvedProperty, ResolvedStyle, StyleRun};
 
@@ -39,6 +39,13 @@ pub(crate) struct TreeStyleBuilder<B: Brush> {
 impl<B: Brush> TreeStyleBuilder<B> {
     fn current_style(&self) -> ResolvedStyle<B> {
         self.tree[self.current_span].style.clone()
+    }
+
+    pub(crate) fn root_text_wrap_mode(&self) -> TextWrapMode {
+        self.tree
+            .first()
+            .map(|node| node.style.text_wrap_mode)
+            .unwrap_or(TextWrapMode::Wrap)
     }
 }
 
