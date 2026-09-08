@@ -284,19 +284,17 @@ impl<B: Brush> LayoutData<B> {
     // TODO: this method does not handle mixed direction text at all.
     #[expect(clippy::cast_possible_truncation, reason = "deferred")]
     pub(crate) fn calculate_content_widths(&self) -> ContentWidths {
-        fn hanging_whitespace_advance(atom: Option<(Whitespace, f32)>) -> f32 {
-            atom.filter(|(whitespace, _)| whitespace_can_hang(*whitespace))
-                .map_or(0.0, |(_, advance)| advance)
-        }
-
         let mut min_width = 0.0_f32;
         let mut max_width = 0.0_f32;
 
         let mut running_min_width = 0.0;
         let mut running_max_width = 0.0;
         let mut text_wrap_mode = TextWrapMode::Wrap;
-        // The whitespace class of the previous atom's first character, and the atom's advance.
-        let mut prev_atom: Option<(Whitespace, f32)> = None;
+        // Total advance of the run of whitespace ending just before the current
+        // atom that would hang past the end of the line if the line ended here.
+        // Whitespace can only hang when wrapping is enabled, and a max-content
+        // line never ends, so only the min-content width ever excludes it.
+        let mut hanging_run = 0.0_f32;
         let is_rtl = self.base_level.is_rtl();
         for item in &self.items {
             match item.kind {
@@ -305,10 +303,14 @@ impl<B: Brush> LayoutData<B> {
                     let spacing =
                         EffectiveSpacing::new(self.runs[item.index].spacing, Justification::NONE);
                     if is_rtl {
-                        prev_atom = slice.atoms_start().next().map(|atom| {
-                            let character = &atom.characters()[0];
-                            (character.info.whitespace(), spacing.atom_advance(&atom))
-                        });
+                        hanging_run = slice
+                            .atoms_start()
+                            .next()
+                            .filter(|atom| {
+                                text_wrap_mode == TextWrapMode::Wrap
+                                    && whitespace_can_hang(atom.characters()[0].info.whitespace())
+                            })
+                            .map_or(0.0, |atom| spacing.atom_advance(&atom));
                     }
                     for atom in slice.atoms_start() {
                         let character = &atom.characters()[0];
@@ -321,8 +323,7 @@ impl<B: Brush> LayoutData<B> {
                             && (boundary == Boundary::Line
                                 || style.overflow_wrap == OverflowWrap::Anywhere)
                         {
-                            let hanging_whitespace = hanging_whitespace_advance(prev_atom);
-                            min_width = min_width.max(running_min_width - hanging_whitespace);
+                            min_width = min_width.max(running_min_width - hanging_run);
                             running_min_width = 0.0;
                         }
 
@@ -335,48 +336,49 @@ impl<B: Brush> LayoutData<B> {
                         // immediately following each other are equivalent to one linebreak for the purpose
                         // of width calculation.
                         if whitespace == Whitespace::Newline {
-                            let hanging_whitespace = hanging_whitespace_advance(prev_atom);
-                            min_width = min_width.max(running_min_width - hanging_whitespace);
-                            max_width = max_width.max(running_max_width - hanging_whitespace);
+                            min_width = min_width.max(running_min_width - hanging_run);
+                            max_width = max_width.max(running_max_width);
                             running_min_width = 0.0;
                             running_max_width = 0.0;
                             if !is_rtl {
-                                prev_atom = None;
+                                hanging_run = 0.0;
                             }
                         } else {
                             let advance = spacing.atom_advance(&atom);
                             running_min_width += advance;
                             running_max_width += advance;
                             if !is_rtl {
-                                prev_atom = Some((whitespace, advance));
+                                if text_wrap_mode == TextWrapMode::Wrap
+                                    && whitespace_can_hang(whitespace)
+                                {
+                                    hanging_run += advance;
+                                } else {
+                                    hanging_run = 0.0;
+                                }
                             }
                         }
                     }
-                    let hanging_whitespace = hanging_whitespace_advance(prev_atom);
-                    min_width = min_width.max(running_min_width - hanging_whitespace);
+                    min_width = min_width.max(running_min_width - hanging_run);
                 }
                 LayoutItemKind::InlineBox => {
                     let ibox = &self.inline_boxes[item.index];
                     if ibox.kind == InlineBoxKind::InFlow {
                         running_max_width += ibox.width;
                         if text_wrap_mode == TextWrapMode::Wrap {
-                            let hanging_whitespace = hanging_whitespace_advance(prev_atom);
-                            min_width = min_width.max(running_min_width - hanging_whitespace);
+                            min_width = min_width.max(running_min_width - hanging_run);
                             min_width = min_width.max(ibox.width);
                             running_min_width = 0.0;
                         } else {
                             running_min_width += ibox.width;
                         }
                     }
-                    prev_atom = None;
+                    hanging_run = 0.0;
                 }
             }
-            let hanging_whitespace = hanging_whitespace_advance(prev_atom);
-            max_width = max_width.max(running_max_width - hanging_whitespace);
+            max_width = max_width.max(running_max_width);
         }
 
-        let hanging_whitespace = hanging_whitespace_advance(prev_atom);
-        min_width = min_width.max(running_min_width - hanging_whitespace);
+        min_width = min_width.max(running_min_width - hanging_run);
 
         ContentWidths {
             min: min_width,

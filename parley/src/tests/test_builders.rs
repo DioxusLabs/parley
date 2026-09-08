@@ -754,3 +754,65 @@ fn hanging_space_before_forced_break_does_not_split_line() {
         "hanging whitespace at end of text must not create an empty line"
     );
 }
+
+/// `calculate_content_widths` must exclude the whole run of hangable
+/// whitespace from the min-content width (not just its last atom), while the
+/// max-content width counts it in full (a max-content line never wraps, so
+/// nothing hangs). Whitespace only hangs when wrapping is enabled.
+#[test]
+fn content_widths_hang_whole_trailing_whitespace_run() {
+    fn widths_of(
+        fcx: &mut FontContext,
+        lcx: &mut LayoutContext<ColorBrush>,
+        text: &str,
+        text_wrap_mode: TextWrapMode,
+    ) -> crate::ContentWidths {
+        let root_style = TextStyle {
+            font_family: FontFamily::from(FONT_FAMILY_LIST),
+            text_wrap_mode,
+            ..TextStyle::default()
+        };
+        let topts = TreeOptions {
+            scale: 1.0,
+            quantize: false,
+            max_advance: None,
+            root_style: &root_style,
+        };
+        build_layout_with_tree(fcx, lcx, &topts, |tb| {
+            tb.set_white_space_mode(WhiteSpaceCollapse::Preserve);
+            tb.push_text(text);
+        })
+        .calculate_content_widths()
+    }
+
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let x = widths_of(&mut fcx, &mut lcx, "X", TextWrapMode::Wrap).min;
+    let space = widths_of(&mut fcx, &mut lcx, " ", TextWrapMode::Wrap).max;
+
+    let wrap = widths_of(&mut fcx, &mut lcx, "X  ", TextWrapMode::Wrap);
+    assert_eq!(
+        wrap.min, x,
+        "the whole trailing whitespace run hangs off the min-content line"
+    );
+    assert_eq!(
+        wrap.max,
+        x + space + space,
+        "trailing whitespace counts towards max-content (no line ever wraps)"
+    );
+
+    let before_break = widths_of(&mut fcx, &mut lcx, "X \nY", TextWrapMode::Wrap);
+    assert_eq!(
+        before_break.min, x,
+        "whitespace before a forced break hangs and is excluded from min-content"
+    );
+    assert_eq!(before_break.max, x + space);
+
+    let no_wrap = widths_of(&mut fcx, &mut lcx, "X  ", TextWrapMode::NoWrap);
+    assert_eq!(
+        no_wrap.min,
+        x + space + space,
+        "nothing hangs when wrapping is disabled"
+    );
+    assert_eq!(no_wrap.max, x + space + space);
+}
