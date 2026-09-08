@@ -11,9 +11,9 @@ use peniko::{Blob, color::palette};
 
 use super::utils::{ColorBrush, asserts::assert_eq_layout_data};
 use crate::{
-    BaseDirection, FontContext, FontFamily, FontFeatures, FontVariations, Layout, LayoutContext,
-    LineHeight, OverflowWrap, RangedBuilder, StyleProperty, StyleRunBuilder, TextStyle,
-    TextWrapMode, TreeBuilder, WordBreak,
+    BaseDirection, BreakReason, FontContext, FontFamily, FontFeatures, FontVariations, Layout,
+    LayoutContext, LineHeight, OverflowWrap, RangedBuilder, StyleProperty, StyleRunBuilder,
+    TextStyle, TextWrapMode, TreeBuilder, WhiteSpaceCollapse, WordBreak,
 };
 
 // TODO: `FONT_FAMILY_LIST`, `load_fonts`, and `create_font_context` are
@@ -683,5 +683,74 @@ fn builders_crlf_across_run_boundary_counts_as_single_line_break() {
     assert_eq!(
         split_crlf, split_lf,
         "styled CRLF should match styled LF line count"
+    );
+}
+
+/// Whitespace that overflows the line hangs past the line end without ending
+/// the line itself: a following forced break terminates the line instead, and
+/// a trailing whitespace run at the end of the text must not leave a dangling
+/// empty line behind it.
+#[test]
+fn hanging_space_before_forced_break_does_not_split_line() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let root_style = TextStyle {
+        font_family: FontFamily::from(FONT_FAMILY_LIST),
+        ..TextStyle::default()
+    };
+
+    // Measure the advance of "X" so the layout can be wrapped at exactly the
+    // point where a following space overflows and must hang.
+    let topts = TreeOptions {
+        scale: 1.0,
+        quantize: false,
+        max_advance: None,
+        root_style: &root_style,
+    };
+    let probe = build_layout_with_tree(&mut fcx, &mut lcx, &topts, |tb| {
+        tb.push_text("X");
+    });
+    let x_advance = probe.full_width();
+
+    // Whitespace is preserved throughout: `X ` overflows the line and hangs,
+    // `\n` then ends that line explicitly, and `  ` fills the second line
+    // (also hanging).
+    let topts = TreeOptions {
+        max_advance: Some(x_advance),
+        ..topts
+    };
+    let layout = build_layout_with_tree(&mut fcx, &mut lcx, &topts, |tb| {
+        tb.set_white_space_mode(WhiteSpaceCollapse::Preserve);
+        tb.push_text("X \n  ");
+    });
+
+    let lines: Vec<_> = layout.lines().collect();
+    assert_eq!(
+        lines.len(),
+        2,
+        "hanging whitespace must not produce extra lines"
+    );
+    assert_eq!(lines[0].text_range(), 0..3);
+    assert_eq!(lines[0].break_reason(), BreakReason::Explicit);
+    assert!(
+        lines[0].metrics().hanging_advance > 0.0,
+        "the overflowing space must hang past the line end"
+    );
+    assert_eq!(lines[1].text_range(), 3..5);
+    assert_eq!(lines[1].break_reason(), BreakReason::None);
+    assert!(
+        lines[1].metrics().hanging_advance > 0.0,
+        "the whole trailing space run must hang"
+    );
+
+    // Text ending in hanging whitespace must not gain an empty trailing line.
+    let layout = build_layout_with_tree(&mut fcx, &mut lcx, &topts, |tb| {
+        tb.set_white_space_mode(WhiteSpaceCollapse::Preserve);
+        tb.push_text("X ");
+    });
+    assert_eq!(
+        layout.lines().count(),
+        1,
+        "hanging whitespace at end of text must not create an empty line"
     );
 }
