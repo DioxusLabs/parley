@@ -318,33 +318,85 @@ impl<B: Brush> LayoutData<B> {
 
                     // Atom boundaries coincide with `is_grapheme_start` cluster boundaries, so
                     // atoms can be found by walking `shaped_clusters` directly instead of
-                    // materializing an [`Atom`] for every step.
-                    let mut clusters = slice.shaped_clusters();
-                    let mut chars = slice.characters();
-                    let mut cluster_index = slice.shaped_clusters_range().start;
-
-                    while let Some((first, _)) = clusters.split_first() {
-                        // The atom's shaped clusters are `first` followed by the clusters that
-                        // don't start a grapheme.
-                        let mut span = 1;
-                        let mut shaped_advance = first.advance;
-                        while span < clusters.len() && !clusters[span].is_grapheme_start() {
-                            shaped_advance += clusters[span].advance;
-                            span += 1;
+                    // materializing an [`Atom`] for every step. Everything the fast path needs
+                    // (advance, boundary, whitespace class, style) is on the cluster itself.
+                    let clusters = slice.shaped_clusters();
+                    if run_spacing.is_zero() {
+                        // Without letter/word spacing there are no per-atom gaps, so the atom can
+                        // be processed one cluster at a time: break opportunities are only
+                        // considered on the atom's first cluster, and the hanging-whitespace
+                        // accumulator is updated per cluster (a cluster that can't hang resets it,
+                        // one that can extends it), which is equivalent to the per-atom
+                        // "hangs entirely / hangs partially from the end" rule.
+                        let mut skip_atom = false;
+                        for (i, cluster) in clusters.iter().enumerate() {
+                            let whitespace = cluster.whitespace();
+                            if i == 0 || cluster.is_grapheme_start() {
+                                skip_atom = false;
+                                let boundary = cluster.boundary_before();
+                                let style = &self.styles[cluster.style_index as usize];
+                                let prev_text_wrap_mode = text_wrap_mode;
+                                text_wrap_mode = style.text_wrap_mode;
+                                if prev_text_wrap_mode == TextWrapMode::Wrap
+                                    && (boundary == Boundary::Line
+                                        || style.overflow_wrap == OverflowWrap::Anywhere)
+                                {
+                                    min_width = min_width
+                                        .max(running_min_width - running_hanging_whitespace);
+                                    running_min_width = 0.0;
+                                }
+                                if whitespace == Whitespace::Newline {
+                                    min_width = min_width
+                                        .max(running_min_width - running_hanging_whitespace);
+                                    max_width = max_width
+                                        .max(running_max_width - running_hanging_whitespace);
+                                    running_min_width = 0.0;
+                                    running_max_width = 0.0;
+                                    running_hanging_whitespace = 0.0;
+                                    skip_atom = true;
+                                    continue;
+                                }
+                            } else if skip_atom {
+                                continue;
+                            }
+                            let advance = cluster.advance;
+                            running_min_width += advance;
+                            running_max_width += advance;
+                            // A cluster hangs if all of its characters hang; its first character is
+                            // checked via the cached flags so the common case never touches
+                            // `characters`.
+                            let hangs = can_hang
+                                && whitespace_can_hang(whitespace)
+                                && (cluster.char_len() == 1
+                                    || slice
+                                        .characters_in(cluster.chars_range())
+                                        .iter()
+                                        .all(|c| whitespace_can_hang(c.info.whitespace())));
+                            if hangs {
+                                running_hanging_whitespace += advance;
+                            } else {
+                                running_hanging_whitespace = 0.0;
+                            }
                         }
-                        let atom_clusters = &clusters[..span];
-                        let character_count = (clusters[span - 1].chars_range().end
-                            - first.chars_range().start) as usize;
-                        let characters = &chars[..character_count];
-                        let cluster_end = cluster_index + span as u32;
-                        // Advance the cursors before the body so `continue` stays valid.
-                        clusters = &clusters[span..];
-                        chars = &chars[character_count..];
-                        cluster_index = cluster_end;
+                        continue;
+                    }
+                    let cluster_base = slice.shaped_clusters_range().start;
+                    let mut i = 0;
+                    while i < clusters.len() {
+                        let first = clusters[i];
+                        let mut end = i + 1;
+                        let mut shaped_advance = first.advance;
+                        while end < clusters.len() && !clusters[end].is_grapheme_start() {
+                            shaped_advance += clusters[end].advance;
+                            end += 1;
+                        }
+                        let atom_start = i;
+                        let cluster_end = cluster_base + end as u32;
+                        i = end;
 
-                        let whitespace = characters[0].info.whitespace();
-                        let boundary = characters[0].info.boundary();
-                        let style = &self.styles[characters[0].style_index as usize];
+                        let whitespace = first.whitespace();
+                        let boundary = first.boundary_before();
+                        let style = &self.styles[first.style_index as usize];
                         let prev_text_wrap_mode = text_wrap_mode;
                         text_wrap_mode = style.text_wrap_mode;
                         if prev_text_wrap_mode == TextWrapMode::Wrap
@@ -379,8 +431,7 @@ impl<B: Brush> LayoutData<B> {
                         }
 
                         let advance = if !run_spacing.is_zero() {
-                            shaped_advance
-                                + spacing.gaps_of(whitespace, cluster_end).total()
+                            shaped_advance + spacing.gaps_of(whitespace, cluster_end).total()
                         } else {
                             shaped_advance
                         };
@@ -389,7 +440,7 @@ impl<B: Brush> LayoutData<B> {
 
                         if !can_hang {
                             running_hanging_whitespace = 0.0;
-                        } else if characters.len() == 1 {
+                        } else if end - atom_start == 1 && first.char_len() == 1 {
                             // Fast path for the common-case that the atom is a single character,
                             // and so a single shaped cluster.
                             if whitespace_can_hang(whitespace) {
@@ -408,7 +459,7 @@ impl<B: Brush> LayoutData<B> {
                             let mut last_cluster = true;
                             let mut all_hang = true;
                             let mut hanging = 0.0;
-                            for cluster in atom_clusters.iter().rev() {
+                            for cluster in clusters[atom_start..end].iter().rev() {
                                 let cluster_hangs = slice
                                     .characters_in(cluster.chars_range())
                                     .iter()
