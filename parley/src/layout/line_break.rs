@@ -125,6 +125,14 @@ impl LineState {
     ///   is its own extent shrunk by it.
     #[inline(always)]
     fn line_height(&self) -> f32 {
+        // Fast path: a box that doesn't extend beyond the text's ascent/descent cannot
+        // extend beyond `threshold_*` (which are the text extents plus any positive
+        // half-leading), and a line with no inline boxes at all (box extents are
+        // `NEG_INFINITY`) lands here too. In both cases the line height is exactly
+        // the text's intrinsic line height.
+        if self.box_ascent <= self.text_ascent && self.box_descent <= self.text_descent {
+            return self.text_line_height;
+        }
         let leading = self.text_line_height - self.text_ascent - self.text_descent;
         let leading_above = leading * 0.5;
         // Use the exact complement so that `leading_above + leading_below == leading`.
@@ -256,6 +264,15 @@ pub struct BreakerState {
     line_max_advance: f32,
     /// The max height available to the current line.
     line_max_height: f32,
+    /// Whether to accumulate the running text metrics (ascent/descent/line-height) as
+    /// clusters are appended to the current line.
+    ///
+    /// The running metrics are only read mid-line by the max-height check, so they are
+    /// only needed when a finite max height is in use; `commit_line` recomputes them
+    /// once per line from the committed items otherwise. This flag is set (and stays
+    /// set) the first time `set_line_max_height` is called with a finite value, so
+    /// that enabling the constraint mid-line or toggling it keeps the metrics correct.
+    track_metrics: bool,
 
     /// The state of the current line
     line: LineState,
@@ -280,6 +297,7 @@ impl Default for BreakerState {
             layout_max_advance: 0.0,
             line_max_advance: 0.0,
             line_max_height: f32::MAX,
+            track_metrics: false,
             line: LineState::default(),
             prev_boundary: None,
             emergency_boundary: None,
@@ -294,15 +312,18 @@ impl BreakerState {
     /// they extend above and below the baseline, *not* including leading) as well as the intrinsic
     /// line height of the cluster(s) (i.e. including the full leading), which may be smaller than
     /// `ascent + descent` when the leading is negative.
+    #[inline(always)]
     pub fn append_cluster_to_line(&mut self, next_x: f32, metrics: &RunMetrics) {
         self.line.items.end = self.item_idx + 1;
         self.line.clusters.end = self.cluster_idx + 1;
         self.cluster_idx += 1;
         self.line.x = next_x;
-        self.line.text_ascent = self.line.text_ascent.max(metrics.ascent);
-        self.line.text_descent = self.line.text_descent.max(metrics.descent);
-        self.line.text_line_height = self.line.text_line_height.max(metrics.line_height);
-        self.update_max_height_exceeded();
+        if self.track_metrics {
+            self.line.text_ascent = self.line.text_ascent.max(metrics.ascent);
+            self.line.text_descent = self.line.text_descent.max(metrics.descent);
+            self.line.text_line_height = self.line.text_line_height.max(metrics.line_height);
+            self.update_max_height_exceeded();
+        }
     }
 
     /// Add an inline box to the line.
@@ -316,7 +337,9 @@ impl BreakerState {
         self.line.x = next_x;
         self.line.box_ascent = self.line.box_ascent.max(ascent);
         self.line.box_descent = self.line.box_descent.max(descent);
-        self.update_max_height_exceeded();
+        if self.track_metrics {
+            self.update_max_height_exceeded();
+        }
     }
 
     /// Store the current iteration state so that we can revert to it if we later want to take
@@ -351,7 +374,11 @@ impl BreakerState {
 
     #[inline(always)]
     fn update_max_height_exceeded(&mut self) {
-        self.line.max_height_exceeded = self.line.line_height() > self.line_max_height;
+        // `line_height()` is relatively expensive and a finite line height can never
+        // exceed `f32::MAX`, so skip the computation when no maximum height constraint
+        // is in effect (the common case: `break_all_lines` never sets one).
+        self.line.max_height_exceeded =
+            self.line_max_height != f32::MAX && self.line.line_height() > self.line_max_height;
     }
 
     /// Get the max-advance of the entire layout
@@ -385,6 +412,10 @@ impl BreakerState {
     #[inline(always)]
     pub fn set_line_max_height(&mut self, height: f32) {
         self.line_max_height = height;
+        // Once a finite max height has been configured, keep accumulating the running
+        // metrics for every line so that a mid-line enable (or a re-enable) sees the
+        // metrics of the whole line.
+        self.track_metrics |= height != f32::MAX;
     }
 
     /// Get the x-offset of the current line
@@ -1433,6 +1464,13 @@ fn commit_line<B: Brush>(
 
                 last_item_kind = item.kind;
                 committed_text_run = true;
+
+                // Accumulate the line's text extents. When `track_metrics` is on this is
+                // redundant with `append_cluster_to_line` (the maxes coincide); otherwise
+                // this once-per-line scan is the only place they are computed.
+                state.text_ascent = state.text_ascent.max(run_data.metrics.ascent);
+                state.text_descent = state.text_descent.max(run_data.metrics.descent);
+                state.text_line_height = state.text_line_height.max(run_data.metrics.line_height);
 
                 // Push run to line
                 let run = Run::new(layout, 0, 0, run_data, None);
