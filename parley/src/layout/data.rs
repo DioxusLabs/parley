@@ -316,8 +316,32 @@ impl<B: Brush> LayoutData<B> {
                     let can_hang = item.bidi_level == self.base_level;
                     let is_rtl = item.bidi_level.is_rtl();
 
-                    for atom in slice.atoms_start() {
-                        let characters = atom.characters();
+                    // Atom boundaries coincide with `is_grapheme_start` cluster boundaries, so
+                    // atoms can be found by walking `shaped_clusters` directly instead of
+                    // materializing an [`Atom`] for every step.
+                    let mut clusters = slice.shaped_clusters();
+                    let mut chars = slice.characters();
+                    let mut cluster_index = slice.shaped_clusters_range().start;
+
+                    while let Some((first, _)) = clusters.split_first() {
+                        // The atom's shaped clusters are `first` followed by the clusters that
+                        // don't start a grapheme.
+                        let mut span = 1;
+                        let mut shaped_advance = first.advance;
+                        while span < clusters.len() && !clusters[span].is_grapheme_start() {
+                            shaped_advance += clusters[span].advance;
+                            span += 1;
+                        }
+                        let atom_clusters = &clusters[..span];
+                        let character_count = (clusters[span - 1].chars_range().end
+                            - first.chars_range().start) as usize;
+                        let characters = &chars[..character_count];
+                        let cluster_end = cluster_index + span as u32;
+                        // Advance the cursors before the body so `continue` stays valid.
+                        clusters = &clusters[span..];
+                        chars = &chars[character_count..];
+                        cluster_index = cluster_end;
+
                         let whitespace = characters[0].info.whitespace();
                         let boundary = characters[0].info.boundary();
                         let style = &self.styles[characters[0].style_index as usize];
@@ -355,9 +379,10 @@ impl<B: Brush> LayoutData<B> {
                         }
 
                         let advance = if !run_spacing.is_zero() {
-                            spacing.atom_advance(&atom)
+                            shaped_advance
+                                + spacing.gaps_of(whitespace, cluster_end).total()
                         } else {
-                            atom.advance()
+                            shaped_advance
                         };
                         running_min_width += advance;
                         running_max_width += advance;
@@ -377,13 +402,13 @@ impl<B: Brush> LayoutData<B> {
                             // space is a single atom (as it's a grapheme), but may consist of
                             // multiple shaped clusters, of which the spaces can hang. Only the
                             // atom's spacing at its logical end hangs along with the clusters.
-                            let gaps = spacing.gaps(&atom);
+                            let gaps = spacing.gaps_of(whitespace, cluster_end);
                             let gap_before = if is_rtl { gaps.after } else { gaps.before };
                             let gap_end = if is_rtl { gaps.before } else { gaps.after };
                             let mut last_cluster = true;
                             let mut all_hang = true;
                             let mut hanging = 0.0;
-                            for cluster in atom.shaped_clusters().iter().rev() {
+                            for cluster in atom_clusters.iter().rev() {
                                 let cluster_hangs = slice
                                     .characters_in(cluster.chars_range())
                                     .iter()

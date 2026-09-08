@@ -151,8 +151,16 @@ impl EffectiveSpacing {
     /// The gaps around `atom`.
     #[inline(always)]
     pub(crate) fn gaps(self, atom: &Atom<'_>) -> Gaps {
-        let whitespace = atom.characters()[0].info.whitespace();
+        self.gaps_of(
+            atom.characters()[0].info.whitespace(),
+            atom.shaped_clusters_range().end,
+        )
+    }
 
+    /// The gaps around an atom whose first character has whitespace class `whitespace`, and whose
+    /// shaped cluster range ends at `cluster_end`.
+    #[inline(always)]
+    pub(crate) fn gaps_of(self, whitespace: Whitespace, cluster_end: u32) -> Gaps {
         if whitespace == Whitespace::Newline {
             return Gaps::ZERO;
         }
@@ -165,7 +173,7 @@ impl EffectiveSpacing {
         if is_word_separator(whitespace) {
             gaps.after += self.spacing.word;
 
-            if atom.shaped_clusters_range().end <= self.justification.justification_end_cluster {
+            if cluster_end <= self.justification.justification_end_cluster {
                 gaps.after += self.justification.amount_per_opportunity;
             }
         }
