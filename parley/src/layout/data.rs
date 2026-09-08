@@ -321,6 +321,65 @@ impl<B: Brush> LayoutData<B> {
                     // materializing an [`Atom`] for every step. Everything the fast path needs
                     // (advance, boundary, whitespace class, style) is on the cluster itself.
                     let clusters = slice.shaped_clusters();
+                    if run_spacing.is_zero() {
+                        // Without letter/word spacing there are no per-atom gaps, so the atom can
+                        // be processed one cluster at a time: break opportunities are only
+                        // considered on the atom's first cluster, and the hanging-whitespace
+                        // accumulator is updated per cluster (a cluster that can't hang resets it,
+                        // one that can extends it), which is equivalent to the per-atom
+                        // "hangs entirely / hangs partially from the end" rule.
+                        let mut skip_atom = false;
+                        for (i, cluster) in clusters.iter().enumerate() {
+                            let whitespace = cluster.whitespace();
+                            if i == 0 || cluster.is_grapheme_start() {
+                                skip_atom = false;
+                                let boundary = cluster.boundary_before();
+                                let style = &self.styles[cluster.style_index as usize];
+                                let prev_text_wrap_mode = text_wrap_mode;
+                                text_wrap_mode = style.text_wrap_mode;
+                                if prev_text_wrap_mode == TextWrapMode::Wrap
+                                    && (boundary == Boundary::Line
+                                        || style.overflow_wrap == OverflowWrap::Anywhere)
+                                {
+                                    min_width = min_width
+                                        .max(running_min_width - running_hanging_whitespace);
+                                    running_min_width = 0.0;
+                                }
+                                if whitespace == Whitespace::Newline {
+                                    min_width = min_width
+                                        .max(running_min_width - running_hanging_whitespace);
+                                    max_width = max_width
+                                        .max(running_max_width - running_hanging_whitespace);
+                                    running_min_width = 0.0;
+                                    running_max_width = 0.0;
+                                    running_hanging_whitespace = 0.0;
+                                    skip_atom = true;
+                                    continue;
+                                }
+                            } else if skip_atom {
+                                continue;
+                            }
+                            let advance = cluster.advance;
+                            running_min_width += advance;
+                            running_max_width += advance;
+                            // A cluster hangs if all of its characters hang; its first character is
+                            // checked via the cached flags so the common case never touches
+                            // `characters`.
+                            let hangs = can_hang
+                                && whitespace_can_hang(whitespace)
+                                && (cluster.char_len() == 1
+                                    || slice
+                                        .characters_in(cluster.chars_range())
+                                        .iter()
+                                        .all(|c| whitespace_can_hang(c.info.whitespace())));
+                            if hangs {
+                                running_hanging_whitespace += advance;
+                            } else {
+                                running_hanging_whitespace = 0.0;
+                            }
+                        }
+                        continue;
+                    }
                     let cluster_base = slice.shaped_clusters_range().start;
                     let mut i = 0;
                     while i < clusters.len() {
