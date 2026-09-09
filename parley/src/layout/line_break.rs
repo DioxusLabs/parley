@@ -90,6 +90,20 @@ struct LineBoxMetrics {
     ///
     /// Like [`Self::line_box`], these are in block flow direction.
     content_box: Extents,
+    /// The inputs most recently folded into these extents by [`Self::add_text`]: the
+    /// `FontMetrics` (keyed by address), `line_height` (keyed by bit pattern) and `quantize`
+    /// flag.
+    ///
+    /// The contribution `add_text` folds in is a pure function of those inputs, applied to the
+    /// extents through `max`. Applying the same contribution again is therefore a no-op, and
+    /// can be skipped. Consecutive clusters usually share their run's metrics, so this turns
+    /// the per-cluster work (which involves `round`/`floor` calls) into a cheap comparison in
+    /// the common case.
+    ///
+    /// This is stored inside `LineBoxMetrics` so that it is cloned and restored along with the
+    /// extents when the line breaker rewinds to a marked break opportunity, and so that it is
+    /// cleared when the metrics are reset for a new line.
+    last_text: Option<(usize, u32, bool)>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -139,7 +153,20 @@ impl LineBoxMetrics {
     }
 
     fn add_text(&mut self, metrics: &FontMetrics, line_height: f32, quantize: bool) {
-        // TODO: perhaps precompute these run metrics and store in `RunMetrics`.
+        // The contribution this function folds in is a pure function of its inputs, applied
+        // through `max` only, so applying the same contribution again is a no-op. Consecutive
+        // clusters usually share their run's metrics, so skip the computation when the inputs
+        // are identical to the ones most recently applied.
+        let key = (
+            metrics as *const FontMetrics as usize,
+            line_height.to_bits(),
+            quantize,
+        );
+        if self.last_text == Some(key) {
+            return;
+        }
+        self.last_text = Some(key);
+
         let (ascent, descent) = if quantize {
             (metrics.ascent.round(), metrics.descent.round())
         } else {
