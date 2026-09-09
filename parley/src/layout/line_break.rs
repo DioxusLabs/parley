@@ -286,6 +286,24 @@ pub struct BreakerState {
     /// The max height available to the current line.
     line_max_height: f32,
 
+    /// Whether the line's vertical metrics (`LineState::box_metrics`) are
+    /// accumulated incrementally as atoms are appended to the line.
+    ///
+    /// The running metrics are only read mid-line by the max-height check
+    /// ([`Self::update_max_height_exceeded`]), which can only trigger when
+    /// `line_max_height` is finite, i.e. once `set_line_max_height` has been
+    /// called. `break_all_lines` never sets a max height, so accumulating per
+    /// atom is wasted work there and the metrics are instead computed once per
+    /// line in `commit_line`.
+    ///
+    /// The flag is sticky so that disabling and re-enabling a max height
+    /// mid-line does not leave subsequent atoms unaccumulated.
+    track_metrics: bool,
+    /// Set when `track_metrics` is enabled while a line is already in
+    /// progress: atoms appended before that point did not accumulate metrics,
+    /// so they must be backfilled before the next iteration observes them.
+    backfill_metrics: bool,
+
     /// The state of the current line
     line: LineState,
 
@@ -309,6 +327,8 @@ impl Default for BreakerState {
             layout_max_advance: 0.0,
             line_max_advance: 0.0,
             line_max_height: f32::MAX,
+            track_metrics: false,
+            backfill_metrics: false,
             line: LineState::default(),
             prev_boundary: None,
             emergency_boundary: None,
@@ -323,7 +343,7 @@ impl BreakerState {
     /// it extends above and below the baseline, *not* including leading) as well as the intrinsic
     /// line height of the atom (i.e. including the full leading), which may be smaller than
     /// `ascent + descent` when the leading is negative.
-    #[inline]
+    #[inline(always)]
     fn append_atom_to_line(
         &mut self,
         atom: &Atom<'_>,
@@ -336,10 +356,12 @@ impl BreakerState {
         self.line.clusters.end = atom.shaped_clusters_range().end;
         self.cluster_idx = atom.shaped_clusters_range().end;
         self.line.x = next_x;
-        self.line
-            .box_metrics
-            .add_text(font_metrics, line_height, quantize);
-        self.update_max_height_exceeded();
+        if self.track_metrics {
+            self.line
+                .box_metrics
+                .add_text(font_metrics, line_height, quantize);
+            self.update_max_height_exceeded();
+        }
     }
 
     /// Add an inline box to the line.
@@ -357,10 +379,15 @@ impl BreakerState {
         self.item_idx += 1;
         self.line.items.end += 1;
         self.line.x = next_x;
+        // Inline box contributions are provided by the caller (e.g. for custom
+        // out-of-flow boxes) and cannot be recomputed at line-commit time, so
+        // they are always accumulated.
         self.line
             .box_metrics
             .add_inline_box(ascent, descent, quantize);
-        self.update_max_height_exceeded();
+        if self.track_metrics {
+            self.update_max_height_exceeded();
+        }
     }
 
     /// Store the current iteration state so that we can revert to it if we later want to take
@@ -429,6 +456,12 @@ impl BreakerState {
     #[inline(always)]
     pub fn set_line_max_height(&mut self, height: f32) {
         self.line_max_height = height;
+        if height != f32::MAX && !self.track_metrics {
+            // Atoms already appended to the in-progress line did not
+            // accumulate metrics; flag them for backfill.
+            self.backfill_metrics = true;
+        }
+        self.track_metrics |= height != f32::MAX;
     }
 
     /// Get the x-offset of the current line
@@ -477,6 +510,27 @@ impl<'a, B: Brush> BreakLines<'a, B> {
             state: BreakerState::default(),
             prev_state: None,
             done: false,
+        }
+    }
+
+    /// Accumulate the metrics of atoms that were appended while
+    /// `track_metrics` was disabled, when tracking is enabled mid-line via
+    /// `set_line_max_height`. Inline boxes need no backfill: their
+    /// contributions are always accumulated in `append_inline_box_to_line`.
+    fn backfill_line_metrics(&mut self) {
+        if !self.state.backfill_metrics {
+            return;
+        }
+        self.state.backfill_metrics = false;
+        for item in &self.layout.data.items[self.state.line.items.clone()] {
+            if item.kind == LayoutItemKind::TextRun {
+                let run = &self.layout.data.shaped_text.runs()[item.index];
+                self.state.line.box_metrics.add_text(
+                    &run.font_metrics,
+                    self.layout.data.runs[item.index].line_height,
+                    self.layout.data.quantize,
+                );
+            }
         }
     }
 
@@ -615,6 +669,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         if self.done {
             return None;
         }
+        self.backfill_line_metrics();
         self.prev_state = Some(self.state.clone());
 
         // HACK: ignore max_advance for empty layouts
@@ -955,6 +1010,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         if self.done {
             return None;
         }
+        self.backfill_line_metrics();
 
         let line_indent = self.resolve_indent();
 
@@ -1514,6 +1570,16 @@ fn commit_line<B: Brush>(
 
                 last_item_kind = item.kind;
                 committed_text_run = true;
+
+                // Accumulate this run's contribution to the line's vertical
+                // metrics at commit time rather than per atom (see
+                // `track_metrics`). `add_text` is a `max` reduction, so this
+                // is a no-op for metrics already accumulated mid-line.
+                state.box_metrics.add_text(
+                    &shaped_run.font_metrics,
+                    layout.data.runs[item.index].line_height,
+                    layout.data.quantize,
+                );
 
                 // Map the cluster range to source-text and grapheme ranges. Line boundaries are
                 // always aligned to `Atom`s, i.e., line bounds are always grapheme bounds.
