@@ -374,6 +374,51 @@ fn trailing_whitespace_ltr() {
     }
 }
 
+/// Trailing spaces hang off the end of the line they follow instead of starting an empty line,
+/// including when they are the last content of the layout or run up against a hard break.
+#[test]
+fn trailing_whitespace_does_not_add_line() {
+    let mut env = TestEnv::new(test_name!(), None);
+
+    for (text, name, lines) in [
+        ("AAA ", "single_space", 1),
+        ("AAA   ", "multiple_spaces", 1),
+        ("\u{a0}AAA\u{a0}", "nbsp", 1),
+        ("AAA \nBBB", "hard_wrap", 2),
+        ("AAA BBB ", "soft_wrap", 2),
+    ] {
+        let builder = env.ranged_builder(text);
+        let mut layout = builder.build(text);
+        layout.break_all_lines(None);
+        let widths = layout.calculate_content_widths();
+        layout.break_all_lines(Some(if name == "soft_wrap" {
+            widths.min
+        } else {
+            widths.max
+        }));
+        layout.align(Alignment::Start, AlignmentOptions::default());
+
+        assert_eq!(layout.len(), lines, "{name}: unexpected line count");
+        env.with_name(name).check_layout_snapshot(&layout);
+    }
+
+    // Trailing spaces that span a style (run) boundary hang together as well, even when the
+    // line is already full before the first of them.
+    for (text, name, lines) in [
+        ("AAA   ", "styled_trailing_spaces", 1),
+        ("AAA   BBB", "styled_spaces_soft_wrap", 2),
+    ] {
+        let mut builder = env.ranged_builder(text);
+        builder.push(StyleProperty::FontSize(24.0), 4..5);
+        let mut layout = builder.build(text);
+        layout.break_all_lines(Some(30.0));
+        layout.align(Alignment::Start, AlignmentOptions::default());
+
+        assert_eq!(layout.len(), lines, "{name}: unexpected line count");
+        env.with_name(name).check_layout_snapshot(&layout);
+    }
+}
+
 #[test]
 fn trailing_whitespace_rtl() {
     let mut env = TestEnv::new(test_name!(), None);
