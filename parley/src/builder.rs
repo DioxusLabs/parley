@@ -5,7 +5,7 @@
 
 use super::FontContext;
 use super::context::LayoutContext;
-use super::style::{Brush, StyleProperty, TextStyle, WhiteSpaceCollapse};
+use super::style::{Brush, StyleProperty, TextStyle};
 
 use super::layout::Layout;
 
@@ -38,6 +38,8 @@ impl BuilderOptions<'_> {
 }
 
 /// Builder for constructing a text layout with ranged attributes.
+///
+/// Text must already be whitespace-processed; source text and byte ranges are preserved.
 #[must_use]
 pub struct RangedBuilder<'a, B: Brush> {
     pub(crate) options: BuilderOptions<'a>,
@@ -103,6 +105,8 @@ impl<'b, B: Brush> RangedBuilder<'b, B> {
 
 /// Builder for constructing a text layout from a style table and
 /// indexed style runs.
+///
+/// Text must already be whitespace-processed; source text and byte ranges are preserved.
 #[must_use]
 pub struct StyleRunBuilder<'a, B: Brush> {
     pub(crate) options: BuilderOptions<'a>,
@@ -255,8 +259,8 @@ impl<'b, B: Brush> TreeBuilder<'b, B> {
     }
 
     pub fn push_inline_box(&mut self, mut inline_box: InlineBox) {
+        self.lcx.tree_style_builder.commit_uncommitted_text();
         if inline_box.kind == InlineBoxKind::InFlow {
-            self.lcx.tree_style_builder.commit_uncommitted_text();
             self.lcx.tree_style_builder.flush_pending_whitespace();
             self.lcx.tree_style_builder.set_last_item_is_inline_box();
         }
@@ -264,12 +268,6 @@ impl<'b, B: Brush> TreeBuilder<'b, B> {
         // TODO: arrange type better here to factor out the index
         inline_box.index = self.lcx.tree_style_builder.committed_text_len();
         self.lcx.inline_boxes.push(inline_box);
-    }
-
-    pub fn set_white_space_mode(&mut self, white_space_collapse: WhiteSpaceCollapse) {
-        self.lcx
-            .tree_style_builder
-            .set_white_space_mode(white_space_collapse);
     }
 
     /// Sets the paragraph's base direction.
