@@ -29,7 +29,7 @@ pub(crate) const fn whitespace_can_hang(whitespace: Whitespace) -> bool {
     )
 }
 
-fn is_break_space<B: Brush>(character: &Character, styles: &[Style<B>]) -> bool {
+fn is_break_space<B: Brush>(character: Character, styles: &[Style<B>]) -> bool {
     styles[character.style_index as usize].white_space_collapse == WhiteSpaceCollapse::BreakSpaces
         && matches!(
             character.info.whitespace(),
@@ -44,10 +44,10 @@ pub(crate) fn soft_line_break<B: Brush>(
     index: usize,
     styles: &[Style<B>],
 ) -> bool {
-    if index > 0 && is_break_space(&characters[index - 1], styles) {
+    if index > 0 && is_break_space(characters[index - 1], styles) {
         return true;
     }
-    let character = &characters[index];
+    let character = characters[index];
     character.info.boundary() == Boundary::Line && !is_break_space(character, styles)
 }
 
