@@ -16,7 +16,7 @@ use super::utils::{
 use crate::{
     BaseDirection, BreakReason, FontContext, FontFamily, FontFeatures, FontVariations, Layout,
     LayoutContext, LineHeight, OverflowWrap, RangedBuilder, StyleProperty, StyleRunBuilder,
-    TextStyle, TextWrapMode, TreeBuilder, WordBreak,
+    TextStyle, TextWrapMode, TreeBuilder, WhiteSpaceCollapse, WordBreak,
 };
 
 /// Set of options for [`build_layout_with_ranged`].
@@ -75,6 +75,58 @@ fn build_layout_with_style_runs(
     let mut layout = rb.build(opts.text);
     layout.break_all_lines(opts.max_advance);
     layout
+}
+
+#[test]
+fn tree_preserve_breaks_across_runs() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    for text in ["a \t\r\n \tb", "a \t\r\n \t\r\n b", "\r\n \t"] {
+        for split in 0..=text.len() {
+            let style = TextStyle {
+                font_family: FontFamily::from(FONT_FAMILY_LIST),
+                ..TextStyle::default()
+            };
+            let mut tree = lcx.tree_builder(&mut fcx, 1., true, &style);
+            tree.set_white_space_mode(WhiteSpaceCollapse::PreserveBreaks);
+            tree.push_text(&text[..split]);
+            tree.push_style_modification_span(&[StyleProperty::FontSize(24.)]);
+            tree.push_text(&text[split..]);
+            tree.pop_style_span();
+            let (mut layout, transformed) = tree.build();
+            assert_eq!(transformed, text.replace([' ', '\t'], ""));
+            layout.break_all_lines(None);
+            assert_eq!(
+                layout.len(),
+                text.matches('\n').count() + 1,
+                "{text:?} at {split}"
+            );
+        }
+    }
+}
+
+#[test]
+fn collapsing_between_segment_breaks_does_not_create_crlf() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let style = TextStyle {
+        font_family: FontFamily::from(FONT_FAMILY_LIST),
+        ..TextStyle::default()
+    };
+    for input in ["a\r \nb", "a\r\t\nb", "a\r \t\nb"] {
+        for split in 0..=input.len() {
+            let mut tree = lcx.tree_builder(&mut fcx, 1., true, &style);
+            tree.set_white_space_mode(WhiteSpaceCollapse::PreserveBreaks);
+            tree.push_text(&input[..split]);
+            tree.push_style_modification_span(&[StyleProperty::FontSize(24.)]);
+            tree.push_text(&input[split..]);
+            tree.pop_style_span();
+            let (mut layout, transformed) = tree.build();
+            assert_eq!(transformed, "a\n\nb");
+            layout.break_all_lines(None);
+            assert_eq!(layout.len(), 3, "{input:?} at {split}");
+        }
+    }
 }
 
 #[test]
