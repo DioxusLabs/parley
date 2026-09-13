@@ -3,8 +3,8 @@
 
 //! Some whitespace-related utilities.
 
-use parley_engine::shape::Whitespace;
-use parley_engine::{Atom, ShapedSlice};
+use parley_engine::shape::{Character, Whitespace};
+use parley_engine::{Atom, Boundary, ShapedSlice};
 
 use crate::layout::Style;
 use crate::layout::spacing::EffectiveSpacing;
@@ -29,6 +29,28 @@ pub(crate) const fn whitespace_can_hang(whitespace: Whitespace) -> bool {
     )
 }
 
+fn is_break_space<B: Brush>(character: Character, styles: &[Style<B>]) -> bool {
+    styles[character.style_index as usize].white_space_collapse == WhiteSpaceCollapse::BreakSpaces
+        && matches!(
+            character.info.whitespace(),
+            Whitespace::Space | Whitespace::Tab | Whitespace::IdeographicSpace
+        )
+}
+
+/// Break-spaces permits wrapping after each preserved space, but not before the first one.
+/// Other Unicode separators retain their UAX #14 opportunities.
+pub(crate) fn soft_line_break<B: Brush>(
+    characters: &[Character],
+    index: usize,
+    styles: &[Style<B>],
+) -> bool {
+    if index > 0 && is_break_space(characters[index - 1], styles) {
+        return true;
+    }
+    let character = characters[index];
+    character.info.boundary() == Boundary::Line && !is_break_space(character, styles)
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Hanging {
     Never,
@@ -48,6 +70,7 @@ impl Hanging {
             (WhiteSpaceCollapse::Collapse | WhiteSpaceCollapse::PreserveBreaks, _) => Self::Always,
             (WhiteSpaceCollapse::Preserve, TextWrapMode::Wrap) => Self::Conditional,
             (WhiteSpaceCollapse::Preserve, TextWrapMode::NoWrap) => Self::Never,
+            (WhiteSpaceCollapse::BreakSpaces, _) => Self::Never,
         }
     }
 }

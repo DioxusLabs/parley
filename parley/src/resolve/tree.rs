@@ -111,7 +111,7 @@ impl<B: Brush> TreeStyleBuilder<B> {
 
         let span = self.current_span;
         match self.tree[span].style.white_space_collapse {
-            WhiteSpaceCollapse::Preserve => {
+            WhiteSpaceCollapse::Preserve | WhiteSpaceCollapse::BreakSpaces => {
                 if uncommitted_text.starts_with(is_segment_break) {
                     // CSS Text 4 § 4.3.1 removes collapsible whitespace before a preserved break.
                     self.pending_whitespace = None;
