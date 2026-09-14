@@ -13,7 +13,9 @@ use icu_normalizer::properties::{
     CanonicalComposition, CanonicalCompositionBorrowed, CanonicalDecomposition,
     CanonicalDecompositionBorrowed,
 };
-use icu_properties::props::{BidiMirroringGlyph, GeneralCategory, GraphemeClusterBreak, Script};
+use icu_properties::props::{
+    BidiClass, BidiMirroringGlyph, GeneralCategory, GraphemeClusterBreak, Script,
+};
 use icu_properties::{
     CodePointMapData, CodePointMapDataBorrowed, PropertyNamesShort, PropertyNamesShortBorrowed,
 };
@@ -176,7 +178,7 @@ pub struct CharInfo {
     /// The Unicode script this character belongs to.
     pub script: Script,
     /// The impact this character has on directionality.
-    pub bidi_class: icu_properties::props::BidiClass,
+    pub bidi_class: BidiClass,
     /// Whether or not the character is a bracket, plus mirror data if so.
     pub bracket: BidiMirroringGlyph,
 
@@ -211,7 +213,7 @@ impl CharInfo {
     fn new(
         boundary: Boundary,
         script: Script,
-        bidi_class: icu_properties::props::BidiClass,
+        bidi_class: BidiClass,
         bracket: BidiMirroringGlyph,
         is_variation_selector: bool,
         is_region_indicator: bool,
@@ -615,6 +617,11 @@ pub(crate) fn analyze_text(
     });
 
     let mut needs_bidi_resolution = false;
+    let paragraphs = &mut analyzer.paragraphs;
+    paragraphs.clear();
+    let mut para_chars = 0usize;
+    let mut para_bytes = 0usize;
+    let mut para_needs_bidi = false;
 
     analysis.info.reserve(text.len());
     boundary_iter
@@ -653,7 +660,11 @@ pub(crate) fn analyze_text(
                     }
                 };
 
-                needs_bidi_resolution |= bidi::needs_bidi_resolution(bidi_class);
+                let char_needs_bidi = bidi::needs_bidi_resolution(bidi_class);
+                needs_bidi_resolution |= char_needs_bidi;
+                para_needs_bidi |= char_needs_bidi;
+                para_chars += 1;
+                para_bytes += ch.len_utf8();
                 // TODO: maybe extend Properties to u64 to fit BidiMirroringGlyph
                 let bracket = data_sources.brackets().get(ch);
 
@@ -671,23 +682,119 @@ pub(crate) fn analyze_text(
                     is_grapheme_start,
                 ));
 
+                if bidi_class == BidiClass::ParagraphSeparator {
+                    paragraphs.push(Paragraph {
+                        char_len: para_chars,
+                        byte_len: para_bytes,
+                        needs_bidi: para_needs_bidi,
+                    });
+                    para_chars = 0;
+                    para_bytes = 0;
+                    para_needs_bidi = false;
+                }
+
                 next_mandatory_linebreak
             },
         );
 
+    if para_chars != 0 {
+        paragraphs.push(Paragraph {
+            char_len: para_chars,
+            byte_len: para_bytes,
+            needs_bidi: para_needs_bidi,
+        });
+    }
+
     if needs_bidi_resolution || options.base_direction == BaseDirection::Rtl {
-        analyzer.bidi.resolve(
-            text.chars().zip(
+        // `base_level` is derived over the entire text to preserve the behavior of
+        // resolving the text in a single call (in particular, `Auto` direction comes
+        // from the first strong character of the whole text, not per paragraph).
+        let base_level = match options.base_direction {
+            BaseDirection::Auto => {
+                let mut isolates = 0usize;
                 analysis
                     .info
                     .iter()
-                    .map(|info| (info.bidi_class, info.bracket)),
-            ),
-            options.base_direction,
-        );
-        core::mem::swap(&mut analysis.levels, &mut analyzer.bidi.levels);
-        analysis.paragraph_level = analyzer.bidi.base_level();
+                    .find_map(|info| match info.bidi_class {
+                        BidiClass::RightToLeftIsolate
+                        | BidiClass::LeftToRightIsolate
+                        | BidiClass::FirstStrongIsolate => {
+                            isolates += 1;
+                            None
+                        }
+                        BidiClass::PopDirectionalIsolate if isolates > 0 => {
+                            isolates -= 1;
+                            None
+                        }
+                        BidiClass::LeftToRight
+                        | BidiClass::RightToLeft
+                        | BidiClass::ArabicLetter
+                            if isolates == 0 =>
+                        {
+                            Some(BidiLevel::new(
+                                (info.bidi_class != BidiClass::LeftToRight) as u8,
+                            ))
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or(BidiLevel::new(0))
+            }
+            BaseDirection::Ltr => BidiLevel::new(0),
+            BaseDirection::Rtl => BidiLevel::new(1),
+        };
+        if base_level == BidiLevel::new(0) {
+            // Paragraphs (delimited by `ParagraphSeparator` characters) are resolved
+            // independently. `BidiResolver::resolve` resets embedding state at
+            // paragraph separators, so this is equivalent to a single `resolve` call,
+            // but allows paragraphs without bidirectional content to skip the UBA
+            // entirely: their characters all resolve to the base level.
+            let mut char_start = 0usize;
+            let mut byte_start = 0usize;
+            for para in paragraphs.iter() {
+                let char_end = char_start + para.char_len;
+                if para.needs_bidi {
+                    let para_text = &text[byte_start..byte_start + para.byte_len];
+                    analyzer.bidi.resolve(
+                        para_text.chars().zip(
+                            analysis.info[char_start..char_end]
+                                .iter()
+                                .map(|info| (info.bidi_class, info.bracket)),
+                        ),
+                        BaseDirection::Ltr,
+                    );
+                    analysis
+                        .levels
+                        .extend(analyzer.bidi.levels.iter().copied());
+                } else {
+                    analysis
+                        .levels
+                        .extend(core::iter::repeat_n(BidiLevel::new(0), para.char_len));
+                }
+                char_start = char_end;
+                byte_start += para.byte_len;
+            }
+            analysis.paragraph_level = BidiLevel::new(0);
+        } else {
+            analyzer.bidi.resolve(
+                text.chars().zip(
+                    analysis
+                        .info
+                        .iter()
+                        .map(|info| (info.bidi_class, info.bracket)),
+                ),
+                options.base_direction,
+            );
+            core::mem::swap(&mut analysis.levels, &mut analyzer.bidi.levels);
+            analysis.paragraph_level = analyzer.bidi.base_level();
+        }
     }
+}
+
+/// A paragraph within an analyzed text, for per-paragraph bidi resolution.
+pub(crate) struct Paragraph {
+    pub char_len: usize,
+    pub byte_len: usize,
+    pub needs_bidi: bool,
 }
 
 /// All characters contribute to shaping except:
