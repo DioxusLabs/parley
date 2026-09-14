@@ -116,15 +116,55 @@ pub(crate) fn shape_text<'a, B: Brush>(
             let item_style_index = char_style_indices[item_start_char];
             let item_style = &styles[usize::from(item_style_index)];
 
-            // Items are at least one character long, therefore the item's own first character is
-            // never a split point.
-            chars.next();
+            let char_end = if inline_box_iter.peek().is_none() {
+                // Fast path: with no inline boxes remaining, items can only split
+                // at shaping-relevant style changes, so we can scan
+                // `char_style_indices` directly instead of walking characters.
+                let mut cursor = item_start_char + 1;
+                loop {
+                    let Some(rel) = char_style_indices[cursor..]
+                        .iter()
+                        .position(|&style_index| style_index != item_style_index)
+                    else {
+                        // End of text.
+                        break char_count;
+                    };
+                    let char_index = cursor + rel;
+                    let style = &styles[usize::from(char_style_indices[char_index])];
+                    if !nearly_eq(style.font_size, item_style.font_size)
+                        || style.locale != item_style.locale
+                        || style.font_variations != item_style.font_variations
+                        || style.font_features != item_style.font_features
+                        || !nearly_eq(style.letter_spacing, item_style.letter_spacing)
+                        || !nearly_eq(style.word_spacing, item_style.word_spacing)
+                    {
+                        break char_index;
+                    }
+                    cursor = char_index + 1;
+                    if cursor == char_count {
+                        break char_count;
+                    }
+                }
+            } else {
+                // Catch `chars` up to the item start. This decodes each skipped
+                // character at most once across all items, so the fast path above
+                // never causes repeated rescanning.
+                while let Some(&(char_index, _)) = chars.peek() {
+                    if char_index >= item_start_char {
+                        break;
+                    }
+                    chars.next();
+                }
 
-            let char_end = loop {
-                let Some(&(char_index, (byte_index, _))) = chars.peek() else {
-                    // End of text.
-                    break char_count;
-                };
+                // Items are at least one character long, therefore the item's own first
+                // character is never a split point.
+                chars.next();
+
+                loop {
+                    let Some(&(char_index, (byte_index, _))) = chars.peek() else {
+                        // End of text.
+                        break char_count;
+                    };
 
                 // Split at inlines boxes, so each box falls on a shaping boundary.
                 //
@@ -163,6 +203,7 @@ pub(crate) fn shape_text<'a, B: Brush>(
                 }
 
                 chars.next();
+                }
             };
 
             item_start_char = char_end;
