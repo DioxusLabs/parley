@@ -619,8 +619,8 @@ pub(crate) fn analyze_text(
     let mut needs_bidi_resolution = false;
     let paragraphs = &mut analyzer.paragraphs;
     paragraphs.clear();
-    let mut para_chars = 0usize;
-    let mut para_bytes = 0usize;
+    let mut para_chars = 0_usize;
+    let mut para_bytes = 0_usize;
     let mut para_needs_bidi = false;
 
     analysis.info.reserve(text.len());
@@ -711,7 +711,7 @@ pub(crate) fn analyze_text(
         // from the first strong character of the whole text, not per paragraph).
         let base_level = match options.base_direction {
             BaseDirection::Auto => {
-                let mut isolates = 0usize;
+                let mut isolates = 0_usize;
                 analysis
                     .info
                     .iter()
@@ -748,8 +748,8 @@ pub(crate) fn analyze_text(
             // paragraph separators, so this is equivalent to a single `resolve` call,
             // but allows paragraphs without bidirectional content to skip the UBA
             // entirely: their characters all resolve to the base level.
-            let mut char_start = 0usize;
-            let mut byte_start = 0usize;
+            let mut char_start = 0_usize;
+            let mut byte_start = 0_usize;
             for para in paragraphs.iter() {
                 let char_end = char_start + para.char_len;
                 if para.needs_bidi {
@@ -762,9 +762,7 @@ pub(crate) fn analyze_text(
                         ),
                         BaseDirection::Ltr,
                     );
-                    analysis
-                        .levels
-                        .extend(analyzer.bidi.levels.iter().copied());
+                    analysis.levels.extend(analyzer.bidi.levels.iter().copied());
                 } else {
                     analysis
                         .levels
