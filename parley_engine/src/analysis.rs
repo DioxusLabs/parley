@@ -177,8 +177,6 @@ pub struct CharInfo {
     pub script: Script,
     /// The impact this character has on directionality.
     pub bidi_class: icu_properties::props::BidiClass,
-    /// Whether or not the character is a bracket, plus mirror data if so.
-    pub bracket: BidiMirroringGlyph,
 
     flags: u8,
 }
@@ -212,7 +210,6 @@ impl CharInfo {
         boundary: Boundary,
         script: Script,
         bidi_class: icu_properties::props::BidiClass,
-        bracket: BidiMirroringGlyph,
         is_variation_selector: bool,
         is_region_indicator: bool,
         is_control: bool,
@@ -225,7 +222,6 @@ impl CharInfo {
             boundary,
             script,
             bidi_class,
-            bracket,
             flags: (is_variation_selector as u8) << Self::VARIATION_SELECTOR_SHIFT
                 | (is_region_indicator as u8) << Self::REGION_INDICATOR_SHIFT
                 | (is_control as u8) << Self::CONTROL_SHIFT
@@ -654,14 +650,11 @@ pub(crate) fn analyze_text(
                 };
 
                 needs_bidi_resolution |= bidi::needs_bidi_resolution(bidi_class);
-                // TODO: maybe extend Properties to u64 to fit BidiMirroringGlyph
-                let bracket = data_sources.brackets().get(ch);
 
                 analysis.info.push(CharInfo::new(
                     boundary,
                     script,
                     bidi_class,
-                    bracket,
                     is_variation_selector,
                     is_region_indicator,
                     general_category == GeneralCategory::Control,
@@ -676,12 +669,16 @@ pub(crate) fn analyze_text(
         );
 
     if needs_bidi_resolution || options.base_direction == BaseDirection::Rtl {
+        // Bracket data is only needed for bidi resolution, so it is looked up here
+        // rather than stored on every `CharInfo`.
+        let brackets = data_sources.brackets();
         analyzer.bidi.resolve(
             text.chars().zip(
                 analysis
                     .info
                     .iter()
-                    .map(|info| (info.bidi_class, info.bracket)),
+                    .zip(text.chars())
+                    .map(|(info, ch)| (info.bidi_class, brackets.get(ch))),
             ),
             options.base_direction,
         );
