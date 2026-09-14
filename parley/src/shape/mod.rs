@@ -124,18 +124,20 @@ pub(crate) fn shape_text<'a, B: Brush>(
             script = item.script;
         }
         let level = levels.get(char_index).copied().unwrap_or(0);
+        let mut next_style_index = None;
         if item.style_index != *style_index {
-            item.style_index = *style_index;
-            style = &styles[*style_index as usize];
-            if !nearly_eq(style.font_size, item.size)
-                || style.locale != item.locale
-                || style.font_variations != item.variations
-                || style.font_features != item.features
-                || !nearly_eq(style.letter_spacing, item.letter_spacing)
-                || !nearly_eq(style.word_spacing, item.word_spacing)
+            let next_style = &styles[*style_index as usize];
+            if !nearly_eq(next_style.font_size, item.size)
+                || next_style.locale != item.locale
+                || next_style.font_variations != item.variations
+                || next_style.font_features != item.features
+                || !nearly_eq(next_style.letter_spacing, item.letter_spacing)
+                || !nearly_eq(next_style.word_spacing, item.word_spacing)
+                || next_style.line_height != style.line_height
             {
                 break_run = true;
             }
+            next_style_index = Some(*style_index);
         }
 
         if level != item.level || script != item.script {
@@ -177,6 +179,14 @@ pub(crate) fn shape_text<'a, B: Brush>(
                 layout,
                 analysis_data_sources,
             );
+            text_range.start = text_range.end;
+            char_range.start = char_range.end;
+        }
+        if let Some(next_style_index) = next_style_index {
+            item.style_index = next_style_index;
+            style = &styles[next_style_index as usize];
+        }
+        if break_run {
             item.size = style.font_size;
             item.level = level;
             item.script = script;
@@ -185,8 +195,6 @@ pub(crate) fn shape_text<'a, B: Brush>(
             item.features = style.font_features;
             item.word_spacing = style.word_spacing;
             item.letter_spacing = style.letter_spacing;
-            text_range.start = text_range.end;
-            char_range.start = char_range.end;
         }
 
         if let Some(deferred_boxes) = deferred_boxes {
