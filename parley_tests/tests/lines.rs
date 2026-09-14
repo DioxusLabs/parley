@@ -589,3 +589,27 @@ fn lines_line_height_absolute() {
     layout.align(Alignment::Start, AlignmentOptions::default());
     env.check_layout_snapshot(&layout);
 }
+
+/// A run must use its own `line-height`, not the line height of the style that follows it.
+///
+/// Here the first word has a large font size and line height, followed by a small style. Runs
+/// are split at the font size change, and the line box must be tall enough for the large run.
+#[test]
+fn lines_line_height_per_run_boundary() {
+    let mut env = TestEnv::new(test_name!(), None);
+    let text = "Test123";
+
+    let mut builder = env.ranged_builder(text);
+    builder.push_default(StyleProperty::FontSize(10.0));
+    builder.push_default(LineHeight::Absolute(11.0));
+    builder.push(StyleProperty::FontSize(30.0), 0..4);
+    builder.push(LineHeight::Absolute(35.0), 0..4);
+
+    let mut layout = builder.build(text);
+    layout.break_all_lines(None);
+
+    assert_eq!(layout.len(), 1);
+    let line = layout.get(0).unwrap();
+    assert_eq!(line.metrics().line_height, 35.0);
+    assert_eq!(layout.height(), 35.0);
+}
