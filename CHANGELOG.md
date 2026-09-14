@@ -12,6 +12,12 @@ Subheadings to categorize changes are `added, changed, deprecated, removed, fixe
 
 This release has an [MSRV] of 1.88.
 
+### Fixed
+
+#### Parley
+
+- A run's `line_height` was taken from the style of the *following* run when the style changed at a run boundary.
+
 ## [0.11.1] - 2026-08-16
 
 This release has an [MSRV] of 1.88.
