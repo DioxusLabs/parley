@@ -77,7 +77,7 @@ pub struct Item<'a> {
     // pub user_data: u16,
 }
 
-/// Produces the items in a text via [`Self::next`]; created by [`Analysis::itemize`].
+/// Produces the items in a text via [`Self::next_until`]; created by [`Analysis::itemize`].
 #[derive(Debug)]
 pub(crate) struct Itemizer<'a> {
     /// The input text.
@@ -109,8 +109,9 @@ impl Analysis {
     ///
     /// The `text` passed in must be the same as used for producing the `self` analysis.
     ///
-    /// The text is divided into items produced by a predicate passed to [`Itemizer::next`] and
-    /// further divided into segments of constant bidi level and script.
+    /// The text is divided into items ending at the character offsets passed to
+    /// [`Itemizer::next_until`], and further divided into segments of constant bidi level and
+    /// script.
     ///
     /// Characters that don't have a particular script have their script resolved based on
     /// surrounding context (see [`Segment::script`]).
@@ -138,123 +139,15 @@ impl Analysis {
 }
 
 impl Itemizer<'_> {
-    /// Produce the next segment, if any.
-    ///
-    /// For consecutive characters where the bidi level and script are unchanging, the `split_after`
-    /// predicate is called with the growing item range, and can be used to split on additional
-    /// properties like shaping-relevant style changes (e.g., font size) or properties like
-    /// language.
-    ///
-    /// The predicate is given a range encoding the current item and considers whether to split
-    /// after that item based on the next character. Iff the predicate returns `true`, the text is
-    /// split after that item; i.e., given a range of `start..end`, the predicate controls whether
-    /// that item is now finished, or whether it is extended to include the character at `end` (at
-    /// which point the item spans `start..end+1`).
-    //
-    // TODO: currently the items from `split_after` have the same effect as a change in bidi or
-    // script. This is not how browsers handle things. In particular, `split_after` should reset
-    // grapheme segmentation, whereas bidi and script should produce separately-shaped segments.
-    #[inline]
-    #[cfg(test)]
-    pub(crate) fn next(
-        &mut self,
-        mut split_after: impl FnMut(TextRange) -> bool,
-    ) -> Option<Segment> {
-        let len = self.char_info.len();
-        if self.pos >= len {
-            // We're already finished.
-            debug_assert!(
-                self.byte_pos == self.text.len()
-                    && (self.bidi_levels.is_empty() || self.bidi_levels.len() == len),
-                "`char_info`, `bidi_levels`, and `text` should now all be fully consumed \
-                (though note `bidi_levels` may already have been empty as a special-case)"
-            );
-            return None;
-        }
-
-        let no_levels = self.bidi_levels.is_empty();
-        let bytes = self.text.as_bytes();
-        let start_byte_offset = self.byte_pos;
-        let start_pos = self.pos;
-        let mut i = start_pos;
-        let mut byte_pos = start_byte_offset;
-        let mut item_bidi_level = BidiLevel::new(0); // Initialized in the loop.
-
-        loop {
-            let bidi_level = if no_levels {
-                self.paragraph_bidi_level
-            } else {
-                self.bidi_levels[i]
-            };
-            let mut script = self.char_info[i].script;
-
-            if !real_script(script) {
-                // This is a very simple heuristic, where if a character does not have a "real
-                // script," it inherits the script of the preceding character. UAX 24 paragraph
-                // 5.1 says this "works well in many cases", but also suggests performing, e.g.,
-                // bracket matching (for example, the parentheses in `hello (αβγ)` should ideally
-                // both be marked as being `Latin`). At that point, `Itemizer` would probably like
-                // to have reusable scratch for the bracket stack.
-                script = self.current_script;
-            }
-
-            // First iteration of the loop, initialize item properties.
-            if i == start_pos {
-                item_bidi_level = bidi_level;
-                self.current_script = script;
-            }
-
-            if bidi_level != item_bidi_level || script != self.current_script {
-                break;
-            }
-
-            if i > start_pos
-                && split_after(TextRange {
-                    byte_range: start_byte_offset..byte_pos,
-                    char_range: self.current_char_offset..self.current_char_offset + (i - start_pos),
-                })
-            {
-                break;
-            }
-
-            // Advance past this character. `bytes[byte_pos]` is the first byte of a `char`
-            // (never a UTF-8 continuation byte), so its leading bits give the char's length.
-            byte_pos += match bytes[byte_pos] {
-                ..0x80 => 1,
-                0xC0..=0xDF => 2,
-                0xE0..=0xEF => 3,
-                _ => 4,
-            };
-            i += 1;
-
-            if i >= len {
-                // The text is now empty, so we're finished.
-                break;
-            }
-        }
-
-        let item_char_len = i - start_pos;
-        self.pos = i;
-        self.byte_pos = byte_pos;
-        let start_char_offset = self.current_char_offset;
-        self.current_char_offset += item_char_len;
-
-        Some(Segment {
-            range: TextRange {
-                byte_range: start_byte_offset..byte_pos,
-                char_range: start_char_offset..self.current_char_offset,
-            },
-            script: icu_script_to_parlance_script(self.current_script),
-            bidi_level: item_bidi_level,
-        })
-    }
-
     /// Produce the next segment, which must not extend past `char_end`.
     ///
-    /// This is a specialization of [`Self::next`] for the common `split_after`
-    /// shape of `|range| range.char_range.end == char_end`: rather than invoking
-    /// a predicate per character, it scans ahead to the first bidi/script change
-    /// (or `char_end`), then advances the byte cursor in a single tight pass.
+    /// A segment ends at the first change in bidi level or script, or at `char_end`, whichever
+    /// comes first. Callers pass the end of the item being shaped as `char_end`, so that items
+    /// split the text in addition to bidi level and script.
+    //
+    // TODO: currently the items have the same effect as a change in bidi or script. This is not
+    // how browsers handle things. In particular, items should reset grapheme segmentation, whereas
+    // bidi and script should produce separately-shaped segments.
     pub(crate) fn next_until(&mut self, char_end: usize) -> Option<Segment> {
         let len = self.char_info.len();
         if self.pos >= len {
@@ -285,6 +178,12 @@ impl Itemizer<'_> {
         {
             let mut script = self.char_info[i].script;
             if !real_script(script) {
+                // This is a very simple heuristic, where if a character does not have a "real
+                // script," it inherits the script of the preceding character. UAX 24 paragraph
+                // 5.1 says this "works well in many cases", but also suggests performing, e.g.,
+                // bracket matching (for example, the parentheses in `hello (αβγ)` should ideally
+                // both be marked as being `Latin`). At that point, `Itemizer` would probably like
+                // to have reusable scratch for the bracket stack.
                 script = self.current_script;
             }
             self.current_script = script;
@@ -374,10 +273,12 @@ mod tests {
         analysis
     }
 
+    /// The segments of `text` as one single item, i.e. split only by bidi level and script.
     fn items(text: &str) -> Vec<Segment> {
         let analysis = analyze(text);
+        let char_count = analysis.char_info().len();
         let mut itemizer = analysis.itemize(text);
-        core::iter::from_fn(|| itemizer.next(|_| false)).collect()
+        core::iter::from_fn(|| itemizer.next_until(char_count)).collect()
     }
 
     #[test]
@@ -408,12 +309,14 @@ mod tests {
     }
 
     #[test]
-    fn predicate() {
+    fn item_ends_split_segments() {
         let text = "abcdef";
         let analysis = analyze(text);
         let mut itemizer = analysis.itemize(text);
-        let items: Vec<_> =
-            core::iter::from_fn(|| itemizer.next(|range| range.char_range.end == 3)).collect();
+        let items: Vec<_> = [3, 6]
+            .into_iter()
+            .map(|char_end| itemizer.next_until(char_end).unwrap())
+            .collect();
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].range.byte_range, 0..3);
         assert_eq!(items[0].range.char_range, 0..3);

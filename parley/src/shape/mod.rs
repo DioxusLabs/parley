@@ -166,43 +166,43 @@ pub(crate) fn shape_text<'a, B: Brush>(
                         break char_count;
                     };
 
-                // Split at inlines boxes, so each box falls on a shaping boundary.
-                //
-                // We loop because there may be multiple boxes at this index.
-                let mut split = false;
-                while let Some(inline_box) = inline_box_iter.peek() {
-                    if inline_box.index < byte_index {
-                        // Inline boxes *before* this index are popped (this occurs if the itemizer
-                        // split a run and we were not called, such as at a bidi boundary).
-                        inline_box_iter.next();
-                    } else if inline_box.index == byte_index {
-                        inline_box_iter.next();
-                        split = true;
-                    } else {
-                        break;
+                    // Split at inlines boxes, so each box falls on a shaping boundary.
+                    //
+                    // We loop because there may be multiple boxes at this index.
+                    let mut split = false;
+                    while let Some(inline_box) = inline_box_iter.peek() {
+                        if inline_box.index < byte_index {
+                            // Inline boxes *before* this index are popped (this occurs if the itemizer
+                            // split a run and we were not called, such as at a bidi boundary).
+                            inline_box_iter.next();
+                        } else if inline_box.index == byte_index {
+                            inline_box_iter.next();
+                            split = true;
+                        } else {
+                            break;
+                        }
                     }
-                }
 
-                if split {
-                    break char_index;
-                }
+                    if split {
+                        break char_index;
+                    }
 
-                let style_index = char_style_indices[char_index];
-                if style_index != item_style_index {
-                    let style = &styles[usize::from(style_index)];
-                    split = !nearly_eq(style.font_size, item_style.font_size)
-                        || style.locale != item_style.locale
-                        || style.font_variations != item_style.font_variations
-                        || style.font_features != item_style.font_features
-                        || !nearly_eq(style.letter_spacing, item_style.letter_spacing)
-                        || !nearly_eq(style.word_spacing, item_style.word_spacing);
-                }
+                    let style_index = char_style_indices[char_index];
+                    if style_index != item_style_index {
+                        let style = &styles[usize::from(style_index)];
+                        split = !nearly_eq(style.font_size, item_style.font_size)
+                            || style.locale != item_style.locale
+                            || style.font_variations != item_style.font_variations
+                            || style.font_features != item_style.font_features
+                            || !nearly_eq(style.letter_spacing, item_style.letter_spacing)
+                            || !nearly_eq(style.word_spacing, item_style.word_spacing);
+                    }
 
-                if split {
-                    break char_index;
-                }
+                    if split {
+                        break char_index;
+                    }
 
-                chars.next();
+                    chars.next();
                 }
             };
 
