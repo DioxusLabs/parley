@@ -136,10 +136,7 @@ impl Shaper {
 
             loop {
                 let segment = itemizer
-                    .next(
-                        #[inline(always)]
-                        |text_range| text_range.char_range.end == item.char_end as usize,
-                    )
+                    .next_until(item.char_end as usize)
                     .expect("A segment must be yielded, given items tile the full text exactly");
 
                 if shape_segment(

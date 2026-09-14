@@ -3,7 +3,7 @@
 
 //! Itemization breaks text into individually-shapeable items.
 
-use core::{ops::Range, str::CharIndices};
+use core::ops::Range;
 
 use icu_properties::props::Script as IcuScript;
 use parlance::{BidiLevel, Script};
@@ -80,11 +80,11 @@ pub struct Item<'a> {
 /// Produces the items in a text via [`Self::next`]; created by [`Analysis::itemize`].
 #[derive(Debug)]
 pub(crate) struct Itemizer<'a> {
-    /// Our underlying iterator over the input text.
-    char_indices: CharIndices<'a>,
-    /// The per-char info, parallel to [`Self::char_indices`].
+    /// The input text.
+    text: &'a str,
+    /// The per-char info, indexed by character index.
     char_info: &'a [CharInfo],
-    /// The per-char bidi level, parallel to [`Self::char_indices`].
+    /// The per-char bidi level, indexed by character index.
     bidi_levels: &'a [BidiLevel],
 
     /// The paragraph's base bidi level.
@@ -97,6 +97,11 @@ pub(crate) struct Itemizer<'a> {
     current_char_offset: usize,
     /// The running script of the last-processed item.
     current_script: IcuScript,
+
+    /// Character index of the next unconsumed character.
+    pos: usize,
+    /// Byte offset of the next unconsumed character.
+    byte_pos: usize,
 }
 
 impl Analysis {
@@ -118,13 +123,16 @@ impl Analysis {
             .unwrap_or(IcuScript::Latin);
 
         Itemizer {
-            char_indices: text.char_indices(),
+            text,
             char_info: self.char_info(),
             bidi_levels: self.bidi_levels(),
             paragraph_bidi_level: self.paragraph_level(),
 
             current_char_offset: 0,
             current_script: first_real_script,
+
+            pos: 0,
+            byte_pos: 0,
         }
     }
 }
@@ -147,33 +155,38 @@ impl Itemizer<'_> {
     // script. This is not how browsers handle things. In particular, `split_after` should reset
     // grapheme segmentation, whereas bidi and script should produce separately-shaped segments.
     #[inline]
+    #[cfg(test)]
     pub(crate) fn next(
         &mut self,
         mut split_after: impl FnMut(TextRange) -> bool,
     ) -> Option<Segment> {
-        if self.char_info.is_empty() {
+        let len = self.char_info.len();
+        if self.pos >= len {
             // We're already finished.
             debug_assert!(
-                self.char_indices.next().is_none() && self.bidi_levels.is_empty(),
-                "`char_info`, `bidi_levels`, and `char_indices` should now all be empty \
+                self.byte_pos == self.text.len()
+                    && (self.bidi_levels.is_empty() || self.bidi_levels.len() == len),
+                "`char_info`, `bidi_levels`, and `text` should now all be fully consumed \
                 (though note `bidi_levels` may already have been empty as a special-case)"
             );
             return None;
         }
 
+        let no_levels = self.bidi_levels.is_empty();
+        let bytes = self.text.as_bytes();
+        let start_byte_offset = self.byte_pos;
+        let start_pos = self.pos;
+        let mut i = start_pos;
+        let mut byte_pos = start_byte_offset;
         let mut item_bidi_level = BidiLevel::new(0); // Initialized in the loop.
 
-        let start_byte_offset = self.char_indices.offset();
-        let mut item_char_len = 0;
         loop {
-            let byte_offset = self.char_indices.offset();
-
-            let bidi_level = if self.bidi_levels.is_empty() {
+            let bidi_level = if no_levels {
                 self.paragraph_bidi_level
             } else {
-                self.bidi_levels[0]
+                self.bidi_levels[i]
             };
-            let mut script = self.char_info[0].script;
+            let mut script = self.char_info[i].script;
 
             if !real_script(script) {
                 // This is a very simple heuristic, where if a character does not have a "real
@@ -186,7 +199,7 @@ impl Itemizer<'_> {
             }
 
             // First iteration of the loop, initialize item properties.
-            if item_char_len == 0 {
+            if i == start_pos {
                 item_bidi_level = bidi_level;
                 self.current_script = script;
             }
@@ -195,35 +208,127 @@ impl Itemizer<'_> {
                 break;
             }
 
-            if item_char_len > 0
+            if i > start_pos
                 && split_after(TextRange {
-                    byte_range: start_byte_offset..byte_offset,
-                    char_range: self.current_char_offset..self.current_char_offset + item_char_len,
+                    byte_range: start_byte_offset..byte_pos,
+                    char_range: self.current_char_offset..self.current_char_offset + (i - start_pos),
                 })
             {
                 break;
             }
 
-            self.char_indices.next().expect("The passed in `text` was not of the same length as the text used to generate `Analysis`");
-            self.char_info = &self.char_info[1..];
-            if !self.bidi_levels.is_empty() {
-                self.bidi_levels = &self.bidi_levels[1..];
-            }
+            // Advance past this character. `bytes[byte_pos]` is the first byte of a `char`
+            // (never a UTF-8 continuation byte), so its leading bits give the char's length.
+            byte_pos += match bytes[byte_pos] {
+                ..0x80 => 1,
+                0xC0..=0xDF => 2,
+                0xE0..=0xEF => 3,
+                _ => 4,
+            };
+            i += 1;
 
-            item_char_len += 1;
-
-            if self.char_info.is_empty() {
+            if i >= len {
                 // The text is now empty, so we're finished.
                 break;
             }
         }
 
+        let item_char_len = i - start_pos;
+        self.pos = i;
+        self.byte_pos = byte_pos;
         let start_char_offset = self.current_char_offset;
         self.current_char_offset += item_char_len;
 
         Some(Segment {
             range: TextRange {
-                byte_range: start_byte_offset..self.char_indices.offset(),
+                byte_range: start_byte_offset..byte_pos,
+                char_range: start_char_offset..self.current_char_offset,
+            },
+            script: icu_script_to_parlance_script(self.current_script),
+            bidi_level: item_bidi_level,
+        })
+    }
+
+    /// Produce the next segment, which must not extend past `char_end`.
+    ///
+    /// This is a specialization of [`Self::next`] for the common `split_after`
+    /// shape of `|range| range.char_range.end == char_end`: rather than invoking
+    /// a predicate per character, it scans ahead to the first bidi/script change
+    /// (or `char_end`), then advances the byte cursor in a single tight pass.
+    pub(crate) fn next_until(&mut self, char_end: usize) -> Option<Segment> {
+        let len = self.char_info.len();
+        if self.pos >= len {
+            debug_assert!(
+                self.byte_pos == self.text.len()
+                    && (self.bidi_levels.is_empty() || self.bidi_levels.len() == len),
+                "`char_info`, `bidi_levels`, and `text` should now all be fully consumed \
+                (though note `bidi_levels` may already have been empty as a special-case)"
+            );
+            return None;
+        }
+        debug_assert!(
+            char_end > self.pos,
+            "char_end must be greater than the running char offset"
+        );
+
+        let no_levels = self.bidi_levels.is_empty();
+        let limit = char_end.min(len);
+        let start_pos = self.pos;
+        let mut i = start_pos;
+
+        // First iteration: initialize item properties.
+        let item_bidi_level = if no_levels {
+            self.paragraph_bidi_level
+        } else {
+            self.bidi_levels[i]
+        };
+        {
+            let mut script = self.char_info[i].script;
+            if !real_script(script) {
+                script = self.current_script;
+            }
+            self.current_script = script;
+        }
+
+        // Scan for the first bidi/script change, not passing `char_end`.
+        i += 1;
+        while i < limit {
+            let bidi_level = if no_levels {
+                self.paragraph_bidi_level
+            } else {
+                self.bidi_levels[i]
+            };
+            let mut script = self.char_info[i].script;
+            if !real_script(script) {
+                script = self.current_script;
+            }
+            if bidi_level != item_bidi_level || script != self.current_script {
+                break;
+            }
+            i += 1;
+        }
+
+        // Advance the byte cursor past the consumed characters.
+        let bytes = self.text.as_bytes();
+        let mut byte_pos = self.byte_pos;
+        for _ in 0..i - start_pos {
+            byte_pos += match bytes[byte_pos] {
+                ..0x80 => 1,
+                0xC0..=0xDF => 2,
+                0xE0..=0xEF => 3,
+                _ => 4,
+            };
+        }
+
+        let start_byte_offset = self.byte_pos;
+        self.pos = i;
+        self.byte_pos = byte_pos;
+        let start_char_offset = self.current_char_offset;
+        self.current_char_offset += i - start_pos;
+
+        Some(Segment {
+            range: TextRange {
+                byte_range: start_byte_offset..byte_pos,
                 char_range: start_char_offset..self.current_char_offset,
             },
             script: icu_script_to_parlance_script(self.current_script),
