@@ -49,6 +49,8 @@ struct LineState {
     /// flow to the caller to handle the constraint violation.
     ///
     /// This never happens when calling `break_all_lines` as it never sets `line_max_height`, and it defaults to `f32::MAX`.
+    /// The check is only performed once a max height has been configured via
+    /// `BreakerState::set_line_max_height`.
     max_height_exceeded: bool,
 
     /// We lag the text-wrap-mode by one cluster due to line-breaking boundaries only
@@ -309,6 +311,11 @@ pub struct BreakerState {
     line_max_advance: f32,
     /// The max height available to the current line.
     line_max_height: f32,
+    /// Whether a max height has been configured via [`Self::set_line_max_height`].
+    ///
+    /// When `false`, `line_max_height` is still at its default of `f32::MAX` and the per-atom
+    /// exceeded check is skipped.
+    has_line_max_height: bool,
 
     /// The state of the current line
     line: LineState,
@@ -333,6 +340,7 @@ impl Default for BreakerState {
             layout_max_advance: 0.0,
             line_max_advance: 0.0,
             line_max_height: f32::MAX,
+            has_line_max_height: false,
             line: LineState::default(),
             prev_boundary: None,
             emergency_boundary: None,
@@ -416,7 +424,10 @@ impl BreakerState {
 
     #[inline(always)]
     fn update_max_height_exceeded(&mut self) {
-        self.line.max_height_exceeded = self.line.box_metrics.line_height() > self.line_max_height;
+        if self.has_line_max_height {
+            self.line.max_height_exceeded =
+                self.line.box_metrics.line_height() > self.line_max_height;
+        }
     }
 
     /// Get the max-advance of the entire layout
@@ -450,6 +461,7 @@ impl BreakerState {
     #[inline(always)]
     pub fn set_line_max_height(&mut self, height: f32) {
         self.line_max_height = height;
+        self.has_line_max_height = true;
     }
 
     /// Get the x-offset of the current line
