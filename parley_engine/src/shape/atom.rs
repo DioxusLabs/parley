@@ -447,24 +447,26 @@ impl<'a> Iterator for Atoms<'a> {
             return None;
         }
 
-        let mut advance = self.slice.shaped_clusters[start as usize].advance;
+        // Bounding the slice up front lets a single `get` serve as both the bound and the
+        // bounds check in the (hot) loop below.
+        let shaped_clusters = &self.slice.shaped_clusters[..bound as usize];
+        let first = &shaped_clusters[start as usize];
+        let mut last = first;
+        let mut advance = first.advance;
         let mut idx = start + 1;
-        while idx < bound && !self.slice.shaped_clusters[idx as usize].is_grapheme_start() {
-            advance += self.slice.shaped_clusters[idx as usize].advance;
+        while let Some(cluster) = shaped_clusters.get(idx as usize) {
+            if cluster.is_grapheme_start() {
+                break;
+            }
+            advance += cluster.advance;
+            last = cluster;
             idx += 1;
         }
         self.cluster_idx = idx;
         Some(Atom {
             slice: self.slice,
             clusters: (start, idx),
-            chars: (
-                self.slice.shaped_clusters[start as usize]
-                    .chars_range()
-                    .start,
-                self.slice.shaped_clusters[idx as usize - 1]
-                    .chars_range()
-                    .end,
-            ),
+            chars: (first.chars_range.0, last.chars_range.1),
             advance,
         })
     }
