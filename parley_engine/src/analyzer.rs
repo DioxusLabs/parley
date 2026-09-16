@@ -3,18 +3,20 @@
 
 //! The analyzer API.
 
+use alloc::vec::Vec;
 use core::ops::Range;
 
 use parlance::{BaseDirection, WordBreak};
 
 use crate::{bidi::BidiResolver, break_overrides::LineBreakOverrideFn};
 
-use crate::analysis::{Analysis, analyze_text};
+use crate::analysis::{Analysis, Paragraph, analyze_text};
 
 /// Reusable scratch for [`Analyzer::analyze`].
 #[derive(Default)]
 pub struct Analyzer {
     pub(crate) bidi: BidiResolver,
+    pub(crate) paragraphs: Vec<Paragraph>,
 }
 
 impl core::fmt::Debug for Analyzer {
