@@ -506,6 +506,15 @@ impl<'a> Atom<'a> {
         self.slice.characters_in(self.char_range())
     }
 
+    /// The logically first [`Character`] of this atom.
+    ///
+    /// Atoms are never empty, so this always exists. It carries the atom's line breaking boundary,
+    /// whitespace classification and style index.
+    #[inline(always)]
+    pub fn first_character(&self) -> &'a Character {
+        &self.slice.characters[self.chars.0 as usize]
+    }
+
     /// The range of [`ShapedCluster`] into the underlying [`ShapedSlice`] this atom spans.
     #[inline(always)]
     pub fn shaped_clusters_range(&self) -> Range<u32> {

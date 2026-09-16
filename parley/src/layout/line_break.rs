@@ -795,7 +795,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     // Iterate over the remaining atoms in the Run
                     for atom in slice.atoms_from(self.state.cluster_idx) {
                         // Retrieve metadata about the atom
-                        let first_character = &atom.characters()[0];
+                        let first_character = atom.first_character();
                         let whitespace = first_character.info.whitespace();
                         let is_newline = whitespace == Whitespace::Newline;
                         // Whether this atom is a justification opportunity.
@@ -1091,7 +1091,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             return Some(());
                         }
 
-                        let first_character = &atom.characters()[0];
+                        let first_character = atom.first_character();
                         let whitespace = first_character.info.whitespace();
                         let is_newline = whitespace == Whitespace::Newline;
                         let is_separator = is_word_separator(whitespace);
@@ -1619,7 +1619,7 @@ fn hanging_whitespace<B: Brush>(
                         effective_spacing,
                         line_item.is_rtl(),
                     );
-                    let first_character = &atom.characters()[0];
+                    let first_character = atom.first_character();
                     let whitespace = first_character.info.whitespace();
                     if in_conditional_suffix && whitespace != Whitespace::Newline {
                         if layout.data.styles[first_character.style_index as usize]
