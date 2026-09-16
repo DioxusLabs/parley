@@ -795,7 +795,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     // Iterate over the remaining atoms in the Run
                     for atom in slice.atoms_from(self.state.cluster_idx) {
                         // Retrieve metadata about the atom
-                        let first_character = &atom.characters()[0];
+                        let first_character = atom.first_character();
                         let whitespace = first_character.info.whitespace();
                         let is_newline = whitespace == Whitespace::Newline;
                         // Whether this is a space that is allowed to hang past the line.
@@ -1091,7 +1091,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             return Some(());
                         }
 
-                        let first_character = &atom.characters()[0];
+                        let first_character = atom.first_character();
                         let whitespace = first_character.info.whitespace();
                         let is_newline = whitespace == Whitespace::Newline;
                         let is_separator = is_word_separator(whitespace);
@@ -1586,7 +1586,7 @@ fn hanging_whitespace<B: Brush>(
                     // Justification can't stretch within an atom, so it stops at the start of the
                     // last atom that hangs in its entirety or only partially.
                     justification_end_cluster = atom.shaped_clusters_range().start;
-                    if is_word_separator(atom.characters()[0].info.whitespace()) {
+                    if is_word_separator(atom.first_character().info.whitespace()) {
                         hanging_opportunities += 1;
                     }
                     if !all_hang {
