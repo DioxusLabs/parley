@@ -780,6 +780,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                     // Additional spacing to apply between atoms.
                     let spacing = EffectiveSpacing::new(run.data.spacing, Justification::NONE);
+                    let has_spacing = !spacing.is_zero();
 
                     // Note that, within a run, all the atoms' text metrics are the same.
                     let line_height = run.data.line_height;
@@ -881,7 +882,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                         // Breaking an atom requires reshaping, which we don't do here, so it is
                         // consumed as a whole (this includes all clusters of a ligature).
-                        let advance = spacing.atom_advance(&atom);
+                        let advance = if has_spacing {
+                            spacing.atom_advance(&atom)
+                        } else {
+                            atom.advance()
+                        };
 
                         // Compute the x position of the content being currently processed
                         let next_x = self.state.line.x + advance;
