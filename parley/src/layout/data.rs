@@ -14,8 +14,8 @@ use core::ops::Range;
 
 use alloc::vec::Vec;
 use parlance::BidiLevel;
-use parley_engine::ShapedText;
 use parley_engine::shape::Whitespace;
+use parley_engine::{Boundary, ShapedText};
 
 /// `HarfRust`-based run data
 #[derive(Clone, Debug, PartialEq)]
@@ -131,6 +131,9 @@ pub(crate) struct LayoutData<B: Brush> {
 
     // Output of style resolution (input to line breaking)
     pub(crate) styles: Vec<Style<B>>,
+    /// Whether any style uses `WhiteSpaceCollapse::BreakSpaces`, which requires the line breaker
+    /// and intrinsic sizing to consult styles for break opportunities.
+    pub(crate) has_break_spaces: bool,
     pub(crate) inline_boxes: Vec<InlineBox>,
 
     // Output of shaping (input to line breaking)
@@ -174,6 +177,7 @@ impl<B: Brush> Default for LayoutData<B> {
             full_width: 0.,
             height: 0.,
             styles: Vec::new(),
+            has_break_spaces: false,
             inline_boxes: Vec::new(),
             shaped_text: ShapedText::new(),
             runs: Vec::new(),
@@ -206,12 +210,22 @@ impl<B: Brush> LayoutData<B> {
             self.alignment = None;
         }
         self.styles.clear();
+        self.has_break_spaces = false;
         self.inline_boxes.clear();
         self.shaped_text.clear();
         self.runs.clear();
         self.items.clear();
         self.lines.clear();
         self.line_items.clear();
+    }
+
+    pub(crate) fn set_styles(&mut self, styles: impl Iterator<Item = Style<B>>) {
+        self.styles.clear();
+        self.styles.extend(styles);
+        self.has_break_spaces = self
+            .styles
+            .iter()
+            .any(|s| s.white_space_collapse == WhiteSpaceCollapse::BreakSpaces);
     }
 
     /// Push an inline box to the list of items
@@ -320,12 +334,13 @@ impl<B: Brush> LayoutData<B> {
                         let style = &self.styles[first_character.style_index as usize];
                         let prev_text_wrap_mode = text_wrap_mode;
                         text_wrap_mode = style.text_wrap_mode;
+                        let is_soft_line_break = if self.has_break_spaces {
+                            soft_line_break(self, atom.char_range().start as usize)
+                        } else {
+                            first_character.info.boundary() == Boundary::Line
+                        };
                         if prev_text_wrap_mode == TextWrapMode::Wrap
-                            && (soft_line_break(
-                                self.shaped_text.characters(),
-                                atom.char_range().start as usize,
-                                &self.styles,
-                            ) || style.overflow_wrap == OverflowWrap::Anywhere)
+                            && (is_soft_line_break || style.overflow_wrap == OverflowWrap::Anywhere)
                         {
                             min_width =
                                 min_width.max(running_min_width - running_hanging_whitespace);

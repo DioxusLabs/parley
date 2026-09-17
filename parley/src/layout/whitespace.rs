@@ -6,8 +6,8 @@
 use parley_engine::shape::{Character, Whitespace};
 use parley_engine::{Atom, Boundary, ShapedSlice};
 
-use crate::layout::Style;
 use crate::layout::spacing::EffectiveSpacing;
+use crate::layout::{LayoutData, Style};
 use crate::style::Brush;
 use crate::{TextWrapMode, WhiteSpaceCollapse};
 
@@ -63,12 +63,14 @@ fn is_break_space<B: Brush>(character: Character, styles: &[Style<B>]) -> bool {
 /// wrapping after each preserved space or tab, but not before the first one. Other Unicode
 /// separators retain their UAX #14 opportunities.
 ///
+/// This is only needed when some style uses `BreakSpaces` (see `LayoutData::has_break_spaces`);
+/// otherwise it's equivalent to the plain `Boundary::Line` check.
+///
 /// [css-break-spaces]: https://www.w3.org/TR/css-text-4/#white-space-collapsing
-pub(crate) fn soft_line_break<B: Brush>(
-    characters: &[Character],
-    index: usize,
-    styles: &[Style<B>],
-) -> bool {
+#[inline(never)]
+pub(crate) fn soft_line_break<B: Brush>(data: &LayoutData<B>, index: usize) -> bool {
+    let characters = data.shaped_text.characters();
+    let styles = &data.styles;
     if index > 0 && is_break_space(characters[index - 1], styles) {
         return true;
     }

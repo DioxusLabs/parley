@@ -352,8 +352,7 @@ fn build_into_layout<B: Brush>(
     // Copy the visual styles into the layout
     layout
         .data
-        .styles
-        .extend(lcx.style_table.iter().map(|s| s.as_layout_style()));
+        .set_styles(lcx.style_table.iter().map(|s| s.as_layout_style()));
 
     // Sort the inline boxes as subsequent code assumes that they are in text index order.
     // Note: It's important that this is a stable sort to allow users to control the order of contiguous inline boxes
