@@ -293,8 +293,16 @@ impl<B: Brush> LayoutData<B> {
     ///
     /// This should mirror the line breaker in terms of layout decisions like hanging whitespace (if
     /// it doesn't, one of the calculations is buggy).
-    #[expect(clippy::cast_possible_truncation, reason = "deferred")]
     pub(crate) fn calculate_content_widths(&self) -> ContentWidths {
+        if self.has_break_spaces {
+            self.calculate_content_widths_impl::<true>()
+        } else {
+            self.calculate_content_widths_impl::<false>()
+        }
+    }
+
+    #[expect(clippy::cast_possible_truncation, reason = "deferred")]
+    fn calculate_content_widths_impl<const HAS_BREAK_SPACES: bool>(&self) -> ContentWidths {
         let mut min_width = 0.0_f32;
         let mut max_width = 0.0_f32;
 
@@ -334,7 +342,7 @@ impl<B: Brush> LayoutData<B> {
                         let style = &self.styles[first_character.style_index as usize];
                         let prev_text_wrap_mode = text_wrap_mode;
                         text_wrap_mode = style.text_wrap_mode;
-                        let is_soft_line_break = if self.has_break_spaces {
+                        let is_soft_line_break = if HAS_BREAK_SPACES {
                             soft_line_break(self, atom.char_range().start as usize)
                         } else {
                             first_character.info.boundary() == Boundary::Line
