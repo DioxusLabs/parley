@@ -4,9 +4,7 @@
 use crate::inline_box::LayoutInlineBox;
 use crate::layout::spacing::{EffectiveSpacing, Justification, Spacing};
 use crate::layout::style_metrics::StyleMetrics;
-use crate::layout::whitespace::{
-    atom_hanging_advance, whitespace_can_hang, whitespace_hangs,
-};
+use crate::layout::whitespace::{atom_hanging_advance, whitespace_hangs};
 use crate::layout::{ContentWidths, LineMetrics, Style};
 use crate::resolve::ResolvedStyle;
 use crate::style::Brush;
