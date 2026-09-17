@@ -420,7 +420,7 @@ impl<'a, B: Brush> Iterator for GlyphRunIter<'a, B> {
                     while let Some(atom) = atoms.peek() {
                         let (atom_glyph_count, atom_advance) = atoms.measure(&atom);
                         if atom_glyph_count != 0 {
-                            let atom_style_index = atom.characters()[0].style_index;
+                            let atom_style_index = atom.first_character().style_index;
                             let atom_clusters = atom.shaped_clusters_range();
                             match &mut glyph_run {
                                 Some((style_index, shaped_clusters)) => {
