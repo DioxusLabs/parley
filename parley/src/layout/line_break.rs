@@ -627,14 +627,6 @@ impl<'a, B: Brush> BreakLines<'a, B> {
     /// Computes the next line in the paragraph. Returns the advance and size
     /// (width and height for horizontal layouts) of the line.
     fn break_next_line_or_box(&mut self) -> Option<YieldData> {
-        if self.layout.data.has_break_spaces {
-            self.break_next_line_or_box_impl::<true>()
-        } else {
-            self.break_next_line_or_box_impl::<false>()
-        }
-    }
-
-    fn break_next_line_or_box_impl<const HAS_BREAK_SPACES: bool>(&mut self) -> Option<YieldData> {
         assert!(
             self.state.layout_max_advance == f32::INFINITY
                 || self.state.line_max_advance - self.state.layout_max_advance < 1.0
@@ -797,7 +789,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         let is_separator = is_word_separator(whitespace);
                         let max_height_exceeded = self.state.line.max_height_exceeded;
                         let style = &self.layout.data.styles[first_character.style_index as usize];
-                        let is_soft_line_break = if HAS_BREAK_SPACES {
+                        let is_soft_line_break = if self.layout.data.has_break_spaces {
                             soft_line_break(&self.layout.data, atom.char_range().start as usize)
                         } else {
                             first_character.info.boundary() == Boundary::Line
