@@ -719,10 +719,11 @@ impl BreakerState {
 
     /// Discard both saved line-breaking opportunities, keeping their allocations for reuse.
     fn clear_boundaries(&mut self) {
-        for boundary in [self.prev_boundary.take(), self.emergency_boundary.take()] {
-            if let Some(boundary) = boundary {
-                self.spare_snapshots.push(boundary.subtree_snapshot);
-            }
+        for boundary in [self.prev_boundary.take(), self.emergency_boundary.take()]
+            .into_iter()
+            .flatten()
+        {
+            self.spare_snapshots.push(boundary.subtree_snapshot);
         }
     }
 
