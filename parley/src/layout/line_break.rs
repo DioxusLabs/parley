@@ -21,7 +21,7 @@ use crate::{InlineBoxKind, OverflowWrap, TextWrapMode, WhiteSpaceCollapse};
 
 use core::ops::Range;
 use parley_engine::shape::Whitespace;
-use parley_engine::{Atom, FontMetrics};
+use parley_engine::{Atom, Boundary, FontMetrics};
 
 #[derive(Default)]
 struct LineLayout {
@@ -789,6 +789,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         let is_separator = is_word_separator(whitespace);
                         let max_height_exceeded = self.state.line.max_height_exceeded;
                         let style = &self.layout.data.styles[first_character.style_index as usize];
+                        let is_soft_line_break = if self.layout.data.has_break_spaces {
+                            soft_line_break(&self.layout.data, atom.char_range().start as usize)
+                        } else {
+                            first_character.info.boundary() == Boundary::Line
+                        };
 
                         // Lag text_wrap_mode style by one atom
                         let text_wrap_mode = self.state.line.text_wrap_mode;
@@ -848,13 +853,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 max_advance,
                                 line_indent,
                             );
-                        } else if text_wrap_mode == TextWrapMode::Wrap
-                            && soft_line_break(
-                                self.layout.data.shaped_text.characters(),
-                                atom.char_range().start as usize,
-                                &self.layout.data.styles,
-                            )
-                        {
+                        } else if text_wrap_mode == TextWrapMode::Wrap && is_soft_line_break {
                             // We don't record boundaries when the advance is 0. As we do not want overflowing content to cause extra consecutive
                             // line breaks. We should accept the overflowing fragment in that scenario.
                             if self.state.line.x != 0.0 {
