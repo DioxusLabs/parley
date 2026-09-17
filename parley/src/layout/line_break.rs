@@ -100,7 +100,7 @@ impl LineState {
 /// These live on the [`BreakerState`] rather than in [`LineState`], so that saving a
 /// line-breaking opportunity (which clones the `LineState`) only records their lengths; reverting
 /// to the opportunity truncates them back to those lengths.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 struct LineBoxBuffers {
     /// Extents of each non-root aligned subtree (rooted at a `vertical-align: top | bottom` box)
     /// with content on this line. The root subtree lives in [`LineBoxMetrics::root`].
@@ -108,15 +108,6 @@ struct LineBoxBuffers {
     /// Style indices whose span box has already been added to this line, so that ancestors
     /// shared by several runs contribute only once.
     contributed: Vec<u16>,
-}
-
-impl Default for LineBoxBuffers {
-    fn default() -> Self {
-        Self {
-            subtrees: Vec::new(),
-            contributed: Vec::new(),
-        }
-    }
 }
 
 impl LineBoxBuffers {
@@ -722,10 +713,11 @@ impl BreakerState {
 
     /// Discard both saved line-breaking opportunities, keeping their allocations for reuse.
     fn clear_boundaries(&mut self) {
-        for boundary in [self.prev_boundary.take(), self.emergency_boundary.take()] {
-            if let Some(boundary) = boundary {
-                self.spare_snapshots.push(boundary.subtree_snapshot);
-            }
+        for boundary in [self.prev_boundary.take(), self.emergency_boundary.take()]
+            .into_iter()
+            .flatten()
+        {
+            self.spare_snapshots.push(boundary.subtree_snapshot);
         }
     }
 
