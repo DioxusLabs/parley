@@ -39,5 +39,6 @@ mod styles;
 mod text_indent;
 mod whitespace;
 mod wrap;
+mod zz_revert;
 #[macro_use]
 mod util;
