@@ -36,14 +36,15 @@ impl WhiteSpaceCollapse {
 // https://github.com/linebender/parley/pull/762#discussion_r3923722770.
 #[inline(always)]
 pub(crate) fn whitespace_hangs<B: Brush>(whitespace: Whitespace, style: &Style<B>) -> bool {
-    if style.white_space_collapse == WhiteSpaceCollapse::BreakSpaces {
-        return whitespace == Whitespace::Newline;
-    }
+    // Match on the whitespace class first: it's usually `None`, and then the style isn't needed.
     match whitespace {
         Whitespace::Newline => true,
         Whitespace::Space | Whitespace::IdeographicSpace | Whitespace::Tab => {
-            style.white_space_collapse != WhiteSpaceCollapse::Preserve
-                || style.text_wrap_mode == TextWrapMode::Wrap
+            match style.white_space_collapse {
+                WhiteSpaceCollapse::BreakSpaces => false,
+                WhiteSpaceCollapse::Preserve => style.text_wrap_mode == TextWrapMode::Wrap,
+                _ => true,
+            }
         }
         _ => false,
     }
