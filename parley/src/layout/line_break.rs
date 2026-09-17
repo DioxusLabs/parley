@@ -145,14 +145,14 @@ impl LineBoxBuffers {
 
     /// Drop the entries added after the buffers had the given lengths.
     #[inline]
-    fn truncate(&mut self, lens: LineBoxBufferLens) {
-        self.subtrees.truncate(lens.subtrees);
-        self.contributed.truncate(lens.contributed);
+    fn truncate(&mut self, lengths: LineBoxBufferLengths) {
+        self.subtrees.truncate(lengths.subtrees);
+        self.contributed.truncate(lengths.contributed);
     }
 
     #[inline]
-    fn lens(&self) -> LineBoxBufferLens {
-        LineBoxBufferLens {
+    fn lengths(&self) -> LineBoxBufferLengths {
+        LineBoxBufferLengths {
             subtrees: self.subtrees.len(),
             contributed: self.contributed.len(),
         }
@@ -161,7 +161,7 @@ impl LineBoxBuffers {
 
 /// The lengths of the [`LineBoxBuffers`] at a saved line-breaking opportunity.
 #[derive(Clone, Copy, Default)]
-struct LineBoxBufferLens {
+struct LineBoxBufferLengths {
     subtrees: usize,
     contributed: usize,
 }
@@ -432,7 +432,7 @@ struct PrevBoundaryState {
     cluster_idx: u32,
     state: LineState,
     /// Lengths of the [`BreakerState::line_buffers`] at this opportunity.
-    buffer_lens: LineBoxBufferLens,
+    buffer_lengths: LineBoxBufferLengths,
 }
 
 /// Reason that the line breaker has yielded control flow
@@ -672,7 +672,7 @@ impl BreakerState {
             run_idx: self.run_idx,
             cluster_idx: self.cluster_idx,
             state: self.line.clone(),
-            buffer_lens: self.line_buffers.lens(),
+            buffer_lengths: self.line_buffers.lengths(),
         });
     }
 
@@ -684,7 +684,7 @@ impl BreakerState {
             run_idx: self.run_idx,
             cluster_idx: self.cluster_idx,
             state: self.line.clone(),
-            buffer_lens: self.line_buffers.lens(),
+            buffer_lengths: self.line_buffers.lengths(),
         });
     }
 
@@ -694,7 +694,7 @@ impl BreakerState {
         self.run_idx = prev_state.run_idx;
         self.cluster_idx = prev_state.cluster_idx;
         self.line = prev_state.state;
-        self.line_buffers.truncate(prev_state.buffer_lens);
+        self.line_buffers.truncate(prev_state.buffer_lengths);
     }
 
     /// The line height of the current line seen so far.
