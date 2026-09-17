@@ -1,7 +1,7 @@
 # Benchmarking Parley
 
-Practices distilled from a full-history perf sweep (v0.5.0 → main) and per-PR
-profiling work. Written for both humans and tooling.
+Practices for timing and profiling Parley itself, distilled from a full-history
+performance sweep and per-PR profiling work.
 
 ## Measure phases separately
 
@@ -43,9 +43,10 @@ A layout has four independently-timed phases; regressions hide in composites:
   have the whole hot loop folded under it (observed: `update_max_height_exceeded`
   absorbing all of `break_next_line_or_box`). Cross-check with inclusive time
   and deletion experiments before attributing a hotspot.
-- **`perf record` may be unavailable** (paranoid level); callgrind works as a
-  fallback, and counters like `idq.mite_uops` are what expose frontend decode
-  issues.
+- **Counters expose what timing hides.** Frontend-decode counters
+  (`idq.mite_uops`, `dsb2mite_switches.penalty_cycles`) are what reveal the
+  codegen-layout effect described above; instruction counts and branch misses
+  stay flat while they move.
 - **Corpus matters for fallback paths.** Font-fallback cost is per-cluster and
   only shows on text that actually misses primary coverage — multi-script,
   emoji-heavy, or uncovered-codepoint inputs. Clean prose profiles near zero.
