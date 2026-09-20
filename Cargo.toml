@@ -14,6 +14,8 @@ members = [
     "parley_tests",
     "parley_tests/linebreaking_cases",
     "parley_tests/linebreaking_browser_recorder",
+    "parley_tests/wpt_cases",
+    "parley_tests/wpt_recorder",
     "examples/common",
     "examples/swash_render",
     "examples/tiny_skia_render",
@@ -43,6 +45,7 @@ parley_dev = { default-features = false, path = "parley_dev" }
 parley_engine = { version = "0.11.0", default-features = false, path = "parley_engine" }
 parley_emoji = { version = "0.11.0", default-features = false, path = "parley_emoji" }
 parley_linebreaking_cases = { path = "parley_tests/linebreaking_cases" }
+parley_wpt_cases = { path = "parley_tests/wpt_cases" }
 
 # External dependencies
 accesskit = "0.24.0"

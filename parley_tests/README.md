@@ -47,6 +47,11 @@ The following command shows snapshots that are not used in any test. The command
 cargo xtask dead-snapshots
 ```
 
+## Web Platform Tests
+
+`tests/wpt/` replays text blocks from the WPT CSS text suites, recorded from Chrome by
+`parley_wpt_recorder`, against Parley. See [`tests/wpt/README.md`](tests/wpt/README.md).
+
 ## Matching Chrome in line height calculations
 
 The `lines.html` file can be used to generate images roughly similar to the ones in `test_lines.rs`.

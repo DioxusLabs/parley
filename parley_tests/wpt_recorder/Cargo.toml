@@ -1,0 +1,30 @@
+[package]
+name = "parley_wpt_recorder"
+description = "Records WPT text-layout fixtures from Chrome for the parley_tests WPT suite"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "wpt_record"
+path = "src/main.rs"
+
+[dependencies]
+parley_wpt_cases = { workspace = true }
+# chromedriver is only ever spoken to over loopback HTTP, so no TLS backend.
+fantoccini = { version = "0.22.0", default-features = false }
+hyper-util = { version = "0.1.3", default-features = false, features = [
+    "client-legacy",
+    "http1",
+    "tokio",
+] }
+read-fonts = { workspace = true, features = ["std"] }
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.150"
+tokio = { version = "1.52.3", features = ["macros", "rt", "time"] }
+walkdir = "2.5.0"
+
+[lints]
+workspace = true

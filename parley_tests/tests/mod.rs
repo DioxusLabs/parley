@@ -38,6 +38,7 @@ mod out_of_flow_boxes;
 mod styles;
 mod text_indent;
 mod whitespace;
+mod wpt;
 mod wrap;
 #[macro_use]
 mod util;
