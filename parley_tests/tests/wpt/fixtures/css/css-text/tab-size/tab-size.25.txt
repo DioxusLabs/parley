@@ -1,0 +1,54 @@
+source css/css-text/tab-size/tab-size.html
+block 25 table#results > tbody > tr > td:nth-of-type(3) > details > table > tr:nth-of-type(2) > td:nth-of-type(1)
+size 40.015625 56
+lang
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 13px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps small-caps
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height normal
+  overflow-wrap normal
+  tab-size 8
+  text-align start
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align middle
+  white-space-collapse collapse
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+run 0 0
+  "Pass"
+char 0 0 0 21.5 13.015625 13
+char 0 1 13 21.5 9.015625 13
+char 0 2 22 21.5 9.015625 13
+char 0 3 31 21.5 9.015625 13

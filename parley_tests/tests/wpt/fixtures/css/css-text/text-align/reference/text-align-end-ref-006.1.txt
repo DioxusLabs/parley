@@ -1,0 +1,83 @@
+source css/css-text/text-align/reference/text-align-end-ref-006.html
+block 1 html > body > div:nth-of-type(2) > div:nth-of-type(1)
+size 300 75
+lang en
+font Ahem Ahem.ttf
+container
+  direction rtl
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 25px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height 25px
+  overflow-wrap normal
+  tab-size 8
+  text-align right
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse collapse
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+run 0 0 en
+  "REF REF REF REF REF REF REF REF"
+char 0 0 24.984375 0 25.015625 25
+char 0 1 49.984375 0 25.015625 25
+char 0 2 74.984375 0 25.015625 25
+char 0 3 99.984375 0 25.015625 25
+char 0 4 124.984375 0 25.015625 25
+char 0 5 149.984375 0 25.015625 25
+char 0 6 174.984375 0 25.015625 25
+char 0 7 199.984375 0 25.015625 25
+char 0 8 224.984375 0 25.015625 25
+char 0 9 249.984375 0 25.015625 25
+char 0 10 274.984375 0 25.015625 25
+char 0 11 299.984375 0 0 25
+char 0 11 24.984375 25 0 25
+char 0 12 24.984375 25 25.015625 25
+char 0 13 49.984375 25 25.015625 25
+char 0 14 74.984375 25 25.015625 25
+char 0 15 99.984375 25 25.015625 25
+char 0 16 124.984375 25 25.015625 25
+char 0 17 149.984375 25 25.015625 25
+char 0 18 174.984375 25 25.015625 25
+char 0 19 199.984375 25 25.015625 25
+char 0 20 224.984375 25 25.015625 25
+char 0 21 249.984375 25 25.015625 25
+char 0 22 274.984375 25 25.015625 25
+char 0 23 299.984375 25 0 25
+char 0 23 124.984375 50 0 25
+char 0 24 124.984375 50 25.015625 25
+char 0 25 149.984375 50 25.015625 25
+char 0 26 174.984375 50 25.015625 25
+char 0 27 199.984375 50 25.015625 25
+char 0 28 224.984375 50 25.015625 25
+char 0 29 249.984375 50 25.015625 25
+char 0 30 274.984375 50 25.015625 25

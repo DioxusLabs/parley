@@ -1,0 +1,91 @@
+source css/css-text/hanging-punctuation/hanging-punctuation-first-rtl.html
+block 1 html > body > div:nth-of-type(2) > div:nth-of-type(1)
+size 752 32
+lang
+font Ahem Ahem.ttf
+container
+  direction rtl
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 16px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height normal
+  overflow-wrap normal
+  tab-size 8
+  text-align start
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse collapse
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+style 1
+  white-space-collapse preserve
+run 0 0
+  "(This should hang."
+run 1 1
+  "\n"
+run 2 0
+  "(This should not."
+char 0 0 735.984375 0 16.015625 16
+char 0 1 479.96875 0 16.015625 16
+char 0 2 495.96875 0 16.015625 16
+char 0 3 511.96875 0 16.015625 16
+char 0 4 527.96875 0 16.015625 16
+char 0 5 543.96875 0 16.015625 16
+char 0 6 559.96875 0 16.015625 16
+char 0 7 575.96875 0 16.015625 16
+char 0 8 591.96875 0 16.015625 16
+char 0 9 607.96875 0 16.015625 16
+char 0 10 623.96875 0 16.015625 16
+char 0 11 639.96875 0 16.015625 16
+char 0 12 655.96875 0 16.015625 16
+char 0 13 671.96875 0 16.015625 16
+char 0 14 687.96875 0 16.015625 16
+char 0 15 703.96875 0 16.015625 16
+char 0 16 719.96875 0 16.015625 16
+char 0 17 463.953125 0 16.015625 16
+char 2 0 735.984375 16 16.015625 16
+char 2 1 495.96875 16 16.015625 16
+char 2 2 511.96875 16 16.015625 16
+char 2 3 527.96875 16 16.015625 16
+char 2 4 543.96875 16 16.015625 16
+char 2 5 559.96875 16 16.015625 16
+char 2 6 575.96875 16 16.015625 16
+char 2 7 591.96875 16 16.015625 16
+char 2 8 607.96875 16 16.015625 16
+char 2 9 623.96875 16 16.015625 16
+char 2 10 639.96875 16 16.015625 16
+char 2 11 655.96875 16 16.015625 16
+char 2 12 671.96875 16 16.015625 16
+char 2 13 687.96875 16 16.015625 16
+char 2 14 703.96875 16 16.015625 16
+char 2 15 719.96875 16 16.015625 16
+char 2 16 479.953125 16 16.015625 16

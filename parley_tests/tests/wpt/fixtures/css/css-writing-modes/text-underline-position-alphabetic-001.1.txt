@@ -1,0 +1,53 @@
+source css/css-writing-modes/text-underline-position-alphabetic-001.xht
+block 1 span#ahem_text
+size 300 100
+lang
+font ahem Ahem.ttf
+container
+  direction ltr
+  font-family ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 100px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height 100px
+  overflow-wrap normal
+  tab-size 8
+  text-align start
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style auto
+  unicode-bidi normal
+  vertical-align baseline
+  white-space-collapse collapse
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+run 0 0
+  "ppp"
+char 0 0 0 0 100 100
+char 0 1 99.984375 0 100.015625 100
+char 0 2 199.984375 0 100.015625 100

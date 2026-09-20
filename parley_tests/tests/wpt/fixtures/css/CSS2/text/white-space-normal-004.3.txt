@@ -1,0 +1,73 @@
+source css/CSS2/text/white-space-normal-004.xht
+block 3 html > body > table > tr > td > div:nth-of-type(4)
+size 380 20
+lang
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 20px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height 20px
+  overflow-wrap normal
+  tab-size 8
+  text-align start
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse collapse
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+  unicode-bidi normal
+run 0 0
+  "  XXXÉ XXXX ÉXXp ÉXXp "
+char 0 0 0 0 0 20
+char 0 1 0 0 0 20
+char 0 2 0 0 20 20
+char 0 3 19.984375 0 20.015625 20
+char 0 4 39.984375 0 20.015625 20
+char 0 5 59.984375 0 20.015625 20
+char 0 6 79.984375 0 20.015625 20
+char 0 7 99.984375 0 20.015625 20
+char 0 8 119.984375 0 20.015625 20
+char 0 9 139.984375 0 20.015625 20
+char 0 10 159.984375 0 20.015625 20
+char 0 11 179.984375 0 20.015625 20
+char 0 12 199.984375 0 20.015625 20
+char 0 13 219.984375 0 20.015625 20
+char 0 14 239.984375 0 20.015625 20
+char 0 15 259.984375 0 20.015625 20
+char 0 16 279.984375 0 20.015625 20
+char 0 17 299.984375 0 20.015625 20
+char 0 18 319.984375 0 20.015625 20
+char 0 19 339.984375 0 20.015625 20
+char 0 20 359.984375 0 20.015625 20
+char 0 21 379.984375 0 0 20

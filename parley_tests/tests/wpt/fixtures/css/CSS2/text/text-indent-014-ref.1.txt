@@ -1,0 +1,187 @@
+source css/CSS2/text/text-indent-014-ref.xht
+block 1 html > body > div > div > div
+size 240 120
+lang
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 20px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height 20px
+  overflow-wrap normal
+  tab-size 8
+  text-align start
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse collapse
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+style 1
+  white-space-collapse preserve
+run 0 0
+  "\n        \u{00A0}\u{00A0}\u{00A0}\u{00A0}\u{00A0}\u{00A0}BlockA"
+run 1 1
+  "\n"
+run 2 0
+  "\n        \u{00A0}\u{00A0}\u{00A0}\u{00A0}\u{00A0}\u{00A0}BlockA"
+run 3 1
+  "\n"
+run 4 0
+  "\n        \u{00A0}\u{00A0}\u{00A0}\u{00A0}\u{00A0}\u{00A0}BlockA"
+run 5 1
+  "\n"
+run 6 0
+  "\n        BlockB"
+run 7 1
+  "\n"
+run 8 0
+  "\n        BlockB"
+run 9 1
+  "\n"
+run 10 0
+  "\n        BlockB\n      "
+char 0 0 0 0 0 20
+char 0 1 0 0 0 20
+char 0 2 0 0 0 20
+char 0 3 0 0 0 20
+char 0 4 0 0 0 20
+char 0 5 0 0 0 20
+char 0 6 0 0 0 20
+char 0 7 0 0 0 20
+char 0 8 0 0 0 20
+char 0 9 0 0 20 20
+char 0 10 19.984375 0 20.015625 20
+char 0 11 39.984375 0 20.015625 20
+char 0 12 59.984375 0 20.015625 20
+char 0 13 79.984375 0 20.015625 20
+char 0 14 99.984375 0 20.015625 20
+char 0 15 119.984375 0 20.015625 20
+char 0 16 139.984375 0 20.015625 20
+char 0 17 159.984375 0 20.015625 20
+char 0 18 179.984375 0 20.015625 20
+char 0 19 199.984375 0 20.015625 20
+char 0 20 219.984375 0 20.015625 20
+char 2 0 0 20 0 20
+char 2 1 0 20 0 20
+char 2 2 0 20 0 20
+char 2 3 0 20 0 20
+char 2 4 0 20 0 20
+char 2 5 0 20 0 20
+char 2 6 0 20 0 20
+char 2 7 0 20 0 20
+char 2 8 0 20 0 20
+char 2 9 0 20 20 20
+char 2 10 19.984375 20 20.015625 20
+char 2 11 39.984375 20 20.015625 20
+char 2 12 59.984375 20 20.015625 20
+char 2 13 79.984375 20 20.015625 20
+char 2 14 99.984375 20 20.015625 20
+char 2 15 119.984375 20 20.015625 20
+char 2 16 139.984375 20 20.015625 20
+char 2 17 159.984375 20 20.015625 20
+char 2 18 179.984375 20 20.015625 20
+char 2 19 199.984375 20 20.015625 20
+char 2 20 219.984375 20 20.015625 20
+char 4 0 0 40 0 20
+char 4 1 0 40 0 20
+char 4 2 0 40 0 20
+char 4 3 0 40 0 20
+char 4 4 0 40 0 20
+char 4 5 0 40 0 20
+char 4 6 0 40 0 20
+char 4 7 0 40 0 20
+char 4 8 0 40 0 20
+char 4 9 0 40 20 20
+char 4 10 19.984375 40 20.015625 20
+char 4 11 39.984375 40 20.015625 20
+char 4 12 59.984375 40 20.015625 20
+char 4 13 79.984375 40 20.015625 20
+char 4 14 99.984375 40 20.015625 20
+char 4 15 119.984375 40 20.015625 20
+char 4 16 139.984375 40 20.015625 20
+char 4 17 159.984375 40 20.015625 20
+char 4 18 179.984375 40 20.015625 20
+char 4 19 199.984375 40 20.015625 20
+char 4 20 219.984375 40 20.015625 20
+char 6 0 0 60 0 20
+char 6 1 0 60 0 20
+char 6 2 0 60 0 20
+char 6 3 0 60 0 20
+char 6 4 0 60 0 20
+char 6 5 0 60 0 20
+char 6 6 0 60 0 20
+char 6 7 0 60 0 20
+char 6 8 0 60 0 20
+char 6 9 0 60 20 20
+char 6 10 19.984375 60 20.015625 20
+char 6 11 39.984375 60 20.015625 20
+char 6 12 59.984375 60 20.015625 20
+char 6 13 79.984375 60 20.015625 20
+char 6 14 99.984375 60 20.015625 20
+char 8 0 0 80 0 20
+char 8 1 0 80 0 20
+char 8 2 0 80 0 20
+char 8 3 0 80 0 20
+char 8 4 0 80 0 20
+char 8 5 0 80 0 20
+char 8 6 0 80 0 20
+char 8 7 0 80 0 20
+char 8 8 0 80 0 20
+char 8 9 0 80 20 20
+char 8 10 19.984375 80 20.015625 20
+char 8 11 39.984375 80 20.015625 20
+char 8 12 59.984375 80 20.015625 20
+char 8 13 79.984375 80 20.015625 20
+char 8 14 99.984375 80 20.015625 20
+char 10 0 0 100 0 20
+char 10 1 0 100 0 20
+char 10 2 0 100 0 20
+char 10 3 0 100 0 20
+char 10 4 0 100 0 20
+char 10 5 0 100 0 20
+char 10 6 0 100 0 20
+char 10 7 0 100 0 20
+char 10 8 0 100 0 20
+char 10 9 0 100 20 20
+char 10 10 19.984375 100 20.015625 20
+char 10 11 39.984375 100 20.015625 20
+char 10 12 59.984375 100 20.015625 20
+char 10 13 79.984375 100 20.015625 20
+char 10 14 99.984375 100 20.015625 20
+char 10 15 119.984375 100 0 20
+char 10 16 119.984375 100 0 20
+char 10 17 119.984375 100 0 20
+char 10 18 119.984375 100 0 20
+char 10 19 119.984375 100 0 20
+char 10 20 119.984375 100 0 20
+char 10 21 119.984375 100 0 20

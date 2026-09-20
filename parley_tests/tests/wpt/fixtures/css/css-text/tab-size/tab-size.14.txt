@@ -1,0 +1,67 @@
+source css/css-text/tab-size/tab-size.html
+block 14 section#summary > p
+size 784 13
+lang
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 13px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height normal
+  overflow-wrap normal
+  tab-size 8
+  text-align start
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse collapse
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+run 0 0
+  "Found "
+run 1 0
+  "1"
+run 2 0
+  " tests"
+char 0 0 0 0 13.015625 13
+char 0 1 13 0 13.015625 13
+char 0 2 26 0 13.015625 13
+char 0 3 39 0 13.015625 13
+char 0 4 52 0 13.015625 13
+char 0 5 65 0 13.015625 13
+char 1 0 78.015625 0 13.015625 13
+char 2 0 91.03125 0 13.015625 13
+char 2 1 104.03125 0 13.015625 13
+char 2 2 117.03125 0 13.015625 13
+char 2 3 130.03125 0 13.015625 13
+char 2 4 143.03125 0 13.015625 13
+char 2 5 156.03125 0 13.015625 13

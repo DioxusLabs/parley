@@ -1,0 +1,75 @@
+source css/css-text/text-align/reference/text-align-justify-tabs-001-ref.html
+block 1 html > body > div:nth-of-type(1)
+size 750 50
+lang en
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem, monospace
+  font-feature-settings normal
+  font-kerning auto
+  font-size 25px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height normal
+  overflow-wrap normal
+  tab-size 8
+  text-align start
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse preserve
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+run 0 0 en
+  "a b c\ttab 1\ttab 2\tjklmnop"
+char 0 0 0 0 25.015625 25
+char 0 1 25 0 25.015625 25
+char 0 2 50 0 25.015625 25
+char 0 3 75 0 25.015625 25
+char 0 4 100 0 25.015625 25
+char 0 5 125.015625 0 75 25
+char 0 6 200.015625 0 25.015625 25
+char 0 7 225.015625 0 25.015625 25
+char 0 8 250.015625 0 25.015625 25
+char 0 9 275.015625 0 25.015625 25
+char 0 10 300.015625 0 25.015625 25
+char 0 11 325.03125 0 74.984375 25
+char 0 12 400.015625 0 25.015625 25
+char 0 13 425.015625 0 25.015625 25
+char 0 14 450.015625 0 25.015625 25
+char 0 15 475.015625 0 25.015625 25
+char 0 16 500.015625 0 25.015625 25
+char 0 17 525.03125 0 74.984375 25
+char 0 18 0 25 25.015625 25
+char 0 19 25 25 25.015625 25
+char 0 20 50 25 25.015625 25
+char 0 21 75 25 25.015625 25
+char 0 22 100 25 25.015625 25
+char 0 23 125 25 25.015625 25
+char 0 24 150 25 25.015625 25

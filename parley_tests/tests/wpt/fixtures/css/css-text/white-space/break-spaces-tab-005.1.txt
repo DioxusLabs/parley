@@ -1,0 +1,88 @@
+source css/css-text/white-space/break-spaces-tab-005.html
+block 1 div#ref
+size 39.984375 140
+lang
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 20px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height 20px
+  overflow-wrap normal
+  tab-size 8
+  text-align start
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode nowrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse preserve
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+run 0 0
+  " X"
+run 1 0
+  "\n"
+run 2 0
+  " X"
+run 3 0
+  "\n"
+run 4 0
+  "XX"
+run 5 0
+  "\n"
+run 6 0
+  "XX"
+run 7 0
+  "\n"
+run 8 0
+  "XX"
+run 9 0
+  "\n"
+run 10 0
+  "XX"
+run 11 0
+  "\n"
+run 12 0
+  "  "
+char 0 0 0 0 20 20
+char 0 1 19.984375 0 20.015625 20
+char 2 0 0 20 20 20
+char 2 1 19.984375 20 20.015625 20
+char 4 0 0 40 20 20
+char 4 1 19.984375 40 20.015625 20
+char 6 0 0 60 20 20
+char 6 1 19.984375 60 20.015625 20
+char 8 0 0 80 20 20
+char 8 1 19.984375 80 20.015625 20
+char 10 0 0 100 20 20
+char 10 1 19.984375 100 20.015625 20
+char 12 0 0 120 20 20
+char 12 1 19.984375 120 20.015625 20

@@ -1,0 +1,103 @@
+source css/css-text/hanging-punctuation/hanging-punctuation-first-and-last-together.html
+block 1 html > body > div:nth-of-type(2) > div
+size 160 112
+lang
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 16px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height normal
+  overflow-wrap normal
+  tab-size 8
+  text-align justify
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse collapse
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+style 1
+  white-space-collapse preserve
+run 0 0
+  "(This should hang."
+run 1 1
+  "\n"
+run 2 0
+  "(This should also hang.)"
+char 0 0 0 0 16.015625 16
+char 0 1 16 0 16.015625 16
+char 0 2 32 0 16.015625 16
+char 0 3 48 0 16.015625 16
+char 0 4 64 0 16.015625 16
+char 0 5 80 0 0 16
+char 0 5 0 16 0 16
+char 0 6 0 16 16.015625 16
+char 0 7 16 16 16.015625 16
+char 0 8 32 16 16.015625 16
+char 0 9 48 16 16.015625 16
+char 0 10 64 16 16.015625 16
+char 0 11 80 16 16.015625 16
+char 0 12 96 16 0 16
+char 0 12 0 32 0 16
+char 0 13 0 32 16.015625 16
+char 0 14 16 32 16.015625 16
+char 0 15 32 32 16.015625 16
+char 0 16 48 32 16.015625 16
+char 0 17 64 32 16.015625 16
+char 2 0 0 48 16.015625 16
+char 2 1 16 48 16.015625 16
+char 2 2 32 48 16.015625 16
+char 2 3 48 48 16.015625 16
+char 2 4 64 48 16.015625 16
+char 2 5 80 48 0 16
+char 2 5 0 64 0 16
+char 2 6 0 64 16.015625 16
+char 2 7 16 64 16.015625 16
+char 2 8 32 64 16.015625 16
+char 2 9 48 64 16.015625 16
+char 2 10 64 64 16.015625 16
+char 2 11 80 64 16.015625 16
+char 2 12 96 64 0 16
+char 2 12 0 80 0 16
+char 2 13 0 80 16.015625 16
+char 2 14 16 80 16.015625 16
+char 2 15 32 80 16.015625 16
+char 2 16 48 80 16.015625 16
+char 2 17 64 80 0 16
+char 2 17 0 96 0 16
+char 2 18 0 96 16.015625 16
+char 2 19 16 96 16.015625 16
+char 2 20 32 96 16.015625 16
+char 2 21 48 96 16.015625 16
+char 2 22 64 96 16.015625 16
+char 2 23 80 96 16.015625 16

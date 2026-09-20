@@ -1,0 +1,86 @@
+source css/css-text/white-space/text-wrap-balance-word-spacing-001.html
+block 0 html > body > div:nth-of-type(1)
+size 500 12
+lang en
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 12px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height normal
+  overflow-wrap normal
+  tab-size 8
+  text-align start
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style balance
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse collapse
+  word-break normal
+  word-spacing 10px
+  writing-mode horizontal-tb
+style 0
+run 0 0 en
+  "This passes if this div is one line "
+char 0 0 0 0 12.015625 12
+char 0 1 12 0 12.015625 12
+char 0 2 24 0 12.015625 12
+char 0 3 36 0 12.015625 12
+char 0 4 48 0 22.015625 12
+char 0 5 70 0 12.015625 12
+char 0 6 82 0 12.015625 12
+char 0 7 94 0 12.015625 12
+char 0 8 106 0 12.015625 12
+char 0 9 118 0 12.015625 12
+char 0 10 130 0 12.015625 12
+char 0 11 142 0 22.015625 12
+char 0 12 164 0 12.015625 12
+char 0 13 176 0 12.015625 12
+char 0 14 188 0 22.015625 12
+char 0 15 210 0 12.015625 12
+char 0 16 222 0 12.015625 12
+char 0 17 234 0 12.015625 12
+char 0 18 246 0 12.015625 12
+char 0 19 258 0 22.015625 12
+char 0 20 280 0 12.015625 12
+char 0 21 292 0 12.015625 12
+char 0 22 304 0 12.015625 12
+char 0 23 316 0 22.015625 12
+char 0 24 338 0 12.015625 12
+char 0 25 350 0 12.015625 12
+char 0 26 362 0 22.015625 12
+char 0 27 384 0 12.015625 12
+char 0 28 396 0 12.015625 12
+char 0 29 408 0 12.015625 12
+char 0 30 420 0 22.015625 12
+char 0 31 442 0 12.015625 12
+char 0 32 454 0 12.015625 12
+char 0 33 466 0 12.015625 12
+char 0 34 478 0 12.015625 12
+char 0 35 490 0 0 12

@@ -1,0 +1,95 @@
+source css/css-text/white-space/break-spaces-before-first-ideographic-char-010.html
+block 1 html > body > div:nth-of-type(1)
+size 100.046875 100
+lang
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 25px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height 25px
+  overflow-wrap normal
+  tab-size 8
+  text-align start
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse collapse
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+style 1
+  unicode-bidi normal
+style 2
+  white-space-collapse preserve
+style 3
+  unicode-bidi normal
+  white-space-collapse preserve
+run 0 0
+  "X"
+run 1 1
+  "X"
+run 2 0
+  "XX"
+run 3 2
+  "\n"
+run 4 1
+  "X"
+run 5 0
+  "X"
+run 6 1
+  "XX"
+run 7 3
+  "\n"
+run 8 1
+  "XXXX"
+run 9 3
+  "\n"
+run 10 1
+  "XXXX"
+run 11 3
+  "\n"
+char 0 0 0 0 25.015625 25
+char 1 0 25.015625 0 25.015625 25
+char 2 0 50.03125 0 25.015625 25
+char 2 1 75.03125 0 25.015625 25
+char 4 0 0 25 25.015625 25
+char 5 0 25.015625 25 25.015625 25
+char 6 0 50.03125 25 25.015625 25
+char 6 1 75.03125 25 25.015625 25
+char 8 0 0 50 25.015625 25
+char 8 1 25 50 25.015625 25
+char 8 2 50 50 25.015625 25
+char 8 3 75 50 25.015625 25
+char 10 0 0 75 25.015625 25
+char 10 1 25 75 25.015625 25
+char 10 2 50 75 25.015625 25
+char 10 3 75 75 25.015625 25

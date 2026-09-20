@@ -1,0 +1,73 @@
+source css/css-text/text-fit/background-image-ref.html
+block 1 html > body > div:nth-of-type(2)
+size 160 120
+lang
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 20px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height 40px
+  overflow-wrap normal
+  tab-size 8
+  text-align start
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode nowrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse preserve
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+  font-size 40px
+  line-height 80px
+  unicode-bidi normal
+style 1
+style 2
+  unicode-bidi normal
+run 0 0
+  "ÉpÉp"
+run 1 1
+  "\n"
+run 2 2
+  "pÉpÉpÉpÉ"
+char 0 0 0 20 40 40
+char 0 1 39.984375 20 40.015625 40
+char 0 2 79.984375 20 40.015625 40
+char 0 3 119.984375 20 40.015625 40
+char 1 0 160 36 0 20
+char 2 0 0 90 20 20
+char 2 1 19.984375 90 20.015625 20
+char 2 2 39.984375 90 20.015625 20
+char 2 3 59.984375 90 20.015625 20
+char 2 4 79.984375 90 20.015625 20
+char 2 5 99.984375 90 20.015625 20
+char 2 6 119.984375 90 20.015625 20
+char 2 7 139.984375 90 20.015625 20

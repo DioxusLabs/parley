@@ -1,0 +1,16 @@
+[package]
+name = "parley_wpt_cases"
+description = "WPT-derived text layout fixtures recorded from Chrome, and their Parley-side layout"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+parley = { workspace = true, features = ["std"] }
+fontique = { workspace = true, features = ["std"] }
+read-fonts = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true

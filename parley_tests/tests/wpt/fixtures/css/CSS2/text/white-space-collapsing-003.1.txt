@@ -1,0 +1,54 @@
+source css/CSS2/text/white-space-collapsing-003.xht
+block 1 html > body > div:nth-of-type(1)
+size 223.975 31.975
+lang
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem, monospace
+  font-feature-settings normal
+  font-kerning auto
+  font-size 32px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height normal
+  overflow-wrap normal
+  tab-size 8
+  text-align center
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse collapse
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+run 0 0
+  "XXXX"
+char 0 0 47.971875 -0.012500000000002842 32.015625 32
+char 0 1 79.971875 -0.012500000000002842 32.015625 32
+char 0 2 111.971875 -0.012500000000002842 32.015625 32
+char 0 3 143.971875 -0.012500000000002842 32.015625 32

@@ -1,0 +1,86 @@
+source css/css-text/white-space/reference/text-wrap-balance-text-indent-001-ref.html
+block 0 html > body > div
+size 99.984375 30
+lang
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 10px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height normal
+  overflow-wrap normal
+  tab-size 8
+  text-align start
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 49.9999px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse collapse
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+style 1
+  white-space-collapse preserve
+run 0 0
+  "\n  01"
+run 1 1
+  "\n"
+run 2 0
+  "\n  34 6 89"
+run 3 1
+  "\n"
+run 4 0
+  "\n  12 3 56\n"
+char 0 0 49.984375 0 0 10
+char 0 1 49.984375 0 0 10
+char 0 2 49.984375 0 0 10
+char 0 3 49.984375 0 10 10
+char 0 4 59.96875 0 10.015625 10
+char 2 0 0 10 0 10
+char 2 1 0 10 0 10
+char 2 2 0 10 0 10
+char 2 3 0 10 10 10
+char 2 4 9.984375 10 10.015625 10
+char 2 5 19.984375 10 10.015625 10
+char 2 6 29.984375 10 10.015625 10
+char 2 7 39.984375 10 10.015625 10
+char 2 8 49.984375 10 10.015625 10
+char 2 9 59.984375 10 10.015625 10
+char 4 0 0 20 0 10
+char 4 1 0 20 0 10
+char 4 2 0 20 0 10
+char 4 3 0 20 10 10
+char 4 4 9.984375 20 10.015625 10
+char 4 5 19.984375 20 10.015625 10
+char 4 6 29.984375 20 10.015625 10
+char 4 7 39.984375 20 10.015625 10
+char 4 8 49.984375 20 10.015625 10
+char 4 9 59.984375 20 10.015625 10
+char 4 10 69.984375 20 0 10

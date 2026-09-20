@@ -1,0 +1,75 @@
+source css/css-text/text-align/text-align-justify-tabs-001.html
+block 2 html > body > div:nth-of-type(2)
+size 750 50
+lang en
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem, monospace
+  font-feature-settings normal
+  font-kerning auto
+  font-size 25px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height normal
+  overflow-wrap normal
+  tab-size 8
+  text-align justify
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse preserve
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+run 0 0 en
+  "a b c\ttab 1\ttab 2\tjklmnop"
+char 0 0 0 0 25.015625 25
+char 0 1 25 0 62.5 25
+char 0 2 87.484375 0 25.015625 25
+char 0 3 112.484375 0 62.515625 25
+char 0 4 174.984375 0 25.015625 25
+char 0 5 200 0 112.484375 25
+char 0 6 312.484375 0 25.015625 25
+char 0 7 337.484375 0 25.015625 25
+char 0 8 362.484375 0 25.015625 25
+char 0 9 387.484375 0 62.5 25
+char 0 10 449.96875 0 25.015625 25
+char 0 11 474.984375 0 112.46875 25
+char 0 12 587.453125 0 25.015625 25
+char 0 13 612.453125 0 25.015625 25
+char 0 14 637.453125 0 25.015625 25
+char 0 15 662.453125 0 62.5 25
+char 0 16 724.9375 0 25.015625 25
+char 0 17 749.953125 0 74.984375 25
+char 0 18 0 25 25.015625 25
+char 0 19 25 25 25.015625 25
+char 0 20 50 25 25.015625 25
+char 0 21 75 25 25.015625 25
+char 0 22 100 25 25.015625 25
+char 0 23 125 25 25.015625 25
+char 0 24 150 25 25.015625 25

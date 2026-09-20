@@ -1,0 +1,59 @@
+source css/css-text/white-space/pre-wrap-019.html
+block 4 div#test2
+size 96 96
+lang
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 32px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height normal
+  overflow-wrap normal
+  tab-size 8
+  text-align right
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse preserve
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+run 0 0
+  " 0 0 0 0 "
+char 0 0 31.96875 0 32.015625 32
+char 0 1 63.984375 0 32.015625 32
+char 0 2 96 0 32.015625 32
+char 0 3 0 32 32.015625 32
+char 0 4 32 32 32.015625 32
+char 0 5 64 32 32.015625 32
+char 0 6 96.015625 32 32.015625 32
+char 0 7 31.984375 64 32.015625 32
+char 0 8 63.984375 64 32.015625 32

@@ -1,0 +1,72 @@
+source css/css-text/hanging-punctuation/reference/hanging-punctuation-first-rtl-ref.html
+block 3 html > body > div:nth-of-type(2) > div:nth-of-type(3)
+size 300 16
+lang
+font Ahem Ahem.ttf
+container
+  direction rtl
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 16px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height normal
+  overflow-wrap normal
+  tab-size 8
+  text-align justify
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent -16px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse collapse
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+  unicode-bidi normal
+style 1
+run 0 0
+  "("
+run 1 1
+  "This should hang."
+char 0 0 299.984375 0 16.015625 16
+char 1 0 43.96875 0 16.015625 16
+char 1 1 59.96875 0 16.015625 16
+char 1 2 75.96875 0 16.015625 16
+char 1 3 91.96875 0 16.015625 16
+char 1 4 107.96875 0 16.015625 16
+char 1 5 123.96875 0 16.015625 16
+char 1 6 139.96875 0 16.015625 16
+char 1 7 155.96875 0 16.015625 16
+char 1 8 171.96875 0 16.015625 16
+char 1 9 187.96875 0 16.015625 16
+char 1 10 203.96875 0 16.015625 16
+char 1 11 219.96875 0 16.015625 16
+char 1 12 235.96875 0 16.015625 16
+char 1 13 251.96875 0 16.015625 16
+char 1 14 267.96875 0 16.015625 16
+char 1 15 283.96875 0 16.015625 16
+char 1 16 27.953125 0 16.015625 16

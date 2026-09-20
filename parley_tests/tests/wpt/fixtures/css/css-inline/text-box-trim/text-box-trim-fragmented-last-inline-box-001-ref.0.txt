@@ -1,0 +1,72 @@
+source css/css-inline/text-box-trim/text-box-trim-fragmented-last-inline-box-001-ref.html
+block 0 html > body > div:nth-of-type(2)
+size 784 110
+lang
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 20px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height 40px
+  overflow-wrap normal
+  tab-size 8
+  text-align start
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge text
+  text-box-trim trim-end
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse collapse
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+style 1
+  white-space-collapse preserve
+run 0 0
+  "AAAA"
+run 1 1
+  "\n"
+run 2 0
+  "BBBB"
+run 3 1
+  "\n"
+run 4 0
+  "CCCC"
+char 0 0 0 10 20 20
+char 0 1 19.984375 10 20.015625 20
+char 0 2 39.984375 10 20.015625 20
+char 0 3 59.984375 10 20.015625 20
+char 2 0 0 50 20 20
+char 2 1 19.984375 50 20.015625 20
+char 2 2 39.984375 50 20.015625 20
+char 2 3 59.984375 50 20.015625 20
+char 4 0 0 90 20 20
+char 4 1 19.984375 90 20.015625 20
+char 4 2 39.984375 90 20.015625 20
+char 4 3 59.984375 90 20.015625 20
