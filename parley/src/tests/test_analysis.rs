@@ -206,6 +206,58 @@ fn test_line_break_override_mandatory_break_takes_precedence() {
 }
 
 #[test]
+fn test_line_break_override_cannot_suppress_break_all() {
+    // Chrome's table forbids breaking between letters, which must not remove the
+    // opportunities `word-break: break-all` creates.
+    let normal = verify_analysis("abc", |builder| {
+        builder.set_line_break_override(Some(crate::CHROMIUM_LINE_BREAK_OVERRIDE));
+    })
+    .boundary_list();
+    assert_eq!(normal, vec![Boundary::Word, Boundary::None, Boundary::None]);
+
+    let break_all = verify_analysis("abc", |builder| {
+        builder.set_line_break_override(Some(crate::CHROMIUM_LINE_BREAK_OVERRIDE));
+        builder.push(StyleProperty::WordBreak(WordBreak::BreakAll), 0..3);
+    })
+    .boundary_list();
+    assert_eq!(
+        break_all,
+        vec![Boundary::Word, Boundary::Line, Boundary::Line]
+    );
+}
+
+#[test]
+fn test_line_break_override_break_all_only_within_its_range() {
+    let boundaries = verify_analysis("abcd", |builder| {
+        builder.set_line_break_override(Some(&|_| Some(false)));
+        builder.push(StyleProperty::WordBreak(WordBreak::BreakAll), 2..4);
+    })
+    .boundary_list();
+    assert_eq!(
+        boundaries,
+        vec![
+            Boundary::Word,
+            Boundary::None,
+            // Break-all applies from "c" on; the override may not suppress these.
+            Boundary::Line,
+            Boundary::Line
+        ]
+    );
+}
+
+#[test]
+fn test_line_break_override_can_force_break_within_break_all() {
+    // Break-all does not break before a closing parenthesis (UAX #14 LB13), but an
+    // override may still force it.
+    let boundaries = verify_analysis("a)", |builder| {
+        builder.set_line_break_override(Some(&|_| Some(true)));
+        builder.push(StyleProperty::WordBreak(WordBreak::BreakAll), 0..2);
+    })
+    .boundary_list();
+    assert_eq!(boundaries, vec![Boundary::Word, Boundary::Line]);
+}
+
+#[test]
 fn test_latin_mixed_keep_all_last() {
     verify_analysis("AB", |builder| {
         builder.push(StyleProperty::WordBreak(WordBreak::Normal), 0..1);

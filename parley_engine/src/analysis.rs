@@ -590,9 +590,15 @@ pub(crate) fn analyze_text(
 
     // Merge boundaries - line takes precedence over word
     let mut lb_iter = line_boundary_positions.iter().peekable();
+    let mut word_break_segments = DenseWordBreaks::new(options.word_break, text.len());
+    let mut word_break_segment = word_break_segments.next().unwrap();
     let mut prev_char = None;
     let mut prev_prev_char = None;
     let boundary_iter = text.char_indices().map(|(byte_pos, ch)| {
+        // advance to the word break segment containing this character
+        while word_break_segment.0.end <= byte_pos {
+            word_break_segment = word_break_segments.next().unwrap();
+        }
         // advance any stale word boundary positions
         while let Some(&w) = wb_iter.peek() {
             if w < byte_pos {
@@ -651,7 +657,13 @@ pub(crate) fn analyze_text(
                 before: prev,
                 after: ch,
             });
-            if let Some(forced) = forced {
+            // `word-break: break-all` allows a break before any typographic letter, so the
+            // override (which typically describes preferred breaks within words, like Chrome's
+            // table) may add opportunities there but never remove them.
+            let can_suppress = word_break_segment.1 != WordBreak::BreakAll;
+            if let Some(forced) = forced
+                && (forced || can_suppress)
+            {
                 is_line = forced;
             }
         }
