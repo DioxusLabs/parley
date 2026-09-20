@@ -1,0 +1,57 @@
+source css/css-text/text-transform/text-transform-letter-spacing-001.html
+block 2 html > body > p:nth-of-type(3)
+size 784 25
+lang
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 25px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing 12.5px
+  line-break auto
+  line-height normal
+  overflow-wrap normal
+  tab-size 8
+  text-align start
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse collapse
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+run 0 0
+  "STRASSE"
+char 0 0 0 0 37.515625 25
+char 0 1 37.5 0 37.515625 25
+char 0 2 75 0 37.515625 25
+char 0 3 112.5 0 37.515625 25
+char 0 4 150 0 37.515625 25
+char 0 5 187.5 0 37.515625 25
+char 0 6 225 0 37.515625 25

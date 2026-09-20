@@ -1,0 +1,113 @@
+source css/css-text/white-space/text-wrap-balance-003.html
+block 2 html > body > div:nth-of-type(2)
+size 525 30
+lang
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 15px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height normal
+  overflow-wrap normal
+  tab-size 8
+  text-align start
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style balance
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse collapse
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+style 1
+  unicode-bidi normal
+run 0 0
+  "The "
+run 1 1
+  "quickest "
+run 2 1
+  "brown"
+run 3 1
+  " fox"
+run 4 0
+  " jumped "
+run 5 1
+  "over"
+run 6 0
+  " the "
+run 7 1
+  "lazy dog"
+char 0 0 0 0 15.015625 15
+char 0 1 15 0 15.015625 15
+char 0 2 30 0 15.015625 15
+char 0 3 45 0 15.015625 15
+char 1 0 60.015625 0 15.015625 15
+char 1 1 75.015625 0 15.015625 15
+char 1 2 90.015625 0 15.015625 15
+char 1 3 105.015625 0 15.015625 15
+char 1 4 120.015625 0 15.015625 15
+char 1 5 135.015625 0 15.015625 15
+char 1 6 150.015625 0 15.015625 15
+char 1 7 165.015625 0 15.015625 15
+char 1 8 180.015625 0 15.015625 15
+char 2 0 195.03125 0 15.015625 15
+char 2 1 210.03125 0 15.015625 15
+char 2 2 225.03125 0 15.015625 15
+char 2 3 240.03125 0 15.015625 15
+char 2 4 255.03125 0 15.015625 15
+char 3 0 270.046875 0 15.015625 15
+char 3 1 285.046875 0 15.015625 15
+char 3 2 300.046875 0 15.015625 15
+char 3 3 315.046875 0 15.015625 15
+char 4 0 0 15 0 15
+char 4 1 0 15 15.015625 15
+char 4 2 15 15 15.015625 15
+char 4 3 30 15 15.015625 15
+char 4 4 45 15 15.015625 15
+char 4 5 60 15 15.015625 15
+char 4 6 75 15 15.015625 15
+char 4 7 90 15 15.015625 15
+char 5 0 105.015625 15 15.015625 15
+char 5 1 120.015625 15 15.015625 15
+char 5 2 135.015625 15 15.015625 15
+char 5 3 150.015625 15 15.015625 15
+char 6 0 165.03125 15 15.015625 15
+char 6 1 180.03125 15 15.015625 15
+char 6 2 195.03125 15 15.015625 15
+char 6 3 210.03125 15 15.015625 15
+char 6 4 225.03125 15 15.015625 15
+char 7 0 240.046875 15 15.015625 15
+char 7 1 255.046875 15 15.015625 15
+char 7 2 270.046875 15 15.015625 15
+char 7 3 285.046875 15 15.015625 15
+char 7 4 300.046875 15 15.015625 15
+char 7 5 315.046875 15 15.015625 15
+char 7 6 330.046875 15 15.015625 15
+char 7 7 345.046875 15 15.015625 15

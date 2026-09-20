@@ -1,0 +1,91 @@
+source css/css-text/hanging-punctuation/hanging-punctuation-first.html
+block 5 html > body > div:nth-of-type(2) > div:nth-of-type(5)
+size 300 48
+lang
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 16px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height normal
+  overflow-wrap normal
+  tab-size 8
+  text-align justify
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 32px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse collapse
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+run 0 0
+  "(This should hang into the text-indent."
+char 0 0 32 0 16.015625 16
+char 0 1 48 0 16.015625 16
+char 0 2 64 0 16.015625 16
+char 0 3 80 0 16.015625 16
+char 0 4 96 0 16.015625 16
+char 0 5 112 0 92 16
+char 0 6 203.984375 0 16.015625 16
+char 0 7 219.984375 0 16.015625 16
+char 0 8 235.984375 0 16.015625 16
+char 0 9 251.984375 0 16.015625 16
+char 0 10 267.984375 0 16.015625 16
+char 0 11 283.984375 0 16.015625 16
+char 0 12 299.984375 0 0 16
+char 0 12 0 16 0 16
+char 0 13 0 16 16.015625 16
+char 0 14 16 16 16.015625 16
+char 0 15 32 16 16.015625 16
+char 0 16 48 16 16.015625 16
+char 0 17 64 16 62 16
+char 0 18 125.984375 16 16.015625 16
+char 0 19 141.984375 16 16.015625 16
+char 0 20 157.984375 16 16.015625 16
+char 0 21 173.984375 16 16.015625 16
+char 0 22 189.984375 16 62.015625 16
+char 0 23 251.984375 16 16.015625 16
+char 0 24 267.984375 16 16.015625 16
+char 0 25 283.984375 16 16.015625 16
+char 0 26 299.984375 16 0 16
+char 0 26 0 32 0 16
+char 0 27 0 32 16.015625 16
+char 0 28 16 32 16.015625 16
+char 0 29 32 32 16.015625 16
+char 0 30 48 32 16.015625 16
+char 0 31 64 32 16.015625 16
+char 0 32 80 32 16.015625 16
+char 0 33 96 32 16.015625 16
+char 0 34 112 32 16.015625 16
+char 0 35 128 32 16.015625 16
+char 0 36 144 32 16.015625 16
+char 0 37 160 32 16.015625 16
+char 0 38 176 32 16.015625 16

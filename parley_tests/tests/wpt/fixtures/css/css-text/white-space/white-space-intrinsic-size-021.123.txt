@@ -1,0 +1,54 @@
+source css/css-text/white-space/white-space-intrinsic-size-021.html
+block 123 html > body > div:nth-of-type(22) > div:nth-of-type(4)
+size 40 10
+lang
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 10px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height 10px
+  overflow-wrap normal
+  tab-size 8
+  text-align start
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode nowrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse preserve
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+run 0 0
+  "X  É"
+char 0 0 0 0 10 10
+char 0 1 9.984375 0 10.015625 10
+char 0 2 19.984375 0 10.015625 10
+char 0 3 29.984375 0 10.015625 10

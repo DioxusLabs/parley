@@ -1,0 +1,60 @@
+source css/css-text/white-space/pre-wrap-leading-spaces-017.html
+block 1 html > body > div:nth-of-type(2)
+size 99.984375 100
+lang
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 50px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height 50px
+  overflow-wrap normal
+  tab-size 8
+  text-align start
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse preserve
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+style 1
+  unicode-bidi normal
+run 0 0
+  " "
+run 1 1
+  "  "
+run 2 0
+  "X"
+char 0 0 0 0 50 50
+char 1 0 50 0 50 50
+char 1 1 99.984375 0 50.015625 50
+char 2 0 0 50 50 50

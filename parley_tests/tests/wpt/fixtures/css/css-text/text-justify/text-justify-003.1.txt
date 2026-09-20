@@ -1,0 +1,70 @@
+source css/css-text/text-justify/text-justify-003.html
+block 1 html > body > div:nth-of-type(2)
+size 290 48
+lang en
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 24px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height 24px
+  overflow-wrap normal
+  tab-size 8
+  text-align justify
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify inter-character
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse collapse
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+run 0 0 en
+  "XXX XXX XXX XXX XXX"
+char 0 0 0 0 26.609375 24
+char 0 1 26.59375 0 26.609375 24
+char 0 2 53.1875 0 26.625 24
+char 0 3 79.796875 0 26.609375 24
+char 0 4 106.390625 0 26.609375 24
+char 0 5 132.984375 0 26.625 24
+char 0 6 159.59375 0 26.609375 24
+char 0 7 186.1875 0 26.625 24
+char 0 8 212.796875 0 26.609375 24
+char 0 9 239.390625 0 26.609375 24
+char 0 10 265.984375 0 24.015625 24
+char 0 11 289.984375 0 0 24
+char 0 11 0 24 0 24
+char 0 12 0 24 24 24
+char 0 13 23.984375 24 24.015625 24
+char 0 14 47.984375 24 24.015625 24
+char 0 15 71.984375 24 24.015625 24
+char 0 16 95.984375 24 24.015625 24
+char 0 17 119.984375 24 24.015625 24
+char 0 18 143.984375 24 24.015625 24

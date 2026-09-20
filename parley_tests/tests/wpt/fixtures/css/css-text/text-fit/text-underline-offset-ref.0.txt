@@ -1,0 +1,58 @@
+source css/css-text/text-fit/text-underline-offset-ref.html
+block 0 html > body > div > div:nth-of-type(1)
+size 160 160
+lang
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 40px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height 80px
+  overflow-wrap normal
+  tab-size 8
+  text-align start
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode nowrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse preserve
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+run 0 0
+  "ÉpÉ\npÉpÉ"
+char 0 0 0 20 40 40
+char 0 1 39.984375 20 40.015625 40
+char 0 2 79.984375 20 40.015625 40
+char 0 3 120 20 0 40
+char 0 4 0 100 40 40
+char 0 5 39.984375 100 40.015625 40
+char 0 6 79.984375 100 40.015625 40
+char 0 7 119.984375 100 40.015625 40

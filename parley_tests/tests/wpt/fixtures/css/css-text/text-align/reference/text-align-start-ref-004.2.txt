@@ -1,0 +1,55 @@
+source css/css-text/text-align/reference/text-align-start-ref-004.html
+block 2 html > body > div:nth-of-type(2) > div:nth-of-type(2)
+size 300 25
+lang en
+font Ahem Ahem.ttf
+container
+  direction rtl
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 25px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height 25px
+  overflow-wrap normal
+  tab-size 8
+  text-align left
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse collapse
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+run 0 0 en
+  "REFER"
+char 0 0 0 0 25.015625 25
+char 0 1 25 0 25.015625 25
+char 0 2 50 0 25.015625 25
+char 0 3 75 0 25.015625 25
+char 0 4 100 0 25.015625 25

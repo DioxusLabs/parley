@@ -1,0 +1,53 @@
+source css/css-text/white-space/white-space-pre-wrap-trailing-spaces-002.html
+block 2 span#s2
+size 60 20
+lang
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 20px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height 20px
+  overflow-wrap normal
+  tab-size 8
+  text-align center
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style auto
+  unicode-bidi normal
+  vertical-align baseline
+  white-space-collapse preserve
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+run 0 0
+  " X "
+char 0 0 0 0 20 20
+char 0 1 20 0 20 20
+char 0 2 39.984375 0 20.015625 20

@@ -1,0 +1,78 @@
+source css/css-text/white-space/reference/text-wrap-balance-002-ref.html
+block 0 html > body > div
+size 399.984375 40
+lang
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 20px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height normal
+  overflow-wrap normal
+  tab-size 8
+  text-align start
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse collapse
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+run 0 0
+  "\n  123 567 901 345 789 123\n"
+char 0 0 0 0 0 20
+char 0 1 0 0 0 20
+char 0 2 0 0 0 20
+char 0 3 0 0 20 20
+char 0 4 19.984375 0 20.015625 20
+char 0 5 39.984375 0 20.015625 20
+char 0 6 59.984375 0 20.015625 20
+char 0 7 79.984375 0 20.015625 20
+char 0 8 99.984375 0 20.015625 20
+char 0 9 119.984375 0 20.015625 20
+char 0 10 139.984375 0 20.015625 20
+char 0 11 159.984375 0 20.015625 20
+char 0 12 179.984375 0 20.015625 20
+char 0 13 199.984375 0 20.015625 20
+char 0 14 219.984375 0 20.015625 20
+char 0 15 239.984375 0 20.015625 20
+char 0 16 259.984375 0 20.015625 20
+char 0 17 279.984375 0 20.015625 20
+char 0 18 299.984375 0 20.015625 20
+char 0 19 319.984375 0 20.015625 20
+char 0 20 339.984375 0 20.015625 20
+char 0 21 359.984375 0 20.015625 20
+char 0 22 379.984375 0 0 20
+char 0 22 0 20 0 20
+char 0 23 0 20 20 20
+char 0 24 19.984375 20 20.015625 20
+char 0 25 39.984375 20 20.015625 20
+char 0 26 59.984375 20 0 20

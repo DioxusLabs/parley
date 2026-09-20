@@ -1,0 +1,84 @@
+source css/CSS2/bidi-text/line-breaking-bidi-003.xht
+block 1 html > body > div
+size 680 40
+lang en
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 40px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height 40px
+  overflow-wrap normal
+  tab-size 8
+  text-align start
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse collapse
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+  unicode-bidi normal
+run 0 0 en
+  "\u{00A0}\u{00A0}\u{202E}\u{00A0}\u{202D}\u{00A0}\u{202E}\u{00A0}\u{202D}\u{00A0}\u{202E}\u{00A0}\u{00A0}\u{202D}\u{00A0}\u{202C}\u{00A0}"
+run 1 0 en
+  "\u{00A0}"
+run 2 0 en
+  "\u{202C}\u{00A0}\u{202C}\u{00A0}\u{202C}\u{00A0}\u{202C}\u{00A0}\u{00A0}\u{202C}\u{00A0}"
+char 0 0 0 0 40 40
+char 0 1 39.984375 0 40.015625 40
+char 0 2 639.984375 0 0 40
+char 0 3 600 0 40 40
+char 0 4 160 0 0 40
+char 0 5 160 0 40 40
+char 0 6 559.984375 0 0 40
+char 0 7 520 0 40 40
+char 0 8 240 0 0 40
+char 0 9 240 0 40 40
+char 0 10 479.984375 0 0 40
+char 0 11 439.984375 0 40.015625 40
+char 0 12 400 0 40 40
+char 0 13 360 0 0 40
+char 0 14 360 0 40 40
+char 0 15 359.984375 0 0 40
+char 0 16 320 0 40 40
+char 1 0 280 0 40 40
+char 2 0 480 0 0 40
+char 2 1 480 0 40 40
+char 2 2 239.984375 0 0 40
+char 2 3 200 0 40 40
+char 2 4 560 0 0 40
+char 2 5 560 0 40 40
+char 2 6 159.984375 0 0 40
+char 2 7 119.984375 0 40.015625 40
+char 2 8 80 0 40 40
+char 2 9 640 0 0 40
+char 2 10 640 0 40 40

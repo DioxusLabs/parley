@@ -1,0 +1,104 @@
+source css/css-text/overflow-wrap/overflow-wrap-002-ref.html
+block 1 p#ref
+size 200 80
+lang
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 20px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height 20px
+  overflow-wrap normal
+  tab-size 8
+  text-align start
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse collapse
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+style 1
+  white-space-collapse preserve
+run 0 0
+  "FillerText"
+run 1 1
+  "\n"
+run 2 0
+  "FillerText"
+run 3 1
+  "\n"
+run 4 0
+  "FillerText"
+run 5 1
+  "\n"
+run 6 0
+  "FillerText"
+char 0 0 0 0 20 20
+char 0 1 19.984375 0 20.015625 20
+char 0 2 39.984375 0 20.015625 20
+char 0 3 59.984375 0 20.015625 20
+char 0 4 79.984375 0 20.015625 20
+char 0 5 99.984375 0 20.015625 20
+char 0 6 119.984375 0 20.015625 20
+char 0 7 139.984375 0 20.015625 20
+char 0 8 159.984375 0 20.015625 20
+char 0 9 179.984375 0 20.015625 20
+char 2 0 0 20 20 20
+char 2 1 19.984375 20 20.015625 20
+char 2 2 39.984375 20 20.015625 20
+char 2 3 59.984375 20 20.015625 20
+char 2 4 79.984375 20 20.015625 20
+char 2 5 99.984375 20 20.015625 20
+char 2 6 119.984375 20 20.015625 20
+char 2 7 139.984375 20 20.015625 20
+char 2 8 159.984375 20 20.015625 20
+char 2 9 179.984375 20 20.015625 20
+char 4 0 0 40 20 20
+char 4 1 19.984375 40 20.015625 20
+char 4 2 39.984375 40 20.015625 20
+char 4 3 59.984375 40 20.015625 20
+char 4 4 79.984375 40 20.015625 20
+char 4 5 99.984375 40 20.015625 20
+char 4 6 119.984375 40 20.015625 20
+char 4 7 139.984375 40 20.015625 20
+char 4 8 159.984375 40 20.015625 20
+char 4 9 179.984375 40 20.015625 20
+char 6 0 0 60 20 20
+char 6 1 19.984375 60 20.015625 20
+char 6 2 39.984375 60 20.015625 20
+char 6 3 59.984375 60 20.015625 20
+char 6 4 79.984375 60 20.015625 20
+char 6 5 99.984375 60 20.015625 20
+char 6 6 119.984375 60 20.015625 20
+char 6 7 139.984375 60 20.015625 20
+char 6 8 159.984375 60 20.015625 20
+char 6 9 179.984375 60 20.015625 20

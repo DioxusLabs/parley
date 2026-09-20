@@ -1,0 +1,196 @@
+source css/css-text/white-space/break-spaces-005.html
+block 1 html > body > div:nth-of-type(1)
+size 100 100
+lang
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 10px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height 10px
+  overflow-wrap normal
+  tab-size 8
+  text-align start
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse collapse
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+style 1
+  unicode-bidi normal
+style 2
+  white-space-collapse preserve
+run 0 0
+  "XXXX"
+run 1 1
+  "XXXXXX"
+run 2 2
+  "\n"
+run 3 1
+  "XXXXXXXXXX"
+run 4 2
+  "\n"
+run 5 1
+  "XXXXXXXXXX"
+run 6 2
+  "\n"
+run 7 1
+  "XXXXXXXXXX"
+run 8 2
+  "\n"
+run 9 1
+  "XXXXXXXXXX"
+run 10 2
+  "\n"
+run 11 1
+  "XXXXXXXXXX"
+run 12 2
+  "\n"
+run 13 1
+  "XXXXXXXXXX"
+run 14 2
+  "\n"
+run 15 1
+  "XXXXXXXXXX"
+run 16 2
+  "\n"
+run 17 1
+  "XXXXXXXXXX"
+run 18 2
+  "\n"
+run 19 1
+  "XX"
+run 20 0
+  "XXXX"
+run 21 1
+  "XXXX"
+char 0 0 0 0 10 10
+char 0 1 9.984375 0 10.015625 10
+char 0 2 19.984375 0 10.015625 10
+char 0 3 29.984375 0 10.015625 10
+char 1 0 40 0 10 10
+char 1 1 49.984375 0 10.015625 10
+char 1 2 59.984375 0 10.015625 10
+char 1 3 69.984375 0 10.015625 10
+char 1 4 79.984375 0 10.015625 10
+char 1 5 89.984375 0 10.015625 10
+char 3 0 0 10 10 10
+char 3 1 9.984375 10 10.015625 10
+char 3 2 19.984375 10 10.015625 10
+char 3 3 29.984375 10 10.015625 10
+char 3 4 39.984375 10 10.015625 10
+char 3 5 49.984375 10 10.015625 10
+char 3 6 59.984375 10 10.015625 10
+char 3 7 69.984375 10 10.015625 10
+char 3 8 79.984375 10 10.015625 10
+char 3 9 89.984375 10 10.015625 10
+char 5 0 0 20 10 10
+char 5 1 9.984375 20 10.015625 10
+char 5 2 19.984375 20 10.015625 10
+char 5 3 29.984375 20 10.015625 10
+char 5 4 39.984375 20 10.015625 10
+char 5 5 49.984375 20 10.015625 10
+char 5 6 59.984375 20 10.015625 10
+char 5 7 69.984375 20 10.015625 10
+char 5 8 79.984375 20 10.015625 10
+char 5 9 89.984375 20 10.015625 10
+char 7 0 0 30 10 10
+char 7 1 9.984375 30 10.015625 10
+char 7 2 19.984375 30 10.015625 10
+char 7 3 29.984375 30 10.015625 10
+char 7 4 39.984375 30 10.015625 10
+char 7 5 49.984375 30 10.015625 10
+char 7 6 59.984375 30 10.015625 10
+char 7 7 69.984375 30 10.015625 10
+char 7 8 79.984375 30 10.015625 10
+char 7 9 89.984375 30 10.015625 10
+char 9 0 0 40 10 10
+char 9 1 9.984375 40 10.015625 10
+char 9 2 19.984375 40 10.015625 10
+char 9 3 29.984375 40 10.015625 10
+char 9 4 39.984375 40 10.015625 10
+char 9 5 49.984375 40 10.015625 10
+char 9 6 59.984375 40 10.015625 10
+char 9 7 69.984375 40 10.015625 10
+char 9 8 79.984375 40 10.015625 10
+char 9 9 89.984375 40 10.015625 10
+char 11 0 0 50 10 10
+char 11 1 9.984375 50 10.015625 10
+char 11 2 19.984375 50 10.015625 10
+char 11 3 29.984375 50 10.015625 10
+char 11 4 39.984375 50 10.015625 10
+char 11 5 49.984375 50 10.015625 10
+char 11 6 59.984375 50 10.015625 10
+char 11 7 69.984375 50 10.015625 10
+char 11 8 79.984375 50 10.015625 10
+char 11 9 89.984375 50 10.015625 10
+char 13 0 0 60 10 10
+char 13 1 9.984375 60 10.015625 10
+char 13 2 19.984375 60 10.015625 10
+char 13 3 29.984375 60 10.015625 10
+char 13 4 39.984375 60 10.015625 10
+char 13 5 49.984375 60 10.015625 10
+char 13 6 59.984375 60 10.015625 10
+char 13 7 69.984375 60 10.015625 10
+char 13 8 79.984375 60 10.015625 10
+char 13 9 89.984375 60 10.015625 10
+char 15 0 0 70 10 10
+char 15 1 9.984375 70 10.015625 10
+char 15 2 19.984375 70 10.015625 10
+char 15 3 29.984375 70 10.015625 10
+char 15 4 39.984375 70 10.015625 10
+char 15 5 49.984375 70 10.015625 10
+char 15 6 59.984375 70 10.015625 10
+char 15 7 69.984375 70 10.015625 10
+char 15 8 79.984375 70 10.015625 10
+char 15 9 89.984375 70 10.015625 10
+char 17 0 0 80 10 10
+char 17 1 9.984375 80 10.015625 10
+char 17 2 19.984375 80 10.015625 10
+char 17 3 29.984375 80 10.015625 10
+char 17 4 39.984375 80 10.015625 10
+char 17 5 49.984375 80 10.015625 10
+char 17 6 59.984375 80 10.015625 10
+char 17 7 69.984375 80 10.015625 10
+char 17 8 79.984375 80 10.015625 10
+char 17 9 89.984375 80 10.015625 10
+char 19 0 0 90 10 10
+char 19 1 9.984375 90 10.015625 10
+char 20 0 20 90 10 10
+char 20 1 29.984375 90 10.015625 10
+char 20 2 39.984375 90 10.015625 10
+char 20 3 49.984375 90 10.015625 10
+char 21 0 60 90 10 10
+char 21 1 69.984375 90 10.015625 10
+char 21 2 79.984375 90 10.015625 10
+char 21 3 89.984375 90 10.015625 10

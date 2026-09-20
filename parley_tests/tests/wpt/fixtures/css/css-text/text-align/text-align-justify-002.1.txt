@@ -1,0 +1,96 @@
+source css/css-text/text-align/text-align-justify-002.html
+block 1 html > body > div:nth-of-type(2) > div:nth-of-type(1)
+size 450 75
+lang en
+font Ahem Ahem.ttf
+container
+  direction ltr
+  font-family Ahem
+  font-feature-settings normal
+  font-kerning auto
+  font-size 25px
+  font-stretch 100%
+  font-style normal
+  font-variant-caps normal
+  font-variant-east-asian normal
+  font-variant-ligatures normal
+  font-variant-numeric normal
+  font-variation-settings normal
+  font-weight 400
+  hyphens manual
+  initial-letter normal
+  letter-spacing normal
+  line-break auto
+  line-height 25px
+  overflow-wrap normal
+  tab-size 8
+  text-align justify
+  text-align-last auto
+  text-autospace no-autospace
+  text-box-edge auto
+  text-box-trim none
+  text-combine-upright none
+  text-emphasis-style none
+  text-fit none
+  text-indent 0px
+  text-justify auto
+  text-orientation mixed
+  text-spacing-trim normal
+  text-transform none
+  text-wrap-mode wrap
+  text-wrap-style auto
+  unicode-bidi isolate
+  vertical-align baseline
+  white-space-collapse collapse
+  word-break normal
+  word-spacing 0px
+  writing-mode horizontal-tb
+style 0
+run 0 0 en
+  "TES TES TES TES TES TES TES TES TES TES TES "
+char 0 0 0 0 25.015625 25
+char 0 1 25 0 25.015625 25
+char 0 2 50 0 25.015625 25
+char 0 3 75 0 50 25
+char 0 4 124.984375 0 25.015625 25
+char 0 5 149.984375 0 25.015625 25
+char 0 6 174.984375 0 25.015625 25
+char 0 7 199.984375 0 50.015625 25
+char 0 8 249.984375 0 25.015625 25
+char 0 9 274.984375 0 25.015625 25
+char 0 10 299.984375 0 25.015625 25
+char 0 11 324.984375 0 50.015625 25
+char 0 12 374.984375 0 25.015625 25
+char 0 13 399.984375 0 25.015625 25
+char 0 14 424.984375 0 25.015625 25
+char 0 15 449.984375 0 0 25
+char 0 15 0 25 0 25
+char 0 16 0 25 25.015625 25
+char 0 17 25 25 25.015625 25
+char 0 18 50 25 25.015625 25
+char 0 19 75 25 50 25
+char 0 20 124.984375 25 25.015625 25
+char 0 21 149.984375 25 25.015625 25
+char 0 22 174.984375 25 25.015625 25
+char 0 23 199.984375 25 50.015625 25
+char 0 24 249.984375 25 25.015625 25
+char 0 25 274.984375 25 25.015625 25
+char 0 26 299.984375 25 25.015625 25
+char 0 27 324.984375 25 50.015625 25
+char 0 28 374.984375 25 25.015625 25
+char 0 29 399.984375 25 25.015625 25
+char 0 30 424.984375 25 25.015625 25
+char 0 31 449.984375 25 0 25
+char 0 31 0 50 0 25
+char 0 32 0 50 25.015625 25
+char 0 33 25 50 25.015625 25
+char 0 34 50 50 25.015625 25
+char 0 35 75 50 25.015625 25
+char 0 36 100 50 25.015625 25
+char 0 37 125 50 25.015625 25
+char 0 38 150 50 25.015625 25
+char 0 39 175 50 25.015625 25
+char 0 40 200 50 25.015625 25
+char 0 41 225 50 25.015625 25
+char 0 42 250 50 25.015625 25
+char 0 43 275 50 0 25
