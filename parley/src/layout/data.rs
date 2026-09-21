@@ -308,7 +308,7 @@ impl<B: Brush> LayoutData<B> {
 }
 
 /// Running state of [`LayoutData::calculate_content_widths`].
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 struct ContentWidthsScan {
     min_width: f32,
     max_width: f32,
@@ -374,6 +374,8 @@ impl ContentWidthsScan {
     ) {
         debug_assert!(SPACING || spacing.is_zero());
 
+        // Work on a local copy so the running state can live in registers.
+        let mut this = *self;
         let clusters = slice.shaped_clusters();
         let mut skip_atom = false;
         let mut atom_gap = 0.0;
@@ -384,12 +386,12 @@ impl ContentWidthsScan {
             if is_atom_start {
                 skip_atom = false;
                 let boundary = cluster.boundary_before();
-                let prev_text_wrap_mode = self.text_wrap_mode;
-                self.text_wrap_mode = style.text_wrap_mode;
+                let prev_text_wrap_mode = this.text_wrap_mode;
+                this.text_wrap_mode = style.text_wrap_mode;
                 if prev_text_wrap_mode == TextWrapMode::Wrap
                     && (boundary == Boundary::Line || style.overflow_wrap == OverflowWrap::Anywhere)
                 {
-                    self.break_opportunity();
+                    this.break_opportunity();
                 }
 
                 // Handle `Whitespace::Newline` rather than relying on `Boundary::Mandatory`,
@@ -404,7 +406,7 @@ impl ContentWidthsScan {
                 // Note newlines have no advance.
                 if whitespace == Whitespace::Newline {
                     // Newlines hang, so whitespace before them keeps hanging.
-                    self.forced_break();
+                    this.forced_break();
                     skip_atom = true;
                     continue;
                 }
@@ -425,8 +427,8 @@ impl ContentWidthsScan {
                     advance += atom_gap;
                 }
             }
-            self.running_min_width += advance;
-            self.running_max_width += advance;
+            this.running_min_width += advance;
+            this.running_max_width += advance;
 
             // A cluster hangs if all of its characters hang. Its first character is checked via
             // the cached flags so the common case never touches `characters`.
@@ -443,13 +445,14 @@ impl ContentWidthsScan {
                             )
                         }));
             if hangs {
-                self.running_hanging_whitespace += advance;
-                self.hangs_conditionally =
+                this.running_hanging_whitespace += advance;
+                this.hangs_conditionally =
                     style.white_space_collapse == WhiteSpaceCollapse::Preserve;
             } else {
-                self.running_hanging_whitespace = 0.0;
+                this.running_hanging_whitespace = 0.0;
             }
         }
+        *self = this;
     }
 
     /// Scan an in-flow inline box of the given width.
