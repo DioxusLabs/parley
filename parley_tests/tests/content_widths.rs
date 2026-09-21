@@ -114,6 +114,30 @@ fn content_widths_mixed_direction() {
 }
 
 #[test]
+fn content_widths_with_spacing() {
+    let mut env = TestEnv::new(test_name!(), None);
+
+    // Word and letter spacing are applied after each atom and hang along with it. The content
+    // widths should agree with the line breaker, including for partially hanging atoms, mixed
+    // directions, and forced breaks.
+    for text in [
+        "AA BB CCC   DD EE",
+        "a\u{0D4E} b c",
+        "abc ااا ببب def",
+        "ااا abc def ببب",
+        "01 2  \n\n  34\n 5",
+    ] {
+        for (word, letter) in [(3.0, 0.0), (0.0, 2.0), (4.0, 1.5)] {
+            let mut builder = env.ranged_builder(text);
+            builder.push_default(StyleProperty::WordSpacing(word));
+            builder.push_default(StyleProperty::LetterSpacing(letter));
+            let mut layout = builder.build(text);
+            assert_content_widths_match_layout(&mut layout);
+        }
+    }
+}
+
+#[test]
 fn inbox_content_width() {
     let mut env = TestEnv::new(test_name!(), None);
 

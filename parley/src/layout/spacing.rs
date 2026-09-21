@@ -95,6 +95,20 @@ impl Spacing {
     pub(crate) const fn is_zero(self) -> bool {
         self.word == 0. && self.letter == 0.
     }
+
+    /// The gap applied after an atom whose first character has the given whitespace class.
+    ///
+    /// This is the spacing part of [`EffectiveSpacing::gaps`], i.e., without justification.
+    #[inline(always)]
+    pub(crate) fn atom_gap(self, whitespace: Whitespace) -> f32 {
+        if whitespace == Whitespace::Newline {
+            0.
+        } else if is_word_separator(whitespace) {
+            self.letter + self.word
+        } else {
+            self.letter
+        }
+    }
 }
 
 /// Justification to apply to a single line.
@@ -159,15 +173,13 @@ impl EffectiveSpacing {
 
         let mut gaps = Gaps {
             before: 0.,
-            after: self.spacing.letter,
+            after: self.spacing.atom_gap(whitespace),
         };
 
-        if is_word_separator(whitespace) {
-            gaps.after += self.spacing.word;
-
-            if atom.shaped_clusters_range().end <= self.justification.justification_end_cluster {
-                gaps.after += self.justification.amount_per_opportunity;
-            }
+        if is_word_separator(whitespace)
+            && atom.shaped_clusters_range().end <= self.justification.justification_end_cluster
+        {
+            gaps.after += self.justification.amount_per_opportunity;
         }
 
         gaps
