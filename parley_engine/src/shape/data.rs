@@ -348,11 +348,6 @@ mod tests {
             assert_eq!(info.is_emoji(), emoji, "{ch:?}");
         }
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 
     #[test]
     fn first_char_flags_round_trip() {
