@@ -22,13 +22,13 @@ use crate::layout::{
 };
 use crate::style::Brush;
 use crate::{
-    BaselineShift, InlineBox, InlineBoxKind, LineHeight, OverflowWrap, TextWrapMode, VerticalAlign,
+    BaselineShift, InlineBox, InlineBoxKind, OverflowWrap, TextWrapMode, VerticalAlign,
     WhiteSpaceCollapse,
 };
 
 use core::ops::Range;
-use parley_engine::Atom;
 use parley_engine::shape::Whitespace;
+use parley_engine::{Atom, Atoms, ShapedSlice};
 use smallvec::SmallVec;
 
 #[derive(Default)]
@@ -392,6 +392,40 @@ impl LineBoxMetrics {
     }
 }
 
+/// The atoms of `run` to process next, starting at `shaped_cluster` up to where the run's line
+/// height next changes (and in particular, if there is no next line height change, up to the end of
+/// the run).
+///
+/// This returns a tuple of the atoms, their line height, and whether they reach the run's end.
+///
+/// See also [`crate::layout::data::LayoutData::line_heights`].
+#[inline(always)]
+fn atoms_until_line_height_change<'a, B: Brush>(
+    layout: &'a LayoutData<B>,
+    run: &Run<'a, B>,
+    slice: ShapedSlice<'a>,
+    shaped_cluster: u32,
+) -> (Atoms<'a>, Option<f32>, bool) {
+    let line_heights = &run.data.line_heights;
+    let line_heights = &layout.line_heights[line_heights.start as usize..line_heights.end as usize];
+
+    // The line heights are ordered by shaped cluster; the one in effect at `shaped_cluster` is the
+    // last line height starting at or before it.
+    let current =
+        line_heights[1..].partition_point(|change| change.shaped_cluster <= shaped_cluster);
+    let line_height = line_heights[current].line_height;
+    let (end, is_last) = match line_heights.get(current + 1) {
+        Some(change) => (change.shaped_cluster, false),
+        None => (run.shaped.shaped_clusters_range.end, true),
+    };
+
+    (
+        slice.narrow(shaped_cluster..end).atoms_start(),
+        line_height,
+        is_last,
+    )
+}
+
 #[derive(Clone, Default)]
 struct PrevBoundaryState {
     item_idx: usize,
@@ -567,6 +601,20 @@ impl BreakerState {
             run_box,
             &mut self.contributed,
         );
+        // An atom spanning several styles (e.g. a ligature) gets the span boxes of all of them.
+        if let [_, rest @ ..] = atom.characters() {
+            for character in rest {
+                if character.style_index != style_index {
+                    self.line.box_metrics.add_text(
+                        self.item_idx,
+                        character.style_index,
+                        style_metrics,
+                        run_box,
+                        &mut self.contributed,
+                    );
+                }
+            }
+        }
         self.update_max_height_exceeded();
     }
 
@@ -1020,16 +1068,23 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let run_idx = item.index;
                     let run = Run::new(self.layout, 0, 0, run_idx, None);
                     let slice = run.full_slice();
-                    let run_box = run_box_metrics(&self.layout.data, run_idx);
-                    let run_box = run_box.as_ref();
 
                     // Additional spacing to apply between atoms.
                     let spacing = EffectiveSpacing::new(run.data.spacing, Justification::NONE);
 
-                    let line_height = run.data.line_height;
+                    // The run box's line height can change within the run, so we process the run
+                    // one line height at a time.
+                    let (atoms, line_height, reaches_run_end) = atoms_until_line_height_change(
+                        &self.layout.data,
+                        &run,
+                        slice,
+                        self.state.cluster_idx,
+                    );
+                    let run_box = run_box_metrics(&self.layout.data, run_idx, line_height);
+                    let run_box = run_box.as_ref();
 
-                    // Iterate over the remaining atoms in the Run
-                    for atom in slice.atoms_from(self.state.cluster_idx) {
+                    // Iterate over the atoms
+                    for atom in atoms {
                         // Retrieve metadata about the atom
                         let first_character = &atom.characters()[0];
                         let whitespace = first_character.whitespace;
@@ -1049,7 +1104,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         // Take mandatory line breaks before checking for line wrapping.
                         if is_newline {
                             if max_height_exceeded {
-                                return self.max_height_break_data(line_height);
+                                return self.max_height_break_data(
+                                    self.layout
+                                        .data
+                                        .style_metrics
+                                        .get(usize::from(style_index))
+                                        .map_or(0., |m| m.line_height),
+                                );
                             }
 
                             self.state.append_atom_to_line(
@@ -1097,7 +1158,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         // We simply append the atom to the current line
                         if next_x <= max_advance {
                             if max_height_exceeded {
-                                return self.max_height_break_data(line_height);
+                                return self.max_height_break_data(
+                                    self.layout
+                                        .data
+                                        .style_metrics
+                                        .get(usize::from(style_index))
+                                        .map_or(0., |m| m.line_height),
+                                );
                             }
                             self.state.append_atom_to_line(
                                 &atom,
@@ -1126,7 +1193,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             );
                             if all_hang || next_x - hanging <= max_advance {
                                 if max_height_exceeded {
-                                    return self.max_height_break_data(line_height);
+                                    return self.max_height_break_data(
+                                        self.layout
+                                            .data
+                                            .style_metrics
+                                            .get(usize::from(style_index))
+                                            .map_or(0., |m| m.line_height),
+                                    );
                                 }
                                 self.state.append_atom_to_line(
                                     &atom,
@@ -1171,7 +1244,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             // We fall back to appending the content to the line.
                             else {
                                 if max_height_exceeded {
-                                    return self.max_height_break_data(line_height);
+                                    return self.max_height_break_data(
+                                        self.layout
+                                            .data
+                                            .style_metrics
+                                            .get(usize::from(style_index))
+                                            .map_or(0., |m| m.line_height),
+                                    );
                                 }
                                 self.state.append_atom_to_line(
                                     &atom,
@@ -1183,6 +1262,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 );
                             }
                         }
+                    }
+                    if !reaches_run_end {
+                        continue;
                     }
                     self.state.run_idx += 1;
                     self.state.item_idx += 1;
@@ -1268,10 +1350,19 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let slice = run.full_slice();
                     let spacing = run.line_spacing();
                     let cluster_end = shaped_run.shaped_clusters_range.end;
-                    let run_box = run_box_metrics(&self.layout.data, run_idx);
+
+                    // The line height can change within the run, so we process the run one line
+                    // height at a time.
+                    let (atoms, line_height, reaches_run_end) = atoms_until_line_height_change(
+                        &self.layout.data,
+                        &run,
+                        slice,
+                        self.state.cluster_idx,
+                    );
+                    let run_box = run_box_metrics(&self.layout.data, run_idx, line_height);
                     let run_box = run_box.as_ref();
 
-                    for atom in slice.atoms_from(self.state.cluster_idx) {
+                    for atom in atoms {
                         // Check if we should break before this atom
                         if char_count >= max_chars && max_chars != 0 {
                             self.start_new_line(BreakReason::Regular, f32::MAX, line_indent);
@@ -1324,6 +1415,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             self.start_new_line(break_reason, f32::MAX, line_indent);
                             return Some(());
                         }
+                    }
+                    if !reaches_run_end {
+                        continue;
                     }
                     self.state.run_idx += 1;
                     self.state.item_idx += 1;
@@ -1435,7 +1529,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                 let style_index = self.layout.data.shaped_text.shaped_clusters()
                     [cluster as usize - 1]
                     .style_index;
-                let run_box = run_box_metrics(&self.layout.data, index);
+                let line_heights = &self.layout.data.runs[index].line_heights;
+                let line_height =
+                    self.layout.data.line_heights[line_heights.end as usize - 1].line_height;
+                let run_box = run_box_metrics(&self.layout.data, index, line_height);
                 self.state.line.box_metrics.add_text(
                     index,
                     style_index,
@@ -1927,23 +2024,24 @@ fn hanging_whitespace<B: Brush>(
 /// run's atoms adds it to a line's extents.
 ///
 /// Per [CSS Inline 3 § 4.1], glyphs from fonts other than the first available font only
-/// contribute to the line when the `line-height` is `normal` ([`LineHeight::MetricsRelative`]);
+/// contribute to the line when the `line-height` is `normal` ([`LineHeight::MetricsRelative`](crate::LineHeight::MetricsRelative));
 /// otherwise the style's span box alone sizes the line and this returns `None`.
 ///
 /// [CSS Inline 3 § 4.1]: https://drafts.csswg.org/css-inline-3/#inline-height
 #[inline]
-fn run_box_metrics<B: Brush>(data: &LayoutData<B>, run_idx: usize) -> Option<BoxMetrics> {
+///
+/// `line_height` is the run's line height at the atoms in question (see
+/// [`LayoutData::line_heights`](crate::layout::data::LayoutData::line_heights)), which is only
+/// `Some` for [`LineHeight::MetricsRelative`](crate::LineHeight::MetricsRelative) line heights.
+fn run_box_metrics<B: Brush>(
+    data: &LayoutData<B>,
+    run_idx: usize,
+    line_height: Option<f32>,
+) -> Option<BoxMetrics> {
     let shaped_run = &data.shaped_text.runs()[run_idx];
-    let style_index =
-        data.shaped_text.characters()[shaped_run.characters_range.start as usize].style_index;
-    match data.styles[usize::from(style_index)].line_height {
-        LineHeight::MetricsRelative(_) => Some(BoxMetrics::from_font(
-            &shaped_run.font_metrics,
-            data.runs[run_idx].line_height,
-            data.quantize,
-        )),
-        LineHeight::FontSizeRelative(_) | LineHeight::Absolute(_) => None,
-    }
+    line_height.map(|line_height| {
+        BoxMetrics::from_font(&shaped_run.font_metrics, line_height, data.quantize)
+    })
 }
 
 /// Reorder items within line according to the bidi levels of the items
