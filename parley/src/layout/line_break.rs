@@ -49,6 +49,8 @@ struct LineState {
     /// flow to the caller to handle the constraint violation.
     ///
     /// This never happens when calling `break_all_lines` as it never sets `line_max_height`, and it defaults to `f32::MAX`.
+    /// The check is only performed once a max height has been configured via
+    /// `BreakerState::set_line_max_height`.
     max_height_exceeded: bool,
 
     /// We lag the text-wrap-mode by one cluster due to line-breaking boundaries only
@@ -309,6 +311,11 @@ pub struct BreakerState {
     line_max_advance: f32,
     /// The max height available to the current line.
     line_max_height: f32,
+    /// Whether a max height has been configured via [`Self::set_line_max_height`].
+    ///
+    /// When `false`, `line_max_height` is still at its default of `f32::MAX` and the per-atom
+    /// exceeded check is skipped.
+    has_line_max_height: bool,
 
     /// The state of the current line
     line: LineState,
@@ -333,6 +340,7 @@ impl Default for BreakerState {
             layout_max_advance: 0.0,
             line_max_advance: 0.0,
             line_max_height: f32::MAX,
+            has_line_max_height: false,
             line: LineState::default(),
             prev_boundary: None,
             emergency_boundary: None,
@@ -343,7 +351,9 @@ impl Default for BreakerState {
 impl BreakerState {
     /// Add the atom currently being evaluated to the current line.
     ///
-    /// `text_metrics` are the line box metrics contributed by the atom's text.
+    /// `text_metrics` are the line box metrics contributed by the atom's text. They are the same
+    /// for all atoms of a run, so they are taken (and added to the line box) only for the first
+    /// atom of the run appended to the line being built; it is `None` afterwards.
     /// `is_word_separator` is `true` iff the atom is a [word separator](`is_word_separator`), i.e.,
     /// a justification opportunity.
     #[inline]
@@ -351,7 +361,7 @@ impl BreakerState {
         &mut self,
         atom: &Atom<'_>,
         next_x: f32,
-        text_metrics: LineBoxMetrics,
+        text_metrics: &mut Option<LineBoxMetrics>,
         is_word_separator: bool,
     ) {
         self.line.items.end = self.item_idx + 1;
@@ -359,8 +369,10 @@ impl BreakerState {
         self.cluster_idx = atom.shaped_clusters_range().end;
         self.line.x = next_x;
         self.line.num_word_separators += u32::from(is_word_separator);
-        self.line.box_metrics.add(text_metrics);
-        self.update_max_height_exceeded();
+        if let Some(text_metrics) = text_metrics.take() {
+            self.line.box_metrics.add(text_metrics);
+            self.update_max_height_exceeded();
+        }
     }
 
     /// Add an inline box to the line.
@@ -416,7 +428,10 @@ impl BreakerState {
 
     #[inline(always)]
     fn update_max_height_exceeded(&mut self) {
-        self.line.max_height_exceeded = self.line.box_metrics.line_height() > self.line_max_height;
+        if self.has_line_max_height {
+            self.line.max_height_exceeded =
+                self.line.box_metrics.line_height() > self.line_max_height;
+        }
     }
 
     /// Get the max-advance of the entire layout
@@ -450,6 +465,7 @@ impl BreakerState {
     #[inline(always)]
     pub fn set_line_max_height(&mut self, height: f32) {
         self.line_max_height = height;
+        self.has_line_max_height = true;
     }
 
     /// Get the x-offset of the current line
@@ -765,21 +781,25 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                     // Additional spacing to apply between atoms.
                     let spacing = EffectiveSpacing::new(run.data.spacing, Justification::NONE);
+                    let has_spacing = !spacing.is_zero();
 
-                    // Note that, within a run, all the atoms' text metrics are the same.
+                    // Note that, within a run, all the atoms' text metrics are the same, so they
+                    // only need adding to the line box once per line the run is on. This is
+                    // `take`n by the first `append_atom_to_line` of this call; a revert to an
+                    // earlier break opportunity restores the line box from its snapshot.
                     let line_height = run.data.line_height;
                     // TODO: perhaps precompute these text metrics and store them in `RunMetrics`,
                     // as we currently calculate them for each line a run is on.
-                    let text_metrics = LineBoxMetrics::for_text(
+                    let mut text_metrics = Some(LineBoxMetrics::for_text(
                         run.font_metrics(),
                         line_height,
                         self.layout.data.quantize,
-                    );
+                    ));
 
                     // Iterate over the remaining atoms in the Run
                     for atom in slice.atoms_from(self.state.cluster_idx) {
                         // Retrieve metadata about the atom
-                        let first_character = &atom.characters()[0];
+                        let first_character = atom.first_character();
                         let whitespace = first_character.info.whitespace();
                         let is_newline = whitespace == Whitespace::Newline;
                         // Whether this atom is a justification opportunity.
@@ -801,7 +821,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             self.state.append_atom_to_line(
                                 &atom,
                                 self.state.line.x,
-                                text_metrics,
+                                &mut text_metrics,
                                 is_separator,
                             );
 
@@ -830,7 +850,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
                         // Breaking an atom requires reshaping, which we don't do here, so it is
                         // consumed as a whole (this includes all clusters of a ligature).
-                        let advance = spacing.atom_advance(&atom);
+                        let advance = if has_spacing {
+                            spacing.atom_advance(&atom)
+                        } else {
+                            atom.advance()
+                        };
 
                         // Compute the x position of the content being currently processed
                         let next_x = self.state.line.x + advance;
@@ -847,7 +871,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             self.state.append_atom_to_line(
                                 &atom,
                                 next_x,
-                                text_metrics,
+                                &mut text_metrics,
                                 is_separator,
                             );
                         }
@@ -874,7 +898,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 self.state.append_atom_to_line(
                                     &atom,
                                     next_x,
-                                    text_metrics,
+                                    &mut text_metrics,
                                     is_separator,
                                 );
                             }
@@ -917,7 +941,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 self.state.append_atom_to_line(
                                     &atom,
                                     next_x,
-                                    text_metrics,
+                                    &mut text_metrics,
                                     is_separator,
                                 );
                             }
@@ -1022,11 +1046,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let cluster_end = shaped_run.shaped_clusters_range.end;
 
                     // Note that, within a run, all the atoms' text metrics are the same.
-                    let text_metrics = LineBoxMetrics::for_text(
+                    let mut text_metrics = Some(LineBoxMetrics::for_text(
                         run.font_metrics(),
                         run.data.line_height,
                         self.layout.data.quantize,
-                    );
+                    ));
 
                     for atom in slice.atoms_from(self.state.cluster_idx) {
                         // Check if we should break before this atom
@@ -1035,7 +1059,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             return Some(());
                         }
 
-                        let first_character = &atom.characters()[0];
+                        let first_character = atom.first_character();
                         let whitespace = first_character.info.whitespace();
                         let is_newline = whitespace == Whitespace::Newline;
                         let is_separator = is_word_separator(whitespace);
@@ -1048,8 +1072,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         } else {
                             self.state.line.x + advance
                         };
-                        self.state
-                            .append_atom_to_line(&atom, next_x, text_metrics, is_separator);
+                        self.state.append_atom_to_line(
+                            &atom,
+                            next_x,
+                            &mut text_metrics,
+                            is_separator,
+                        );
                         char_count += atom.char_range().len() as u32;
 
                         // Check if we've reached the limit after adding this atom
@@ -1563,7 +1591,7 @@ fn hanging_whitespace<B: Brush>(
                         effective_spacing,
                         line_item.is_rtl(),
                     );
-                    let first_character = &atom.characters()[0];
+                    let first_character = atom.first_character();
                     let whitespace = first_character.info.whitespace();
                     if in_conditional_suffix && whitespace != Whitespace::Newline {
                         if layout.data.styles[first_character.style_index as usize]
