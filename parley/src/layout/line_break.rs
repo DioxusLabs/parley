@@ -725,9 +725,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         return self.max_height_break_data(height_contribution);
                     }
 
-                    // If the box fits on the current line (or we are at the start of the current line)
-                    // then simply move on to the next item
-                    if next_x <= max_advance || self.state.line.text_wrap_mode != TextWrapMode::Wrap
+                    // If the box fits on the current line (or we are at the start of the current
+                    // line, in which case it will never fit, so we consume it and accept the
+                    // overflow) then simply move on to the next item
+                    if next_x <= max_advance
+                        || self.state.line.x == 0.0
+                        || self.state.line.text_wrap_mode != TextWrapMode::Wrap
                     {
                         // println!("BOX FITS");
 
@@ -741,21 +744,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         // We can always line break after an inline box
                         self.state.mark_line_break_opportunity();
                     } else {
-                        // If we're at the start of the line, this box will never fit, so consume it and accept the overflow.
-                        let reason = if self.state.line.x == 0.0 {
-                            // println!("BOX EMERGENCY BREAK");
-                            self.state.append_inline_box_to_line(
-                                next_x,
-                                ascent_contribution,
-                                descent_contribution,
-                                self.layout.data.quantize,
-                            );
-                            BreakReason::Emergency
-                        } else {
-                            // println!("BOX BREAK");
-                            BreakReason::Regular
-                        };
-                        return self.start_new_line(reason, max_advance, line_indent);
+                        // println!("BOX BREAK");
+                        return self.start_new_line(BreakReason::Regular, max_advance, line_indent);
                     }
                 }
                 LayoutItemKind::TextRun => {
