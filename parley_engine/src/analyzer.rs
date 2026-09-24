@@ -11,10 +11,14 @@ use crate::{bidi::BidiResolver, break_overrides::LineBreakOverrideFn};
 
 use crate::analysis::{Analysis, analyze_text};
 
+extern crate alloc;
+use alloc::vec::Vec;
+
 /// Reusable scratch for [`Analyzer::analyze`].
 #[derive(Default)]
 pub struct Analyzer {
     pub(crate) bidi: BidiResolver,
+    pub(crate) paragraphs: Vec<crate::analysis::Paragraph>,
 }
 
 impl core::fmt::Debug for Analyzer {
