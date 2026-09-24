@@ -175,8 +175,6 @@ pub struct CharInfo {
     pub script: Script,
     /// The impact this character has on directionality.
     pub bidi_class: icu_properties::props::BidiClass,
-    /// Whether or not the character is a bracket, plus mirror data if so.
-    pub bracket: BidiMirroringGlyph,
     flags: u16,
 }
 
@@ -220,7 +218,6 @@ impl CharInfo {
     fn new(
         script: Script,
         bidi_class: icu_properties::props::BidiClass,
-        bracket: BidiMirroringGlyph,
         is_variation_selector: bool,
         is_region_indicator: bool,
         is_control: bool,
@@ -238,7 +235,6 @@ impl CharInfo {
         Self {
             script,
             bidi_class,
-            bracket,
             flags: (is_variation_selector as u16) << Self::VARIATION_SELECTOR_SHIFT
                 | (is_region_indicator as u16) << Self::REGION_INDICATOR_SHIFT
                 | (is_control as u16) << Self::CONTROL_SHIFT
@@ -735,13 +731,10 @@ pub(crate) fn analyze_text(
                 };
 
                 needs_bidi_resolution |= bidi::needs_bidi_resolution(bidi_class);
-                // TODO: maybe extend Properties to u64 to fit BidiMirroringGlyph
-                let bracket = data_sources.brackets().get(ch);
 
                 analysis.info.push(CharInfo::new(
                     script,
                     bidi_class,
-                    bracket,
                     is_variation_selector,
                     is_region_indicator,
                     general_category == GeneralCategory::Control,
@@ -762,13 +755,13 @@ pub(crate) fn analyze_text(
         );
 
     if needs_bidi_resolution || options.base_direction == BaseDirection::Rtl {
+        let brackets = data_sources.brackets();
         analyzer.bidi.resolve(
-            text.chars().zip(
-                analysis
-                    .info
-                    .iter()
-                    .map(|info| (info.bidi_class, info.bracket)),
-            ),
+            analysis
+                .info
+                .iter()
+                .zip(text.chars())
+                .map(|(info, ch)| (ch, (info.bidi_class, brackets.get(ch)))),
             options.base_direction,
         );
         core::mem::swap(&mut analysis.levels, &mut analyzer.bidi.levels);
