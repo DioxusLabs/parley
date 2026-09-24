@@ -207,3 +207,26 @@ fn inline_boxes_after_newline_max_content_width() {
     env.with_name("inline_boxes_after_newline")
         .check_layout_snapshot(&layout);
 }
+
+/// Test that an inline box which overflows at the start of a line doesn't force a line break
+/// after it.
+#[test]
+fn overflowing_inline_box_at_line_start_does_not_force_break() {
+    let mut env = TestEnv::new(test_name!(), None);
+
+    // "[box]\nB": the box overflows, but only the newline should break the line after it.
+    let text = "\nB";
+    let mut builder = env.ranged_builder(text);
+    builder.push_inline_box(InlineBox {
+        id: 0,
+        kind: InlineBoxKind::InFlow,
+        index: 0,
+        width: 10.0,
+        height: 10.0,
+        baseline: None,
+    });
+    let mut layout = builder.build(text);
+    layout.break_all_lines(Some(0.0));
+
+    assert_eq!(layout.len(), 2, "Expected 2 lines");
+}
