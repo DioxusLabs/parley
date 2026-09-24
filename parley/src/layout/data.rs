@@ -327,6 +327,24 @@ impl<B: Brush> LayoutData<B> {
                         // partially from the logical end" rule of `atom_hanging_advance`.
                         let clusters = slice.shaped_clusters();
                         let mut skip_atom = false;
+                        // This loop's measured time is sensitive to instruction alignment
+                        // (fetch-window effects), so align its entry to keep codegen
+                        // perturbations elsewhere from changing its performance.
+                        // SAFETY: `.p2align` is a layout directive only; it emits no
+                        // instructions other than NOP padding and touches no state.
+                        #[allow(unsafe_code)]
+                        #[cfg(any(
+                            target_arch = "x86",
+                            target_arch = "x86_64",
+                            target_arch = "aarch64",
+                            target_arch = "arm"
+                        ))]
+                        unsafe {
+                            core::arch::asm!(
+                                ".p2align 6",
+                                options(nomem, nostack, preserves_flags)
+                            );
+                        }
                         for (i, cluster) in clusters.iter().enumerate() {
                             let whitespace = cluster.whitespace();
                             let style = &self.styles[cluster.style_index as usize];
