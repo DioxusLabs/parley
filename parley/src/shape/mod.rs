@@ -264,7 +264,66 @@ struct FontSelector<'a, 'b, B: Brush> {
     /// The font to use if [`Self::query`] doesn't return any font.
     last_resort_font: LastResortFont,
 
+    /// The font selected for the previous cluster, if it was the query's first candidate.
+    ///
+    /// Clusters are overwhelmingly covered by the same font as their predecessor, so this is
+    /// tried before walking the query again. Only a first candidate can be cached: a later
+    /// candidate is only selected because the fonts preceding it did not cover that particular
+    /// cluster, and one of them may well cover the next one.
+    ///
+    /// Invalidated wherever the query's inputs change (`set_families`, `set_attributes`,
+    /// `set_fallbacks`).
+    cached_font: Option<CachedFont>,
+
     analysis_data_sources: &'a AnalysisDataSources,
+}
+
+/// A font selected for a previous cluster, and the [`FontInstance`] built from it.
+struct CachedFont {
+    query_font: QueryFont,
+    instance: FontInstance,
+    /// Whether the font has a glyph for each ASCII character.
+    ///
+    /// Text is overwhelmingly ASCII, and this answers the coverage question for those
+    /// characters without parsing the font's character map or searching it per character.
+    ascii_coverage: [bool; 128],
+}
+
+impl CachedFont {
+    /// Cache `query_font` and `instance`, tabulating the font's ASCII coverage.
+    fn new(query_font: QueryFont, instance: FontInstance) -> Self {
+        let mut ascii_coverage = [false; 128];
+        if let Some(charmap) = query_font.charmap() {
+            for (ch, covered) in ascii_coverage.iter_mut().enumerate() {
+                // Any non-zero value indicates the existence of a glyph.
+                *covered = charmap.map(ch as u32).is_some_and(|g| g != 0);
+            }
+        }
+        Self {
+            query_font,
+            instance,
+            ascii_coverage,
+        }
+    }
+
+    /// Whether this font covers all of `cluster`.
+    fn covers(&self, cluster: &mut CharCluster, data_sources: &AnalysisDataSources) -> bool {
+        // Only built if the cluster contains a non-ASCII character.
+        let charmap = core::cell::OnceCell::new();
+        cluster
+            .calculate_coverage(
+                |ch| match self.ascii_coverage.get(ch as usize) {
+                    Some(covered) => *covered,
+                    None => charmap
+                        .get_or_init(|| self.query_font.charmap())
+                        .as_ref()
+                        // Any non-zero value indicates the existence of a glyph.
+                        .is_some_and(|charmap| charmap.map(ch).is_some_and(|g| g != 0)),
+                },
+                data_sources,
+            )
+            .is_complete()
+    }
 }
 
 impl<'a, 'b, B: Brush> FontSelector<'a, 'b, B> {
@@ -290,6 +349,7 @@ impl<'a, 'b, B: Brush> FontSelector<'a, 'b, B> {
             variations: &[],
             features: &[],
             last_resort_font: LastResortFont::Unresolved,
+            cached_font: None,
 
             analysis_data_sources,
         }
@@ -306,6 +366,7 @@ impl<'a, 'b, B: Brush> parley_engine::FontSelector for FontSelector<'a, 'b, B> {
             segment.script,
             options.language.as_ref(),
         ));
+        self.cached_font = None;
     }
 
     fn select_font(
@@ -329,9 +390,11 @@ impl<'a, 'b, B: Brush> parley_engine::FontSelector for FontSelector<'a, 'b, B> {
                 let emoji_family = QueryFamily::Generic(GenericFamily::Emoji);
                 self.query.set_families(fonts.chain(once(emoji_family)));
                 self.fonts_id = None;
+                self.cached_font = None;
             } else if self.fonts_id != Some(fonts_id) {
                 self.query.set_families(fonts);
                 self.fonts_id = Some(fonts_id);
+                self.cached_font = None;
             }
 
             let attrs = fontique::Attributes {
@@ -342,15 +405,30 @@ impl<'a, 'b, B: Brush> parley_engine::FontSelector for FontSelector<'a, 'b, B> {
             if self.attrs != attrs {
                 self.query.set_attributes(attrs);
                 self.attrs = attrs;
+                self.cached_font = None;
             }
             self.variations = self.rcx.variations(style.font_variations).unwrap_or(&[]);
             self.features = self.rcx.features(style.font_features).unwrap_or(&[]);
         }
 
+        // The previously selected font covers the overwhelming majority of clusters, and
+        // checking it directly avoids walking the query and rebuilding a `FontInstance`.
+        if let Some(cached_font) = &self.cached_font {
+            if cached_font.covers(cluster, self.analysis_data_sources) {
+                return Some(cached_font.instance.clone());
+            }
+            self.cached_font = None;
+        }
+
         let mut selected_font = None;
         let mut best_coverage = Coverage::NONE;
+        let mut candidates = 0_usize;
 
+        // `matches_with` borrows `self.query` mutably, so the pieces of `self` the closure needs
+        // are taken out of it first.
+        let analysis_data_sources = self.analysis_data_sources;
         self.query.matches_with(|font| {
+            candidates += 1;
             let Some(charmap) = font.charmap() else {
                 return fontique::QueryStatus::Continue;
             };
@@ -365,7 +443,7 @@ impl<'a, 'b, B: Brush> parley_engine::FontSelector for FontSelector<'a, 'b, B> {
                         })
                         .unwrap_or_default()
                 },
-                self.analysis_data_sources,
+                analysis_data_sources,
             );
             if coverage > best_coverage {
                 selected_font = Some(SelectedFont { font: font.clone() });
@@ -384,14 +462,24 @@ impl<'a, 'b, B: Brush> parley_engine::FontSelector for FontSelector<'a, 'b, B> {
             }
         });
 
+        // Only a font that completely covered its cluster on the first probe is cacheable; see
+        // `Self::cached_font`.
+        let cacheable = candidates == 1 && best_coverage.is_complete();
+
         selected_font
             .map(|selected_font| selected_font.font)
-            .map(|font| FontInstance {
-                font: FontData {
-                    data: font.blob,
-                    index: font.index,
-                },
-                synthesis: font.synthesis,
+            .map(|font| {
+                let instance = FontInstance {
+                    font: FontData {
+                        data: font.blob.clone(),
+                        index: font.index,
+                    },
+                    synthesis: font.synthesis,
+                };
+                if cacheable {
+                    self.cached_font = Some(CachedFont::new(font, instance.clone()));
+                }
+                instance
             })
             .or_else(|| {
                 if matches!(self.last_resort_font, LastResortFont::Unresolved) {
