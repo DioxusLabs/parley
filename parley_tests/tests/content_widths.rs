@@ -6,8 +6,8 @@
 use crate::util::TestEnv;
 use crate::{test_name, util::ColorBrush};
 use parley::{
-    Alignment, AlignmentOptions, ContentWidths, InlineBox, InlineBoxKind, Layout, StyleProperty,
-    TextWrapMode, WhiteSpaceCollapse,
+    Alignment, AlignmentOptions, ContentWidths, InlineBox, InlineBoxKind, Layout, LineBreak,
+    StyleProperty, TextWrapMode, WhiteSpaceCollapse,
 };
 
 /// Checks that calculated content widths agree with actual line breaking.
@@ -95,6 +95,77 @@ fn content_widths_partially_hanging_atom() {
         widths.min,
         word_width
     );
+}
+
+#[test]
+fn content_widths_line_break_anywhere() {
+    let mut env = TestEnv::new(test_name!(), None);
+
+    // With `line-break: anywhere` there is a soft wrap opportunity between every character, so
+    // the min-content width is the width of the widest character.
+    let text = "WWW WW";
+    let mut builder = env.ranged_builder(text);
+    builder.push_default(StyleProperty::LineBreak(LineBreak::Anywhere));
+    let mut layout = builder.build(text);
+
+    let widths = assert_content_widths_match_layout(&mut layout);
+    assert_eq!(layout.len(), 5, "one character per line (the space hangs)");
+
+    let char_width = single_line_width(&mut env, "W");
+    assert!(
+        (widths.min - char_width).abs() < 1e-3,
+        "Min content width {} should equal a single character's width {}",
+        widths.min,
+        char_width
+    );
+}
+
+#[test]
+fn content_widths_partially_hanging_atom_mixed_collapse_modes() {
+    let mut env = TestEnv::new(test_name!(), None);
+
+    // The "\u{0D4E} " in the following is a grapheme (and thus an atom). Whether the space hangs
+    // conditionally follows the space's style.
+    let text = "a\u{0D4E} ";
+    let word_width = single_line_width(&mut env, "a\u{0D4E}");
+    let word_with_space_width = single_line_width(&mut env, text);
+    for (prepend_mode, space_mode, expected_max) in [
+        (
+            WhiteSpaceCollapse::Preserve,
+            WhiteSpaceCollapse::Collapse,
+            word_width,
+        ),
+        (
+            WhiteSpaceCollapse::Collapse,
+            WhiteSpaceCollapse::Preserve,
+            word_with_space_width,
+        ),
+    ] {
+        let mut builder = env.ranged_builder(text);
+        builder.push(StyleProperty::WhiteSpaceCollapse(prepend_mode), 0..4);
+        builder.push(StyleProperty::WhiteSpaceCollapse(space_mode), 4..5);
+        let mut layout = builder.build(text);
+
+        let widths = assert_content_widths_match_layout(&mut layout);
+        assert!(
+            (widths.max - expected_max).abs() < 1e-3,
+            "Max content width {} should be {expected_max} for {prepend_mode:?} and {space_mode:?}",
+            widths.max,
+        );
+        assert!(
+            (widths.min - word_width).abs() < 1e-3,
+            "Min content width {} should be {word_width} for {prepend_mode:?} and {space_mode:?}",
+            widths.min,
+        );
+
+        // The same holds with spacing applied.
+        let mut builder = env.ranged_builder(text);
+        builder.push_default(StyleProperty::LetterSpacing(2.));
+        builder.push(StyleProperty::WhiteSpaceCollapse(prepend_mode), 0..4);
+        builder.push(StyleProperty::WhiteSpaceCollapse(space_mode), 4..5);
+        let mut layout = builder.build(text);
+        assert_content_widths_match_layout(&mut layout);
+    }
 }
 
 #[test]
