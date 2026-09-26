@@ -33,6 +33,33 @@ fn is_segment_break(c: char) -> bool {
     matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}')
 }
 
+/// The length of the prefix of `text` that is unchanged by white space collapsing in `mode`,
+/// given that `text` starts with a character that is neither collapsible nor a segment break.
+///
+/// This is the text up to the first collapsible whitespace or segment break, extended past any
+/// single spaces that are followed by such a character, since those are already collapsed.
+#[inline(always)]
+fn collapsed_len(text: &str, mode: WhiteSpaceCollapse) -> usize {
+    // Collapsible whitespace is always ASCII, and the only non-ASCII segment breaks are LS
+    // (U+2028) and PS (U+2029), so the text can be scanned bytewise.
+    let bytes = text.as_bytes();
+    let needs_processing = |i: usize| match bytes[i] {
+        b @ 0..0x80 => mode.is_collapsible(b as char) || matches!(b, b'\n' | b'\r'),
+        0xE2 => bytes.get(i + 1) == Some(&0x80) && matches!(bytes.get(i + 2), Some(0xA8 | 0xA9)),
+        _ => false,
+    };
+    let mut len = 0;
+    while len < bytes.len() {
+        if needs_processing(len)
+            && (bytes[len] != b' ' || len + 1 == bytes.len() || needs_processing(len + 1))
+        {
+            break;
+        }
+        len += 1;
+    }
+    len
+}
+
 /// Builder for constructing a tree of styles
 #[derive(Clone)]
 pub(crate) struct TreeStyleBuilder<B: Brush> {
@@ -147,9 +174,7 @@ impl<B: Brush> TreeStyleBuilder<B> {
                         rest = &rest[break_len..];
                         continue;
                     }
-                    let text_len = rest
-                        .find(|c| mode.is_collapsible(c) || is_segment_break(c))
-                        .unwrap_or(rest.len());
+                    let text_len = collapsed_len(rest, mode);
                     self.flush_pending_whitespace();
                     self.commit_text(span, &rest[..text_len]);
                     rest = &rest[text_len..];
