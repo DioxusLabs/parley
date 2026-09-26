@@ -11,6 +11,7 @@ use parley_bench::benches::{
 };
 use parley_bench::fontique_benches::system_fonts_init;
 use parley_bench::query_benches::cursor;
+use parley_bench::tree_builder_benches::{tree_builder_build, tree_builder_push};
 
 tango_benchmarks!(
     defaults(),
@@ -23,5 +24,7 @@ tango_benchmarks!(
     long_line(),
     page(),
     cursor(),
+    tree_builder_push(),
+    tree_builder_build(),
     system_fonts_init()
 );

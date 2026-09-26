@@ -20,6 +20,7 @@ use parley::{
 pub mod benches;
 pub mod fontique_benches;
 pub mod query_benches;
+pub mod tree_builder_benches;
 
 /// A color brush.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
