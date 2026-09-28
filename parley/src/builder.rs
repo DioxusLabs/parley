@@ -73,6 +73,8 @@ impl<'b, B: Brush> RangedBuilder<'b, B> {
             inline_box,
             parent_style_index: 0,
             baseline_offset: 0.,
+            break_before: true,
+            break_after: true,
         });
     }
 
@@ -177,6 +179,8 @@ impl<'b, B: Brush> StyleRunBuilder<'b, B> {
             inline_box,
             parent_style_index: 0,
             baseline_offset: 0.,
+            break_before: true,
+            break_after: true,
         });
     }
 
@@ -281,6 +285,8 @@ impl<'b, B: Brush> TreeBuilder<'b, B> {
             inline_box,
             parent_style_index,
             baseline_offset: 0.,
+            break_before: true,
+            break_after: true,
         });
     }
 
@@ -339,6 +345,14 @@ fn build_into_layout<B: Brush>(
         "at least one style run is required"
     );
 
+    // Sort the inline boxes as subsequent code assumes that they are in text index order.
+    // Note: It's important that this is a stable sort to allow users to control the order of contiguous inline boxes
+    //
+    // TODO: consider dropping the sort and requiring `push_inline_box` callers to push boxes in text index order
+    // (as `TreeBuilder` already does).
+    lcx.inline_boxes.sort_by_key(|b| b.inline_box.index);
+    crate::analysis::resolve_inline_box_breaks(lcx, text);
+
     crate::analysis::analyze_text(
         lcx,
         text,
@@ -370,13 +384,6 @@ fn build_into_layout<B: Brush>(
         .data
         .styles
         .extend(lcx.style_table.iter().map(|s| s.as_layout_style()));
-
-    // Sort the inline boxes as subsequent code assumes that they are in text index order.
-    // Note: It's important that this is a stable sort to allow users to control the order of contiguous inline boxes
-    //
-    // TODO: consider dropping the sort and requiring `push_inline_box` callers to push boxes in text index order
-    // (as `TreeBuilder` already does).
-    lcx.inline_boxes.sort_by_key(|b| b.inline_box.index);
 
     {
         super::shape::shape_text(

@@ -74,8 +74,10 @@ struct LineState {
     /// This never happens when calling `break_all_lines` as it never sets `line_max_height`, and it defaults to `f32::MAX`.
     max_height_exceeded: bool,
 
-    /// We lag the text-wrap-mode by one cluster due to line-breaking boundaries only
-    /// being triggered on the cluster after the linebreak.
+    /// The text-wrap-mode of the previous atom, which controls whether the current atom provides
+    /// an emergency break opportunity.
+    ///
+    /// Soft wrap opportunities already account for text-wrap-mode, see `analysis::analyze_text`.
     text_wrap_mode: TextWrapMode,
 
     /// The number of word separators appended to the line so far.
@@ -944,7 +946,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
             match item.kind {
                 LayoutItemKind::InlineBox => {
-                    let inline_box = &self.layout.data.inline_boxes[item.index].inline_box;
+                    let layout_box = &self.layout.data.inline_boxes[item.index];
+                    let inline_box = &layout_box.inline_box;
+                    let (break_before, break_after) =
+                        (layout_box.break_before, layout_box.break_after);
 
                     // In-flow boxes are aligned relative to their containing style's span box
                     // (see `append_aligned_inline_box_to_line`). Out-of-flow boxes are not in-flow
@@ -978,17 +983,17 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         return self.max_height_break_data(height_contribution);
                     }
 
-                    // If the box fits on the current line (or we are at the start of the current line)
-                    // then simply move on to the next item
-                    if next_x <= max_advance || self.state.line.text_wrap_mode != TextWrapMode::Wrap
+                    // If the box fits on the current line, or there is no soft wrap opportunity
+                    // around it to break at, then simply move on to the next item
+                    if next_x <= max_advance
+                        || !break_before
+                        || (self.state.line.x == 0.0 && !break_after)
                     {
                         // println!("BOX FITS");
 
                         self.append_layout_inline_box(item.index, next_x);
 
-                        // There is a soft wrap opportunity after an inline box, unless wrapping
-                        // is disabled
-                        if self.state.line.text_wrap_mode == TextWrapMode::Wrap {
+                        if break_after {
                             self.state.mark_line_break_opportunity();
                         }
                     } else {
@@ -1030,7 +1035,6 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         let style_index = first_character.style_index;
                         let style = &self.layout.data.styles[style_index as usize];
 
-                        // Lag text_wrap_mode style by one atom
                         let text_wrap_mode = self.state.line.text_wrap_mode;
                         self.state.line.text_wrap_mode = style.text_wrap_mode;
 
@@ -1054,7 +1058,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 max_advance,
                                 line_indent,
                             );
-                        } else if is_soft_wrap_opportunity && text_wrap_mode == TextWrapMode::Wrap {
+                        } else if is_soft_wrap_opportunity {
                             // We don't record boundaries when the advance is 0. As we do not want overflowing content to cause extra consecutive
                             // line breaks. We should accept the overflowing fragment in that scenario.
                             if self.state.line.x != 0.0 {

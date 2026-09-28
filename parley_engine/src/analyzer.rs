@@ -86,6 +86,20 @@ pub struct AnalysisOptions<'a> {
     /// [uax-14-algorithm]: https://unicode.org/reports/tr14/#Algorithm
     pub break_spaces: &'a [Range<usize>],
 
+    /// Ranges of the source text within which there are no soft wrap opportunities.
+    ///
+    /// This implements [CSS's text-wrap-mode: nowrap][css-nowrap]. An opportunity at a byte
+    /// position is suppressed if the position is strictly inside a range, i.e., the opportunities
+    /// at the start and end of a range are unaffected. This takes precedence over all other
+    /// sources of soft wrap opportunities, including [`Self::line_break_override`]. Mandatory
+    /// breaks are unaffected.
+    ///
+    /// Ranges must be sorted and non-overlapping, and must start and end on character boundaries
+    /// of the text.
+    ///
+    /// [css-nowrap]: https://www.w3.org/TR/css-text-4/#valdef-text-wrap-mode-nowrap
+    pub no_wrap: &'a [Range<usize>],
+
     /// The callback which will be called as a first provider of line breaking decisions.
     ///
     /// See [`LineBreakOverrideFn`] for more details.
@@ -98,6 +112,7 @@ impl core::fmt::Debug for AnalysisOptions<'_> {
             .field("base_direction", &self.base_direction)
             .field("line_break", &self.line_break)
             .field("break_spaces", &self.break_spaces)
+            .field("no_wrap", &self.no_wrap)
             .finish_non_exhaustive()
     }
 }

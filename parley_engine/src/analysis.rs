@@ -636,6 +636,7 @@ pub(crate) fn analyze_text(
     // a `break_spaces` range.
     let mut prev_is_break_space = false;
     let mut break_spaces_iter = options.break_spaces.iter().peekable();
+    let mut no_wrap_iter = options.no_wrap.iter().peekable();
     let mut anywhere_iter = options
         .line_break
         .iter()
@@ -747,6 +748,19 @@ pub(crate) fn analyze_text(
             if let Some(forced) = forced {
                 is_line = forced;
             }
+        }
+
+        while no_wrap_iter
+            .peek()
+            .is_some_and(|range| range.end <= byte_pos)
+        {
+            _ = no_wrap_iter.next();
+        }
+        if no_wrap_iter
+            .peek()
+            .is_some_and(|range| range.start < byte_pos)
+        {
+            is_line = false;
         }
         prev_prev_char = prev_char;
         prev_char = Some(ch);

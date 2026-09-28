@@ -38,6 +38,11 @@ pub(crate) struct LayoutInlineBox {
     /// building and line breaking). Unused for out-of-flow and `vertical-align: top | bottom`
     /// boxes.
     pub(crate) baseline_offset: f32,
+    /// Whether there is a soft wrap opportunity before the box, resolved when building the layout
+    /// from the `text-wrap-mode` of the adjacent content (see `analysis::resolve_inline_box_breaks`).
+    pub(crate) break_before: bool,
+    /// Whether there is a soft wrap opportunity after the box. See [`Self::break_before`].
+    pub(crate) break_after: bool,
 }
 
 /// Whether a box is in-flow (takes up space in the layout) or out-of-flow (e.g. absolutely positioned)

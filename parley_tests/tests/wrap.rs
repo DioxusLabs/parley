@@ -6,8 +6,9 @@
 use crate::test_name;
 use crate::util::{ColorBrush, TestEnv};
 use parley::{
-    Alignment, AlignmentOptions, BreakReason, CHROMIUM_LINE_BREAK_OVERRIDE, OverflowWrap,
-    StyleProperty, TextWrapMode, WordBreak,
+    Alignment, AlignmentOptions, BreakReason, CHROMIUM_LINE_BREAK_OVERRIDE, InlineBox,
+    InlineBoxKind, OverflowWrap, StyleProperty, TextWrapMode, TreeBuilder, VerticalAlign,
+    WordBreak,
 };
 use peniko::color::palette::css;
 
@@ -480,4 +481,162 @@ fn line_break_override_does_not_affect_forced_breaks() {
             .collect();
         assert_eq!(lines, ["a\n", "b"], "override returning Some({forced})");
     }
+}
+
+fn push_wrap_mode_span(
+    builder: &mut TreeBuilder<'_, ColorBrush>,
+    mode: TextWrapMode,
+    contents: impl FnOnce(&mut TreeBuilder<'_, ColorBrush>),
+) {
+    builder.push_style_modification_span(&[StyleProperty::TextWrapMode(mode)]);
+    contents(builder);
+    builder.pop_style_span();
+}
+
+fn nowrap(
+    builder: &mut TreeBuilder<'_, ColorBrush>,
+    contents: impl FnOnce(&mut TreeBuilder<'_, ColorBrush>),
+) {
+    push_wrap_mode_span(builder, TextWrapMode::NoWrap, contents);
+}
+
+fn wrap(
+    builder: &mut TreeBuilder<'_, ColorBrush>,
+    contents: impl FnOnce(&mut TreeBuilder<'_, ColorBrush>),
+) {
+    push_wrap_mode_span(builder, TextWrapMode::Wrap, contents);
+}
+
+fn push_box(builder: &mut TreeBuilder<'_, ColorBrush>) {
+    builder.push_inline_box(InlineBox {
+        id: 0,
+        kind: InlineBoxKind::InFlow,
+        index: 0,
+        width: 10.0,
+        height: 10.0,
+        baseline: None,
+        vertical_align: VerticalAlign::BASELINE,
+    });
+}
+
+/// Returns the number of lines when breaking at every soft wrap opportunity, and whether the
+/// min-content width is smaller than the max-content width.
+fn element_boundary_breaks(
+    contents: impl FnOnce(&mut TreeBuilder<'_, ColorBrush>),
+) -> (usize, bool) {
+    let mut env = TestEnv::new(test_name!(), None);
+    let mut builder = env.tree_builder();
+    contents(&mut builder);
+    let (mut layout, _) = builder.build();
+    let widths = layout.calculate_content_widths();
+    layout.break_all_lines(Some(0.0));
+    (layout.len(), widths.min < widths.max)
+}
+
+#[test]
+fn element_boundary_wrap_follows_nearest_common_ancestor() {
+    // `<nowrap>口</nowrap>口`: the boundary is controlled by the (wrapping) root.
+    let breaks = element_boundary_breaks(|b| {
+        nowrap(b, |b| b.push_text("口"));
+        b.push_text("口");
+    });
+    assert_eq!(breaks, (2, true));
+
+    // `<nowrap>口</nowrap><nowrap>口</nowrap>`
+    let breaks = element_boundary_breaks(|b| {
+        nowrap(b, |b| b.push_text("口"));
+        nowrap(b, |b| b.push_text("口"));
+    });
+    assert_eq!(breaks, (2, true));
+
+    // `口<nowrap>口</nowrap>`
+    let breaks = element_boundary_breaks(|b| {
+        b.push_text("口");
+        nowrap(b, |b| b.push_text("口"));
+    });
+    assert_eq!(breaks, (2, true));
+
+    // `<nowrap>口口</nowrap>`
+    let breaks = element_boundary_breaks(|b| nowrap(b, |b| b.push_text("口口")));
+    assert_eq!(breaks, (1, false));
+
+    // `<nowrap><wrap>口</wrap><wrap>口</wrap></nowrap>`: the boundary is controlled by the
+    // non-wrapping common ancestor.
+    let breaks = element_boundary_breaks(|b| {
+        nowrap(b, |b| {
+            wrap(b, |b| b.push_text("口"));
+            wrap(b, |b| b.push_text("口"));
+        });
+    });
+    assert_eq!(breaks, (1, false));
+}
+
+#[test]
+fn element_boundary_wrap_after_space_follows_space() {
+    // `<nowrap><wrap>口 </wrap><wrap>口</wrap></nowrap>`: the opportunity after a space is
+    // controlled by the space's own style.
+    let breaks = element_boundary_breaks(|b| {
+        nowrap(b, |b| {
+            wrap(b, |b| b.push_text("口 "));
+            wrap(b, |b| b.push_text("口"));
+        });
+    });
+    assert_eq!(breaks, (2, true));
+
+    // `<nowrap>口 </nowrap>口`
+    let breaks = element_boundary_breaks(|b| {
+        nowrap(b, |b| b.push_text("口 "));
+        b.push_text("口");
+    });
+    assert_eq!(breaks.0, 1);
+}
+
+#[test]
+fn inline_box_wrap_follows_nearest_common_ancestor() {
+    // `<nowrap>口</nowrap><nowrap>[box]口</nowrap>`
+    let breaks = element_boundary_breaks(|b| {
+        nowrap(b, |b| b.push_text("口"));
+        nowrap(b, |b| {
+            push_box(b);
+            b.push_text("口");
+        });
+    });
+    assert_eq!(breaks, (2, true));
+
+    // `<nowrap>[box]</nowrap>口`
+    let breaks = element_boundary_breaks(|b| {
+        nowrap(b, push_box);
+        b.push_text("口");
+    });
+    assert_eq!(breaks, (2, true));
+
+    // `<nowrap>[box]</nowrap><nowrap>[box]口</nowrap>`
+    let breaks = element_boundary_breaks(|b| {
+        nowrap(b, push_box);
+        nowrap(b, |b| {
+            push_box(b);
+            b.push_text("口");
+        });
+    });
+    assert_eq!(breaks, (2, true));
+
+    // `<nowrap>口[box]口</nowrap>`
+    let breaks = element_boundary_breaks(|b| {
+        nowrap(b, |b| {
+            b.push_text("口");
+            push_box(b);
+            b.push_text("口");
+        });
+    });
+    assert_eq!(breaks, (1, false));
+
+    // `<nowrap><wrap>[box]</wrap><wrap>[box]</wrap>口</nowrap>`
+    let breaks = element_boundary_breaks(|b| {
+        nowrap(b, |b| {
+            wrap(b, push_box);
+            wrap(b, push_box);
+            b.push_text("口");
+        });
+    });
+    assert_eq!(breaks, (1, false));
 }

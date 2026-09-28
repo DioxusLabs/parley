@@ -1,7 +1,7 @@
 // Copyright 2021 the Parley Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use crate::inline_box::{InlineBox, LayoutInlineBox};
+use crate::inline_box::LayoutInlineBox;
 use crate::layout::spacing::{Justification, Spacing};
 use crate::layout::style_metrics::StyleMetrics;
 use crate::layout::whitespace::whitespace_hangs;
@@ -397,7 +397,7 @@ impl ContentWidthsMeasurer {
                     }
                 }
                 LayoutItemKind::InlineBox => {
-                    self.measure_inline_box(&layout_data.inline_boxes[item.index].inline_box);
+                    self.measure_inline_box(&layout_data.inline_boxes[item.index]);
                 }
             }
         }
@@ -456,9 +456,9 @@ impl ContentWidthsMeasurer {
                 skip_atom = false;
                 let prev_text_wrap_mode = self.text_wrap_mode;
                 self.text_wrap_mode = style.text_wrap_mode;
-                if prev_text_wrap_mode == TextWrapMode::Wrap
-                    && (cluster.is_soft_wrap_opportunity_before()
-                        || style.overflow_wrap == OverflowWrap::Anywhere)
+                if cluster.is_soft_wrap_opportunity_before()
+                    || (prev_text_wrap_mode == TextWrapMode::Wrap
+                        && style.overflow_wrap == OverflowWrap::Anywhere)
                 {
                     self.min_width = self
                         .min_width
@@ -528,20 +528,23 @@ impl ContentWidthsMeasurer {
         }
     }
 
-    fn measure_inline_box(&mut self, inline_box: &InlineBox) {
+    fn measure_inline_box(&mut self, layout_box: &LayoutInlineBox) {
+        let inline_box = &layout_box.inline_box;
         if inline_box.kind == InlineBoxKind::InFlow {
-            self.running_max_width += inline_box.width;
-            if self.text_wrap_mode == TextWrapMode::Wrap {
+            if layout_box.break_before {
                 self.min_width = self
                     .min_width
                     .max(self.running_min_width - self.running_hanging_whitespace);
-                self.min_width = self.min_width.max(inline_box.width);
                 self.running_min_width = 0.0;
-            } else {
-                self.running_min_width += inline_box.width;
             }
+            self.running_min_width += inline_box.width;
+            self.running_max_width += inline_box.width;
             // Inline boxes don't hang.
             self.running_hanging_whitespace = 0.0;
+            if layout_box.break_after {
+                self.min_width = self.min_width.max(self.running_min_width);
+                self.running_min_width = 0.0;
+            }
         }
     }
 }
