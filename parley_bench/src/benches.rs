@@ -216,7 +216,7 @@ pub fn line_breaking() -> Vec<Benchmark> {
 /// Get the byte ranges of each consecutive chunk of `char_len` characters.
 ///
 /// The last chunk holds the characters remaining.
-fn chunks(text: &str, char_len: usize) -> impl Iterator<Item = Range<usize>> {
+pub(crate) fn chunks(text: &str, char_len: usize) -> impl Iterator<Item = Range<usize>> {
     let mut starts = text
         .char_indices()
         .map(|(byte_idx, _)| byte_idx)
