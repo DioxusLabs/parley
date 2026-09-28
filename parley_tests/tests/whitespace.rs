@@ -378,3 +378,73 @@ fn break_spaces_inline_boxes_and_rtl() {
         }
     }
 }
+
+#[test]
+fn trailing_whitespace_resets_to_paragraph_level() {
+    // UAX #9 L1: whitespace at the end of a line takes the paragraph level, so it's placed at the
+    // line's end edge (and hangs there) even when it's inside an embedding of the opposite
+    // direction.
+    let mut env = TestEnv::new(test_name!(), None);
+
+    for (direction, text, test_case_name) in [
+        (
+            BaseDirection::Rtl,
+            "one two three four",
+            "rtl_paragraph_ltr_text",
+        ),
+        (
+            BaseDirection::Ltr,
+            "ببب ببب ببب ببب",
+            "ltr_paragraph_rtl_text",
+        ),
+        (
+            BaseDirection::Rtl,
+            "one   two three",
+            "rtl_paragraph_ltr_text_multiple_spaces",
+        ),
+    ] {
+        let width = advance(&mut env, &text[..text.find(' ').unwrap()]) * 2.5;
+        let mut builder = env.ranged_builder(text);
+        builder.set_base_direction(direction);
+        builder.push_default(StyleProperty::WhiteSpaceCollapse(
+            WhiteSpaceCollapse::Preserve,
+        ));
+        let mut layout = builder.build(text);
+        layout.break_all_lines(Some(width));
+        layout.align(Alignment::Start, AlignmentOptions::default());
+
+        let first = layout.get(0).unwrap();
+        let metrics = first.metrics();
+        assert!(metrics.hanging_advance > 0., "{test_case_name}");
+
+        // The trailing whitespace is a separate item at the line's end edge: visually first
+        // (hanging past the start of the line) in RTL, visually last in LTR.
+        let runs: Vec<_> = first
+            .items()
+            .filter_map(|item| match item {
+                parley::PositionedLayoutItem::GlyphRun(run) => Some(run),
+                parley::PositionedLayoutItem::InlineBox(_) => None,
+            })
+            .collect();
+        assert!(runs.len() >= 2, "{test_case_name}");
+        let (ws, ink) = if direction == BaseDirection::Rtl {
+            (&runs[0], &runs[1])
+        } else {
+            (&runs[runs.len() - 1], &runs[runs.len() - 2])
+        };
+        let ws_text = &text[ws.run().text_range()];
+        assert!(
+            !ws_text.is_empty() && ws_text.chars().all(|c| c == ' '),
+            "{test_case_name}: {ws_text:?}"
+        );
+        nearly_eq(ws.advance(), metrics.hanging_advance);
+        if direction == BaseDirection::Rtl {
+            nearly_eq(ws.offset() + ws.advance(), ink.offset());
+            nearly_eq(ink.offset() + ink.advance(), width);
+        } else {
+            nearly_eq(ws.offset(), ink.offset() + ink.advance());
+        }
+
+        env.with_name(test_case_name).check_layout_snapshot(&layout);
+    }
+}

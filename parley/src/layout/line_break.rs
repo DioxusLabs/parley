@@ -1785,6 +1785,7 @@ fn commit_line<B: Brush>(
         }
     }
     // let end_run_idx = lines.line_items.last().map(|item| item.index).unwrap_or(0);
+    reset_trailing_whitespace_level(layout, &mut lines.line_items, start_item_idx);
     let end_item_idx = lines.line_items.len();
 
     // Trailing whitespace under `WhiteSpaceCollapse::Preserve` directly preceding a forced break
@@ -1852,6 +1853,96 @@ fn commit_line<B: Brush>(
     };
 }
 
+/// Whether a character of the given whitespace class is reset to the paragraph level by UAX #9
+/// rule L1 when it precedes a line end (segment separators, paragraph separators and Unicode `WS`
+/// characters). Non-breaking spaces are not among those.
+#[inline(always)]
+fn is_l1_trailing_whitespace(whitespace: Whitespace) -> bool {
+    matches!(
+        whitespace,
+        Whitespace::Space
+            | Whitespace::IdeographicSpace
+            | Whitespace::OtherSpaceSeparator
+            | Whitespace::Tab
+            | Whitespace::Newline
+    )
+}
+
+/// Apply UAX #9 rule L1 to the line's items (those from `start_item_idx` on): whitespace at the
+/// logical end of the line is reset to the paragraph's base level, so that it ends up at the line's
+/// end edge after bidi reordering (where it can hang) rather than at the end of its embedding.
+///
+/// Trailing whitespace of an item with a different level is split off into a separate item at the
+/// base level. Items that consist entirely of whitespace are reset in full, and the sequence
+/// continues into the preceding item.
+fn reset_trailing_whitespace_level<B: Brush>(
+    layout: &Layout<B>,
+    line_items: &mut Vec<LineItemData>,
+    start_item_idx: usize,
+) {
+    let base_level = layout.data.base_level;
+    let shaped_text = &layout.data.shaped_text;
+    let mut idx = line_items.len();
+    while idx > start_item_idx {
+        idx -= 1;
+        let item = &line_items[idx];
+        match item.kind {
+            LayoutItemKind::InlineBox => {
+                if layout.data.inline_boxes[item.index].inline_box.kind == InlineBoxKind::InFlow {
+                    break;
+                }
+            }
+            LayoutItemKind::TextRun => {
+                let cluster_range = item.shaped_cluster_range.clone();
+                let slice = shaped_text
+                    .run_slice(item.index as u32)
+                    .narrow(cluster_range.clone());
+                let mut split = cluster_range.end;
+                for atom in slice.atoms_end().rev() {
+                    if !atom
+                        .characters()
+                        .iter()
+                        .all(|character| is_l1_trailing_whitespace(character.whitespace))
+                    {
+                        break;
+                    }
+                    split = atom.shaped_clusters_range().start;
+                }
+                if split == cluster_range.end {
+                    break;
+                }
+                if item.bidi_level != base_level {
+                    if split == cluster_range.start {
+                        line_items[idx].bidi_level = base_level;
+                    } else {
+                        let shaped_clusters = slice.shaped_clusters_in(cluster_range.clone());
+                        let split_char = shaped_clusters[(split - cluster_range.start) as usize]
+                            .chars_range()
+                            .start;
+                        let last_char = shaped_clusters.last().unwrap().chars_range().end;
+                        let split_byte = slice.text_byte_at(split_char);
+                        let whitespace_text_range = slice.text_byte_range(split_char..last_char);
+                        let whitespace_item = LineItemData {
+                            kind: LayoutItemKind::TextRun,
+                            index: item.index,
+                            bidi_level: base_level,
+                            text_range: whitespace_text_range,
+                            shaped_cluster_range: split..cluster_range.end,
+                        };
+                        let item = &mut line_items[idx];
+                        item.shaped_cluster_range.end = split;
+                        item.text_range.end = split_byte;
+                        line_items.insert(idx + 1, whitespace_item);
+                    }
+                }
+                if split != cluster_range.start {
+                    break;
+                }
+            }
+        }
+    }
+}
+
 /// Returns the advance of the whitespace hanging past the end of the line made up of `line_items`,
 /// the index one past its logically last shaped cluster that's eligible for justification (see
 /// [`Justification::justification_end_cluster`]), and the number of justification opportunities
@@ -1905,14 +1996,6 @@ fn hanging_whitespace<B: Brush>(
                 }
             }
             LayoutItemKind::TextRun => {
-                // Trailing whitespace can only hang if it ends up at the line's end edge after bidi
-                // reordering. We don't currently apply UAX #9 L1 (resetting trailing whitespace to
-                // paragraph level), so only logically-last items that match the paragraph level are
-                // guaranteed to be at that edge.
-                if line_item.bidi_level != layout.data.base_level {
-                    break;
-                }
-
                 let effective_spacing = EffectiveSpacing::new(
                     layout.data.runs[line_item.index].spacing,
                     Justification::NONE,
