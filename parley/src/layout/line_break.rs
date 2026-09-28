@@ -116,6 +116,8 @@ impl LineState {
 struct LineBoxMetrics {
     /// Extents of the root aligned subtree (root style index `0`).
     root: SubtreeExtents,
+    /// Height of the tallest non-root aligned subtree.
+    max_non_root_height: f32,
     /// Height of the tallest `vertical-align: top` inline box, which is positioned against the
     /// line box rather than a baseline.
     line_relative_top_height: f32,
@@ -244,6 +246,7 @@ impl Default for LineBoxMetrics {
     fn default() -> Self {
         Self {
             root: SubtreeExtents::new(0),
+            max_non_root_height: 0.,
             line_relative_top_height: 0.,
             line_relative_bottom_height: 0.,
             has_content: false,
@@ -280,7 +283,7 @@ impl LineBoxMetrics {
     /// [`BreakerState::subtrees`]).
     #[inline]
     fn grow_subtree(
-        &self,
+        &mut self,
         subtrees: &mut Vec<SubtreeExtents>,
         root: u16,
         baseline_offset: f32,
@@ -290,6 +293,7 @@ impl LineBoxMetrics {
         let mut extents = index.map_or_else(|| SubtreeExtents::new(root), |i| subtrees[i]);
         let before = extents;
         extents.add(baseline_offset, metrics);
+        self.max_non_root_height = self.max_non_root_height.max(extents.line_box.height());
         match index {
             Some(i) if i >= self.saved_subtrees => subtrees[i] = extents,
             Some(_) if extents.same_as(&before) => {}
@@ -299,13 +303,11 @@ impl LineBoxMetrics {
 
     /// The line height seen so far.
     #[inline]
-    fn line_height(&self, subtrees: &[SubtreeExtents]) -> f32 {
-        let mut height = self.root.line_box.height();
-        // Stale entries have extents no larger than the current ones, so they don't affect the max.
-        for subtree in subtrees {
-            height = height.max(subtree.line_box.height());
-        }
-        height
+    fn line_height(&self) -> f32 {
+        self.root
+            .line_box
+            .height()
+            .max(self.max_non_root_height)
             .max(self.line_relative_top_height)
             .max(self.line_relative_bottom_height)
     }
@@ -741,7 +743,7 @@ impl BreakerState {
     #[inline(always)]
     fn update_max_height_exceeded(&mut self) {
         self.line.max_height_exceeded = self.line_max_height != f32::MAX
-            && self.line.box_metrics.line_height(&self.subtrees) > self.line_max_height;
+            && self.line.box_metrics.line_height() > self.line_max_height;
     }
 
     /// Get the max-advance of the entire layout
@@ -893,10 +895,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         let line_height = if invisible {
             0.
         } else {
-            self.state
-                .line
-                .box_metrics
-                .line_height(&self.state.subtrees)
+            self.state.line.box_metrics.line_height()
         };
         let line_y_start = self.state.line_y;
 
@@ -1498,11 +1497,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     &mut self.state.contributed,
                     &mut self.state.subtrees,
                 );
-                line.metrics.line_height = self
-                    .state
-                    .line
-                    .box_metrics
-                    .line_height(&self.state.subtrees);
+                line.metrics.line_height = self.state.line.box_metrics.line_height();
                 self.lines.line_items.push(LineItemData {
                     kind: LayoutItemKind::TextRun,
                     index,
@@ -1991,6 +1986,53 @@ fn reorder_line_items(runs: &mut [LineItemData]) {
                 i = end;
             }
             i += 1;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BoxMetrics, BreakerState};
+
+    #[test]
+    fn subtree_height_restored_at_break_opportunities() {
+        let metrics = BoxMetrics {
+            ascent: 6.,
+            descent: 2.,
+            over: 6.,
+            under: 2.,
+        };
+        for emergency in [false, true] {
+            let mut state = BreakerState::default();
+            state
+                .line
+                .box_metrics
+                .grow_subtree(&mut state.subtrees, 1, 0., metrics);
+            state.mark_line_break_opportunity();
+            state
+                .line
+                .box_metrics
+                .grow_subtree(&mut state.subtrees, 1, 4., metrics);
+            state.mark_emergency_break_opportunity();
+            state
+                .line
+                .box_metrics
+                .grow_subtree(&mut state.subtrees, 1, -4., metrics);
+            assert_eq!(state.line.box_metrics.line_height(), 16.);
+
+            let boundary = if emergency {
+                state.emergency_boundary.take().unwrap()
+            } else {
+                state.prev_boundary.take().unwrap()
+            };
+            state.reset_to(boundary);
+            assert_eq!(
+                state.line.box_metrics.line_height(),
+                if emergency { 12. } else { 8. }
+            );
+
+            state.reset_line(None);
+            assert_eq!(state.line.box_metrics.line_height(), 0.);
         }
     }
 }
