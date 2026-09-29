@@ -934,3 +934,26 @@ const fn mask(t: BidiClass) -> u32 {
     };
     1 << bit
 }
+
+#[cfg(test)]
+mod test {
+    use icu_properties::CodePointMapData;
+    use icu_properties::props::{BidiClass, BidiMirroringGlyph, BidiPairedBracketType};
+    use parley_data::Properties;
+
+    /// Bracket pair lookups are skipped for characters whose Bidi_Class is not ON, which
+    /// relies on every paired bracket being ON.
+    #[test]
+    fn paired_brackets_are_other_neutral() {
+        let brackets = CodePointMapData::<BidiMirroringGlyph>::new();
+        for ch in (0..=char::MAX as u32).filter_map(char::from_u32) {
+            if brackets.get(ch).paired_bracket_type != BidiPairedBracketType::None {
+                assert_eq!(
+                    Properties::get(ch).bidi_class(),
+                    BidiClass::OtherNeutral,
+                    "{ch:?} is a paired bracket but not ON"
+                );
+            }
+        }
+    }
+}
