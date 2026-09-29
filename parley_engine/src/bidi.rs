@@ -18,6 +18,8 @@ pub struct BidiResolver {
     bracket_pairs: Vec<(usize, usize)>,
     runs: Vec<Run>,
     indices: Vec<usize>,
+    /// Character index of the first character of each unit, parallel to `initial_types`.
+    unit_starts: Vec<usize>,
     flags: u16,
 }
 
@@ -42,6 +44,7 @@ impl BidiResolver {
             bracket_pairs: Vec::new(),
             runs: Vec::new(),
             indices: Vec::new(),
+            unit_starts: Vec::new(),
             flags: 0,
         }
     }
@@ -60,6 +63,7 @@ impl BidiResolver {
     /// Clears the resolver state.
     pub fn clear(&mut self) {
         self.initial_types.clear();
+        self.unit_starts.clear();
         self.levels.clear();
         self.types.clear();
         self.brackets.clear();
@@ -75,18 +79,57 @@ impl BidiResolver {
         chars: impl Iterator<Item = (char, (BidiClass, BidiMirroringGlyph))>,
         base_direction: BaseDirection,
     ) {
+        self.resolve_impl(chars, base_direction, true);
+    }
+
+    /// Resolves the paragraph over "units" rather than characters.
+    ///
+    /// When `merge` is set, a strong character absorbs the following characters that are
+    /// guaranteed to resolve to the same level as it, up to and including the next strong
+    /// character of the same class (see [`merge_mask`]). Such a span behaves exactly like the
+    /// single strong character in every rule of the algorithm, so resolving it as one unit
+    /// produces identical levels while doing far less work on long runs of same-direction text.
+    fn resolve_impl(
+        &mut self,
+        chars: impl Iterator<Item = (char, (BidiClass, BidiMirroringGlyph))>,
+        base_direction: BaseDirection,
+        merge: bool,
+    ) {
         self.clear();
         let mut needs_bidi = false;
         let mut len = 0;
-        for (i, (ch, (t, bracket))) in chars.enumerate() {
-            self.initial_types.push(t);
+        // The unit index and class of the last strong unit that can still be extended.
+        let mut merge_target: Option<(usize, BidiClass)> = None;
+        for (ch, (t, bracket)) in chars {
+            let i = len;
+            len += 1;
+            needs_bidi = needs_bidi || mask(t) & BIDI_MASK != 0;
+            let is_bracket = bracket.paired_bracket_type != BidiPairedBracketType::None;
 
-            if bracket.paired_bracket_type != BidiPairedBracketType::None {
-                self.brackets.push((i, ch, bracket));
+            if let Some((unit, class)) = merge_target {
+                if !is_bracket && mask(t) & merge_mask(class) != 0 {
+                    if t == class {
+                        // Absorb this character and any pending units since `unit`.
+                        self.initial_types.truncate(unit + 1);
+                        self.unit_starts.truncate(unit + 1);
+                    } else {
+                        // Pending: absorbed only if another `class` character follows.
+                        self.initial_types.push(t);
+                        self.unit_starts.push(i);
+                    }
+                    continue;
+                }
+                merge_target = None;
             }
 
-            needs_bidi = needs_bidi || mask(t) & BIDI_MASK != 0;
-            len += 1;
+            if is_bracket {
+                self.brackets.push((self.initial_types.len(), ch, bracket));
+            }
+            if merge && mask(t) & STRONG_MASK != 0 {
+                merge_target = Some((self.initial_types.len(), t));
+            }
+            self.initial_types.push(t);
+            self.unit_starts.push(i);
         }
         self.base_level = match base_direction {
             BaseDirection::Auto => Self::default_level(&self.initial_types),
@@ -98,6 +141,24 @@ impl BidiResolver {
             self.levels.resize(len, self.base_level);
             return;
         }
+        self.resolve_units();
+        let units = self.initial_types.len();
+        if units != len {
+            // Expand unit levels to character levels, back to front so that each unit's level
+            // is read before it can be overwritten (`unit_starts[u] >= u`).
+            self.levels.resize(len, BidiLevel::new(0));
+            let mut end = len;
+            for u in (0..units).rev() {
+                let start = self.unit_starts[u];
+                let level = self.levels[u];
+                self.levels[start..end].fill(level);
+                end = start;
+            }
+        }
+    }
+
+    fn resolve_units(&mut self) {
+        let len = self.initial_types.len();
         self.types.extend_from_slice(&self.initial_types);
         self.resolve_levels();
         self.resolve_runs();
@@ -751,6 +812,33 @@ const BIDI_MASK: u32 = EXPLICIT_MASK
     | mask(BidiClass::RightToLeft)
     | mask(BidiClass::ArabicLetter)
     | mask(BidiClass::ArabicNumber);
+const STRONG_MASK: u32 =
+    mask(BidiClass::LeftToRight) | mask(BidiClass::RightToLeft) | mask(BidiClass::ArabicLetter);
+/// Classes that resolve like their surroundings when enclosed by strong characters of the same
+/// class: separators and terminators become ON (W6) or EN, and neutrals resolve to the class of
+/// the enclosing strong characters (N1). Non-spacing marks take the class of the preceding
+/// character (W1) and boundary neutrals take the level of the preceding character (X9).
+/// Paired brackets are excluded by the caller as they participate in N0 individually.
+const MERGE_NEUTRAL_MASK: u32 = mask(BidiClass::EuropeanSeparator)
+    | mask(BidiClass::EuropeanTerminator)
+    | mask(BidiClass::CommonSeparator)
+    | mask(BidiClass::WhiteSpace)
+    | mask(BidiClass::OtherNeutral)
+    | mask(BidiClass::NonspacingMark)
+    | mask(BidiClass::BoundaryNeutral);
+
+/// The classes that may be merged into a unit started by a strong character of class `class`.
+///
+/// European numbers preceded by L (with no intervening strong type) resolve to L (W7), but after
+/// R they stay EN and after AL they become AN (W2), so they only merge into L units.
+fn merge_mask(class: BidiClass) -> u32 {
+    if class == BidiClass::LeftToRight {
+        mask(class) | MERGE_NEUTRAL_MASK | mask(BidiClass::EuropeanNumber)
+    } else {
+        mask(class) | MERGE_NEUTRAL_MASK
+    }
+}
+
 const _RESET_MASK: u32 =
     ISOLATE_MASK | mask(BidiClass::PopDirectionalIsolate) | mask(BidiClass::WhiteSpace);
 
@@ -937,9 +1025,91 @@ const fn mask(t: BidiClass) -> u32 {
 
 #[cfg(test)]
 mod test {
+    use alloc::vec::Vec;
     use icu_properties::CodePointMapData;
     use icu_properties::props::{BidiClass, BidiMirroringGlyph, BidiPairedBracketType};
+    use parlance::BaseDirection;
     use parley_data::Properties;
+
+    use super::BidiResolver;
+
+    /// Characters covering every Bidi_Class, paired brackets, and explicit formatting characters.
+    const POOL: &[char] = &[
+        'a', 'b', 'Z', '\u{05D0}', '\u{05D1}', '\u{0627}', '\u{0628}', '0', '9', '\u{00B2}',
+        '\u{0660}', '\u{0663}', '\u{0600}', '+', '-', '#', '$', '%', '\u{00B0}', ',', '.', ':',
+        '/', '\u{00A0}', '\u{0300}', '\u{064B}', '\u{00AD}', '\u{200D}', '\u{0000}', '\n',
+        '\u{2029}', '\u{001C}', '\t', '\u{001F}', ' ', '\u{2003}', '!', '"', '&', '*', '<', '>',
+        '(', ')', '[', ']', '{', '}', '\u{2329}', '\u{232A}', '\u{3008}', '\u{3009}', '\u{202A}',
+        '\u{202B}', '\u{202C}', '\u{202D}', '\u{202E}', '\u{2066}', '\u{2067}', '\u{2068}',
+        '\u{2069}',
+    ];
+
+    fn resolve(text: &[char], direction: BaseDirection, merge: bool) -> BidiResolver {
+        let brackets = CodePointMapData::<BidiMirroringGlyph>::new();
+        let mut resolver = BidiResolver::new();
+        resolver.resolve_impl(
+            text.iter()
+                .map(|&ch| (ch, (Properties::get(ch).bidi_class(), brackets.get(ch)))),
+            direction,
+            merge,
+        );
+        resolver
+    }
+
+    /// Merging runs of characters into units must not change any resolved level.
+    #[test]
+    fn merged_units_match_per_character_resolution() {
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let mut text = Vec::new();
+        let mut merged_texts = 0;
+        for iteration in 0..40_000 {
+            text.clear();
+            let len = if iteration % 100 == 0 {
+                (next() % 600) as usize
+            } else {
+                (next() % 40) as usize
+            };
+            // Bias each text towards a few classes so that long mergeable runs occur.
+            let favored = [
+                POOL[(next() % POOL.len() as u64) as usize],
+                POOL[(next() % POOL.len() as u64) as usize],
+                *[' ', 'a', '\u{05D0}', '\u{0627}'][(next() % 4) as usize..]
+                    .first()
+                    .unwrap(),
+            ];
+            for _ in 0..len {
+                let r = next();
+                text.push(if r % 3 == 0 {
+                    POOL[((r >> 8) % POOL.len() as u64) as usize]
+                } else {
+                    favored[((r >> 8) % 3) as usize]
+                });
+            }
+            for direction in [BaseDirection::Auto, BaseDirection::Ltr, BaseDirection::Rtl] {
+                let merged = resolve(&text, direction, true);
+                let reference = resolve(&text, direction, false);
+                if merged.initial_types.len() < text.len() {
+                    merged_texts += 1;
+                }
+                assert_eq!(merged.levels().len(), text.len());
+                assert_eq!(
+                    (merged.base_level(), merged.levels()),
+                    (reference.base_level(), reference.levels()),
+                    "{text:?} {direction:?}"
+                );
+            }
+        }
+        assert!(
+            merged_texts > 40_000,
+            "too few texts exercised merging: {merged_texts}"
+        );
+    }
 
     /// Bracket pair lookups are skipped for characters whose Bidi_Class is not ON, which
     /// relies on every paired bracket being ON.
