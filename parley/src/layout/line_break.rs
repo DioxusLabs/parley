@@ -2031,7 +2031,7 @@ mod tests {
                 if emergency { 12. } else { 8. }
             );
 
-            state.reset_line(None);
+            state.line.reset();
             assert_eq!(state.line.box_metrics.line_height(), 0.);
         }
     }
