@@ -73,8 +73,6 @@ pub(crate) fn shape_text<'a, B: Brush>(
 
     let mut fq = fcx.collection.query(&mut fcx.source_cache);
 
-    let mut inline_box_iter = inline_boxes.iter().map(|b| &b.inline_box).peekable();
-
     // Merge font features with letter-spacing ligature suppression.
     //
     // TODO: This allocation is slightly unfortunate (though solvable). It's required currently,
@@ -100,15 +98,28 @@ pub(crate) fn shape_text<'a, B: Brush>(
 
     // Split when shaping-relevant style properties change and at inline boxes.
     let items = {
-        // TODO: we currently walk characters here, but we could instead just walk boundaries of
-        // styles and inline boxes.
         let char_count = char_style_indices.len();
 
         // The first character of the item currently being built.
         let mut item_start_char = 0_usize;
 
-        // Positioned at `item_start_char`, i.e., the first character not yet covered by an item.
-        let mut chars = text.char_indices().enumerate().peekable();
+        // The character indices at which inline boxes split the text, in text order (inline
+        // boxes are sorted by index). Boxes that are not at the start of some character (e.g.,
+        // those at or past the end of the text) never split, so they are skipped.
+        let mut box_cursor = (0_usize, 0_usize); // (byte index, char index)
+        let mut box_split_chars = inline_boxes
+            .iter()
+            .filter_map(move |b| {
+                let byte_index = b.inline_box.index;
+                if byte_index >= text.len() || !text.is_char_boundary(byte_index) {
+                    return None;
+                }
+                box_cursor.1 += text[box_cursor.0..byte_index].chars().count();
+                box_cursor.0 = byte_index;
+                Some(box_cursor.1)
+            })
+            .peekable();
+
         core::iter::from_fn(move || {
             if item_start_char == char_count {
                 return None;
@@ -118,52 +129,39 @@ pub(crate) fn shape_text<'a, B: Brush>(
             let item_style = &styles[usize::from(item_style_index)];
 
             // Items are at least one character long, therefore the item's own first character is
-            // never a split point.
-            chars.next();
+            // never a split point. Inline boxes at or before it are dropped (this occurs if the
+            // itemizer split a run and we were not called, such as at a bidi boundary).
+            while box_split_chars
+                .next_if(|&box_char| box_char <= item_start_char)
+                .is_some()
+            {}
 
+            // Split at inline boxes, so each box falls on a shaping boundary.
+            let limit = box_split_chars.peek().copied().unwrap_or(char_count);
+
+            // Within that, split at the first style change that is shaping-relevant. Characters
+            // are skipped a style run at a time.
+            let mut char_index = item_start_char + 1;
+            let mut run_style_index = item_style_index;
             let char_end = loop {
-                let Some(&(char_index, (byte_index, _))) = chars.peek() else {
-                    // End of text.
-                    break char_count;
-                };
-
-                // Split at inlines boxes, so each box falls on a shaping boundary.
-                //
-                // We loop because there may be multiple boxes at this index.
-                let mut split = false;
-                while let Some(inline_box) = inline_box_iter.peek() {
-                    if inline_box.index < byte_index {
-                        // Inline boxes *before* this index are popped (this occurs if the itemizer
-                        // split a run and we were not called, such as at a bidi boundary).
-                        inline_box_iter.next();
-                    } else if inline_box.index == byte_index {
-                        inline_box_iter.next();
-                        split = true;
-                    } else {
-                        break;
-                    }
+                char_index += position_ne(&char_style_indices[char_index..limit], run_style_index);
+                if char_index == limit {
+                    break limit;
                 }
 
-                if split {
-                    break char_index;
-                }
-
-                let style_index = char_style_indices[char_index];
-                if style_index != item_style_index {
-                    let style = &styles[usize::from(style_index)];
-                    split = !nearly_eq(style.font_size, item_style.font_size)
+                run_style_index = char_style_indices[char_index];
+                if run_style_index != item_style_index {
+                    let style = &styles[usize::from(run_style_index)];
+                    if !nearly_eq(style.font_size, item_style.font_size)
                         || style.locale != item_style.locale
                         || style.font_variations != item_style.font_variations
                         || style.font_features != item_style.font_features
                         || !nearly_eq(style.letter_spacing, item_style.letter_spacing)
-                        || !nearly_eq(style.word_spacing, item_style.word_spacing);
+                        || !nearly_eq(style.word_spacing, item_style.word_spacing)
+                    {
+                        break char_index;
+                    }
                 }
-
-                if split {
-                    break char_index;
-                }
-
-                chars.next();
             };
 
             item_start_char = char_end;
@@ -246,6 +244,28 @@ pub(crate) fn shape_text<'a, B: Brush>(
     for (box_idx, _inline_box) in inline_box_iter {
         layout.data.push_inline_box(box_idx, bidi_level);
     }
+}
+
+/// Returns the index of the first element of `values` not equal to `value`, or `values.len()` if
+/// there is none.
+///
+/// This checks fixed-size chunks without early exit first, so the common case of long runs of
+/// equal values vectorizes.
+fn position_ne(values: &[u16], value: u16) -> usize {
+    const CHUNK_LEN: usize = 32;
+
+    let mut offset = 0;
+    for chunk in values.as_chunks::<CHUNK_LEN>().0 {
+        if chunk.iter().fold(false, |acc, &v| acc | (v != value)) {
+            break;
+        }
+        offset += CHUNK_LEN;
+    }
+    offset
+        + values[offset..]
+            .iter()
+            .position(|&v| v != value)
+            .unwrap_or(values.len() - offset)
 }
 
 /// The font to use if a font query doesn't return any font candidates at all.
