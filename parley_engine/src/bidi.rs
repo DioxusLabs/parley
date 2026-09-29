@@ -1033,7 +1033,15 @@ mod test {
 
     use super::BidiResolver;
 
-    /// Characters covering every Bidi_Class, paired brackets, and explicit formatting characters.
+    fn index(r: u64) -> usize {
+        usize::try_from(r).unwrap()
+    }
+
+    fn pick(r: u64) -> char {
+        POOL[index(r % POOL.len() as u64)]
+    }
+
+    /// Characters covering every `Bidi_Class`, paired brackets, and explicit formatting characters.
     const POOL: &[char] = &[
         'a', 'b', 'Z', '\u{05D0}', '\u{05D1}', '\u{0627}', '\u{0628}', '0', '9', '\u{00B2}',
         '\u{0660}', '\u{0663}', '\u{0600}', '+', '-', '#', '$', '%', '\u{00B0}', ',', '.', ':',
@@ -1071,24 +1079,24 @@ mod test {
         for iteration in 0..40_000 {
             text.clear();
             let len = if iteration % 100 == 0 {
-                (next() % 600) as usize
+                index(next() % 600)
             } else {
-                (next() % 40) as usize
+                index(next() % 40)
             };
             // Bias each text towards a few classes so that long mergeable runs occur.
             let favored = [
-                POOL[(next() % POOL.len() as u64) as usize],
-                POOL[(next() % POOL.len() as u64) as usize],
-                *[' ', 'a', '\u{05D0}', '\u{0627}'][(next() % 4) as usize..]
+                pick(next()),
+                pick(next()),
+                *[' ', 'a', '\u{05D0}', '\u{0627}'][index(next() % 4)..]
                     .first()
                     .unwrap(),
             ];
             for _ in 0..len {
                 let r = next();
                 text.push(if r % 3 == 0 {
-                    POOL[((r >> 8) % POOL.len() as u64) as usize]
+                    pick(r >> 8)
                 } else {
-                    favored[((r >> 8) % 3) as usize]
+                    favored[index((r >> 8) % 3)]
                 });
             }
             for direction in [BaseDirection::Auto, BaseDirection::Ltr, BaseDirection::Rtl] {
@@ -1111,7 +1119,7 @@ mod test {
         );
     }
 
-    /// Bracket pair lookups are skipped for characters whose Bidi_Class is not ON, which
+    /// Bracket pair lookups are skipped for characters whose `Bidi_Class` is not ON, which
     /// relies on every paired bracket being ON.
     #[test]
     fn paired_brackets_are_other_neutral() {
