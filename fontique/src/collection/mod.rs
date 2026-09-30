@@ -704,16 +704,9 @@ impl CommonData {
     fn load_fonts_from_paths(&mut self, paths: impl IntoIterator<Item = impl AsRef<Path>>) {
         let mut families: HashMap<FamilyId, (FamilyName, Vec<FontInfo>)> = HashMap::default();
         let mut scratch_family_name = String::default();
+        let mut sources = crate::source::SourcePathMap::default();
         crate::scan::scan_paths(paths, 16, |scanned_font| {
-            let source = SourceInfo {
-                id: SourceId::new(),
-                kind: SourceKind::Path(Arc::from(scanned_font.path.unwrap())),
-            };
-
-            // `scan_paths` invokes this callback once per face (each face of a
-            // collection is reported separately), so register exactly this font.
-            // Re-scanning the file here would register duplicate faces.
-            families.clear();
+            let source = sources.get_or_insert(scanned_font.path.unwrap());
             self.register_scanned_font(
                 scanned_font,
                 &source,
@@ -721,8 +714,8 @@ impl CommonData {
                 &mut scratch_family_name,
                 &mut families,
             );
-            self.merge_families(&families);
         });
+        self.merge_families(&families);
     }
 
     fn register_fonts(
@@ -951,6 +944,7 @@ fn load_fonts_from_paths_registers_each_face_once() {
 
     collection.load_fonts_from_paths(&font_dirs);
 
+    let mut source_ids: HashMap<std::path::PathBuf, SourceId> = HashMap::default();
     let family_ids: Vec<_> = collection.family_ids().collect();
     for id in family_ids {
         let Some(family) = collection.family(id) else {
@@ -958,11 +952,22 @@ fn load_fonts_from_paths_registers_each_face_once() {
         };
         let mut seen = HashSet::new();
         for font in family.fonts() {
-            let face = (font.source().id(), font.index());
+            let SourceKind::Path(path) = font.source().kind() else {
+                panic!("font loaded from a path has a non-path source");
+            };
+            let face = (path.to_path_buf(), font.index());
             assert!(
-                seen.insert(face),
+                seen.insert(face.clone()),
                 "family {:?} contains a duplicate face {face:?}",
                 collection.family_name(id),
+            );
+            let source_id = *source_ids
+                .entry(face.0)
+                .or_insert_with(|| font.source().id());
+            assert_eq!(
+                source_id,
+                font.source().id(),
+                "faces of {path:?} have different source ids",
             );
         }
     }
