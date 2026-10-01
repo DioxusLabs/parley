@@ -112,6 +112,7 @@ where
     // linebreak_dirty: bool,
     // alignment_dirty: bool,
     alignment: Alignment,
+    alignment_options: AlignmentOptions,
     base_direction: BaseDirection,
     generation: Generation,
 }
@@ -135,6 +136,7 @@ where
             quantize: true,
             layout_dirty: true,
             alignment: Alignment::Start,
+            alignment_options: AlignmentOptions::default(),
             base_direction: BaseDirection::Auto,
             // We don't use the `default` value to start with, as our consumers
             // will choose to use that as their initial value, but will probably need
@@ -980,6 +982,12 @@ where
         self.layout_dirty = true;
     }
 
+    /// Set the additional options used when aligning the layout.
+    pub fn set_alignment_options(&mut self, options: AlignmentOptions) {
+        self.alignment_options = options;
+        self.layout_dirty = true;
+    }
+
     /// Set the base direction of the layout.
     ///
     /// The default is [`BaseDirection::Auto`], which infers the direction from the text.
@@ -1208,8 +1216,7 @@ where
         }
         self.layout = builder.build(&self.buffer);
         self.layout.break_all_lines(self.width);
-        self.layout
-            .align(self.alignment, AlignmentOptions::default());
+        self.layout.align(self.alignment, self.alignment_options);
         self.selection = self.selection.refresh(&self.layout);
         self.layout_dirty = false;
         self.generation.nudge();

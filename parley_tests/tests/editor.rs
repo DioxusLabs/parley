@@ -5,7 +5,7 @@
 
 use crate::test_name;
 use crate::util::TestEnv;
-use parley::Affinity;
+use parley::{Affinity, Alignment, AlignmentOptions};
 
 // TODO - Use CursorTest API for these tests
 
@@ -33,6 +33,19 @@ fn editor_select_all() {
     let mut env = TestEnv::new(test_name!(), None);
     let mut editor = env.editor("Hi, all!\nNext");
     env.driver(&mut editor).select_all();
+    env.check_editor_snapshot(&mut editor);
+}
+
+#[test]
+fn editor_last_line_alignment() {
+    let mut env = TestEnv::new(test_name!(), None);
+    let mut editor = env.editor("Lorem ipsum dolor sit amet,\nconsectetur adipiscing elit.");
+    editor.set_width(Some(150.));
+    editor.set_alignment(Alignment::Justify);
+    editor.set_alignment_options(AlignmentOptions {
+        last_line_alignment: Some(Alignment::End),
+        ..AlignmentOptions::default()
+    });
     env.check_editor_snapshot(&mut editor);
 }
 
