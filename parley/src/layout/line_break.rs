@@ -10,11 +10,9 @@ use alloc::vec::Vec;
 use core_maths::CoreFloat;
 use parlance::BidiLevel;
 
-use crate::layout::data::AlignedSubtreeOffset;
+use crate::layout::data::{AlignedSubtreeOffset, run_box_metrics};
 use crate::layout::spacing::{EffectiveSpacing, Justification, is_word_separator};
-use crate::layout::style_metrics::{
-    BoxMetrics, InlineBoxPlacement, StyleMetrics, inline_box_placement,
-};
+use crate::layout::style_metrics::{InlineBoxPlacement, StyleMetrics, inline_box_placement};
 use crate::layout::whitespace::atom_hanging_advance;
 use crate::layout::{
     BreakReason, Layout, LayoutData, LayoutItem, LayoutItemKind, LineData, LineItemData,
@@ -22,13 +20,13 @@ use crate::layout::{
 };
 use crate::style::Brush;
 use crate::{
-    BaselineShift, InlineBox, InlineBoxKind, LineHeight, OverflowWrap, TextWrapMode, VerticalAlign,
+    BaselineShift, InlineBox, InlineBoxKind, OverflowWrap, TextWrapMode, VerticalAlign,
     WhiteSpaceCollapse,
 };
 
 use core::ops::Range;
 use parley_engine::Atom;
-use parley_engine::shape::Whitespace;
+use parley_engine::shape::{Character, Whitespace};
 
 #[derive(Default)]
 struct LineLayout {
@@ -286,38 +284,88 @@ impl LineBoxMetrics {
         }
     }
 
-    /// Add the glyphs of a text atom of `style_index` in layout item `item_idx`, a run whose own
-    /// box is `run_box` (see [`run_box_metrics`]).
+    /// Add the glyphs of a text atom of `style_index` in layout item `item_idx` and text run
+    /// `run_idx`. The atom's characters are `characters`, the first of which has style
+    /// `style_index`.
     ///
-    /// This adds the style's span box together with its ancestors. When the style's line height
-    /// is [`LineHeight::MetricsRelative`] (which corresponds to CSS `line-height: normal`), it also
-    /// adds the run's box, which matters when the run was shaped with a fallback font whose metrics
-    /// differ from the style's first available font, the font the span box is built from.
+    /// This adds the span boxes of the atom's styles together with its ancestors. When the first
+    /// style's line height is [`LineHeight::MetricsRelative`] (which corresponds to CSS
+    /// `line-height: normal`), it also adds the run's box, which matters when the run was shaped
+    /// with a fallback font whose metrics differ from the style's first available font, the font
+    /// the span box is built from. See [`run_box_metrics`]
+    ///
+    /// [`LineHeight::MetricsRelative`]: crate::LineHeight::MetricsRelative
     #[inline]
-    fn add_text(
+    fn add_text<B: Brush>(
         &mut self,
         item_idx: usize,
+        run_idx: usize,
         style_index: u16,
-        style_metrics: &[StyleMetrics],
-        run_box: Option<&BoxMetrics>,
+        characters: &[Character],
+        data: &LayoutData<B>,
         contributed: &mut Vec<u16>,
         subtrees: &mut Vec<SubtreeExtents>,
     ) {
         self.has_content = true;
         // Consecutive atoms almost always come from the same run and style, whose boxes are then
-        // already on the line.
-        if self.last_text == (item_idx, style_index) {
+        // already on the line, so we can exit early. In case the run has atoms with mixed styles,
+        // new boxes may still be added.
+        if self.last_text == (item_idx, style_index) && !data.runs[run_idx].has_mixed_style_atoms {
             return;
         }
+        self.add_text_boxes(
+            item_idx,
+            run_idx,
+            style_index,
+            characters,
+            data,
+            contributed,
+            subtrees,
+        );
+    }
+
+    /// The part of [`Self::add_text`] for atoms whose boxes may not be on the line yet.
+    ///
+    /// Note we mark this `inline(never)`, to keep the common case fast.
+    #[inline(never)]
+    fn add_text_boxes<B: Brush>(
+        &mut self,
+        item_idx: usize,
+        run_idx: usize,
+        style_index: u16,
+        characters: &[Character],
+        data: &LayoutData<B>,
+        contributed: &mut Vec<u16>,
+        subtrees: &mut Vec<SubtreeExtents>,
+    ) {
         self.last_text = (item_idx, style_index);
         if contributed.last() != Some(&style_index) {
-            self.add_style(style_index, style_metrics, contributed, subtrees);
+            self.add_style(style_index, &data.style_metrics, contributed, subtrees);
         }
-        let Some(run_box) = run_box else {
+        if data.runs[run_idx].has_mixed_style_atoms {
+            // Add the spans of all the atom's other styles.
+            for character in characters.iter().skip(1) {
+                if character.style_index != style_index {
+                    self.add_style(
+                        character.style_index,
+                        &data.style_metrics,
+                        contributed,
+                        subtrees,
+                    );
+                }
+            }
+        }
+        let style = usize::from(style_index);
+        let shaped_run = &data.shaped_text.runs()[run_idx];
+        let Some(run_box) = data.runs[run_idx]
+            .run_box
+            .or_else(|| run_box_metrics(&data.styles[style], shaped_run, data.quantize))
+        else {
             return;
         };
-        let (baseline_offset, aligned_subtree) = style_metrics
-            .get(usize::from(style_index))
+        let (baseline_offset, aligned_subtree) = data
+            .style_metrics
+            .get(style)
             .map_or((0., 0), |m| (m.baseline_offset, m.aligned_subtree));
         let subtree = self.subtree_mut(subtrees, aligned_subtree);
         subtree
@@ -365,7 +413,7 @@ impl LineBoxMetrics {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct PrevBoundaryState {
     item_idx: usize,
     run_idx: usize,
@@ -521,18 +569,17 @@ impl Default for BreakerState {
 impl BreakerState {
     /// Add the atom currently being evaluated to the current line.
     ///
-    /// `run_box` is the box of the atom's run (see [`run_box_metrics`]). `style_index` is the
-    /// atom's style, whose span box (and those of its ancestors) is added to the line too.
-    /// `is_word_separator` is `true` iff the atom is a [word separator](`is_word_separator`), i.e.,
-    /// a justification opportunity.
+    /// `style_index` is the style of the atom's first character. The span boxes of the atom's
+    /// styles (and those of their ancestors) are added to the line too, as is the box of the atom's
+    /// run, see [`LineBoxMetrics::add_text`]. `is_word_separator` is `true` iff the atom is a
+    /// [word separator](`is_word_separator`), i.e., a justification opportunity.
     #[inline]
-    fn append_atom_to_line(
+    fn append_atom_to_line<B: Brush>(
         &mut self,
         atom: &Atom<'_>,
         next_x: f32,
         style_index: u16,
-        style_metrics: &[StyleMetrics],
-        run_box: Option<&BoxMetrics>,
+        data: &LayoutData<B>,
         is_word_separator: bool,
     ) {
         self.line.items.end = self.item_idx + 1;
@@ -542,9 +589,10 @@ impl BreakerState {
         self.line.num_word_separators += u32::from(is_word_separator);
         self.line.box_metrics.add_text(
             self.item_idx,
+            self.run_idx,
             style_index,
-            style_metrics,
-            run_box,
+            atom.characters(),
+            data,
             &mut self.contributed,
             &mut self.subtrees,
         );
@@ -892,14 +940,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
     /// Computes the next line in the paragraph. Returns the advance and size
     /// (width and height for horizontal layouts) of the line.
-    #[inline(always)]
     pub fn break_next(&mut self) -> Option<YieldData> {
-        self.break_next_line_or_box()
-    }
-
-    /// Computes the next line in the paragraph. Returns the advance and size
-    /// (width and height for horizontal layouts) of the line.
-    fn break_next_line_or_box(&mut self) -> Option<YieldData> {
         assert!(
             self.state.layout_max_advance == f32::INFINITY
                 || self.state.line_max_advance - self.state.layout_max_advance < 1.0
@@ -992,8 +1033,6 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let run_idx = item.index;
                     let run = Run::new(self.layout, 0, 0, run_idx, None);
                     let slice = run.full_slice();
-                    let run_box = run_box_metrics(&self.layout.data, run_idx);
-                    let run_box = run_box.as_ref();
 
                     // Additional spacing to apply between atoms.
                     let spacing = EffectiveSpacing::new(run.data.spacing, Justification::NONE);
@@ -1028,8 +1067,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 &atom,
                                 self.state.line.x,
                                 style_index,
-                                &self.layout.data.style_metrics,
-                                run_box,
+                                &self.layout.data,
                                 is_separator,
                             );
 
@@ -1073,8 +1111,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 &atom,
                                 next_x,
                                 style_index,
-                                &self.layout.data.style_metrics,
-                                run_box,
+                                &self.layout.data,
                                 is_separator,
                             );
                         }
@@ -1102,8 +1139,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                     &atom,
                                     next_x,
                                     style_index,
-                                    &self.layout.data.style_metrics,
-                                    run_box,
+                                    &self.layout.data,
                                     is_separator,
                                 );
                             }
@@ -1147,8 +1183,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                     &atom,
                                     next_x,
                                     style_index,
-                                    &self.layout.data.style_metrics,
-                                    run_box,
+                                    &self.layout.data,
                                     is_separator,
                                 );
                             }
@@ -1238,8 +1273,6 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let slice = run.full_slice();
                     let spacing = run.line_spacing();
                     let cluster_end = shaped_run.shaped_clusters_range.end;
-                    let run_box = run_box_metrics(&self.layout.data, run_idx);
-                    let run_box = run_box.as_ref();
 
                     for atom in slice.atoms_from(self.state.cluster_idx) {
                         // Check if we should break before this atom
@@ -1265,8 +1298,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             &atom,
                             next_x,
                             first_character.style_index,
-                            &self.layout.data.style_metrics,
-                            run_box,
+                            &self.layout.data,
                             is_separator,
                         );
                         char_count += atom.char_range().len() as u32;
@@ -1361,10 +1393,6 @@ impl<'a, B: Brush> BreakLines<'a, B> {
     }
 
     fn finish_line(&mut self, line_idx: usize, line_height: f32, invisible: bool) -> f32 {
-        let prev_line_metrics = match line_idx {
-            0 => None,
-            idx => Some(self.lines.lines[idx - 1].metrics),
-        };
         let line = &mut self.lines.lines[line_idx];
 
         // Reset metrics for line
@@ -1379,7 +1407,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         // Whether metrics should be quantized to pixel boundaries
         let quantize = self.layout.data.quantize;
 
-        if line.item_range.is_empty() && prev_line_metrics.is_some() {
+        if line.item_range.is_empty() && line_idx > 0 {
             // If we have no items on this line, it must be the last (empty)
             // line in a layout following a newline. Commit an empty run so
             // that consumers, such as accessibility integrations, have
@@ -1401,12 +1429,12 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                 let style_index = self.layout.data.shaped_text.shaped_clusters()
                     [cluster as usize - 1]
                     .style_index;
-                let run_box = run_box_metrics(&self.layout.data, index);
                 self.state.line.box_metrics.add_text(
                     index,
+                    index,
                     style_index,
-                    &self.layout.data.style_metrics,
-                    run_box.as_ref(),
+                    &[],
+                    &self.layout.data,
                     &mut self.state.contributed,
                     &mut self.state.subtrees,
                 );
@@ -1531,7 +1559,7 @@ impl<B: Brush> Drop for BreakLines<'_, B> {
         let mut layout_width = 0_f32;
         let mut layout_full_width = 0_f32;
         let mut height = 0_f64; // f32 causes test failures due to accumulated error
-        for line in &mut self.lines.lines {
+        for line in &self.lines.lines {
             let indent_extra = line.indent.max(0.0);
             let line_max = line.metrics.inline_min_coord + line.metrics.advance + indent_extra;
             layout_full_width = layout_full_width.max(line_max);
@@ -1575,7 +1603,7 @@ fn commit_line<B: Brush>(
     max_advance: f32,
     break_reason: BreakReason,
     line_indent: f32,
-) -> bool {
+) {
     let shaped_text = &layout.data.shaped_text;
     let shaped_clusters = shaped_text.shaped_clusters();
 
@@ -1584,7 +1612,6 @@ fn commit_line<B: Brush>(
     state.items.end = state.items.end.min(layout.data.items.len());
 
     let start_item_idx = lines.line_items.len();
-    // let start_run_idx = lines.line_items.last().map(|item| item.index).unwrap_or(0);
 
     let items_to_commit = &layout.data.items[state.items.clone()];
 
@@ -1738,8 +1765,6 @@ fn commit_line<B: Brush>(
         // the first item of line N+1 to be the item AFTER the last item in line N.
         LayoutItemKind::InlineBox => state.items.end,
     };
-
-    true
 }
 
 /// Returns the advance of the whitespace hanging past the end of the line made up of `line_items`,
@@ -1869,30 +1894,6 @@ fn hanging_whitespace<B: Brush>(
     )
 }
 
-/// The post-shaping metrics of a run, if needed for line box resolution. This differs from the
-/// style derived box by taking into account any fallback fonts (rather than just using the first
-/// available font).
-///
-/// Per [CSS Inline 3 § 4.1], glyphs from fonts other than the first available font only
-/// contribute to the line when the `line-height` is `normal` ([`LineHeight::MetricsRelative`]);
-/// otherwise the style's span box alone sizes the line and this returns `None`.
-///
-/// [CSS Inline 3 § 4.1]: https://drafts.csswg.org/css-inline-3/#inline-height
-#[inline]
-fn run_box_metrics<B: Brush>(data: &LayoutData<B>, run_idx: usize) -> Option<BoxMetrics> {
-    let shaped_run = &data.shaped_text.runs()[run_idx];
-    let style_index =
-        data.shaped_text.characters()[shaped_run.characters_range.start as usize].style_index;
-    match data.styles[usize::from(style_index)].line_height {
-        LineHeight::MetricsRelative(_) => Some(BoxMetrics::from_font(
-            &shaped_run.font_metrics,
-            data.runs[run_idx].line_height,
-            data.quantize,
-        )),
-        LineHeight::FontSizeRelative(_) | LineHeight::Absolute(_) => None,
-    }
-}
-
 /// Reorder items within line according to the bidi levels of the items
 fn reorder_line_items(runs: &mut [LineItemData]) {
     let run_count = runs.len();
@@ -1926,14 +1927,7 @@ fn reorder_line_items(runs: &mut [LineItemData]) {
                     end += 1;
                 }
 
-                let mut j = i;
-                let mut k = end - 1;
-                while j < k {
-                    runs.swap(j, k);
-                    j += 1;
-                    k -= 1;
-                }
-
+                runs[i..end].reverse();
                 i = end;
             }
             i += 1;
