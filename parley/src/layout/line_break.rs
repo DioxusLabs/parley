@@ -27,8 +27,8 @@ use crate::{
 };
 
 use core::ops::Range;
-use parley_engine::Atom;
 use parley_engine::shape::{Character, Whitespace};
+use parley_engine::{Atom, ShapedSlice};
 use smallvec::SmallVec;
 
 #[derive(Default)]
@@ -1785,6 +1785,10 @@ fn commit_line<B: Brush>(
         }
     }
     // let end_run_idx = lines.line_items.last().map(|item| item.index).unwrap_or(0);
+    // Only lines that are reordered can have whitespace at a level other than the base level.
+    if needs_reorder {
+        reset_trailing_whitespace_level(layout, &mut lines.line_items, start_item_idx);
+    }
     let end_item_idx = lines.line_items.len();
 
     // Trailing whitespace under `WhiteSpaceCollapse::Preserve` directly preceding a forced break
@@ -1852,6 +1856,96 @@ fn commit_line<B: Brush>(
     };
 }
 
+/// Whether a character of the given whitespace class is reset to the paragraph level by UAX #9
+/// rule L1 when it precedes a line end (segment separators, paragraph separators and Unicode `WS`
+/// characters). Non-breaking spaces are not among those.
+#[inline(always)]
+fn is_l1_trailing_whitespace(whitespace: Whitespace) -> bool {
+    matches!(
+        whitespace,
+        Whitespace::Space
+            | Whitespace::IdeographicSpace
+            | Whitespace::OtherSpaceSeparator
+            | Whitespace::Tab
+            | Whitespace::Newline
+    )
+}
+
+/// Apply UAX #9 rule L1 to the line's items (those from `start_item_idx` on): whitespace at the
+/// logical end of the line is reset to the paragraph's base level, so that it ends up at the line's
+/// end edge after bidi reordering (where it can hang) rather than at the end of its embedding.
+///
+/// The line's trailing whitespace can span multiple items, so this walks the items backwards from
+/// the end of the line: items that are whitespace in full are reset as a whole, and the walk stops
+/// at the first item with other content. That item's trailing whitespace (if any) is split off
+/// into an item of its own, as an item has a single level.
+///
+/// `line_items` must be in logical order.
+fn reset_trailing_whitespace_level<B: Brush>(
+    layout: &Layout<B>,
+    line_items: &mut Vec<LineItemData>,
+    start_item_idx: usize,
+) {
+    let base_level = layout.data.base_level;
+
+    for idx in (start_item_idx..line_items.len()).rev() {
+        let item = &mut line_items[idx];
+        match item.kind {
+            LayoutItemKind::InlineBox => {
+                // In-flow boxes are content, so whitespace before them isn't trailing.
+                // Out-of-flow boxes don't take part in the line's content: skip over them.
+                if layout.data.inline_boxes[item.index].inline_box.kind == InlineBoxKind::InFlow {
+                    return;
+                }
+            }
+            LayoutItemKind::TextRun => {
+                let clusters = item.shaped_cluster_range.clone();
+                let slice = layout
+                    .data
+                    .shaped_text
+                    .run_slice(item.index as u32)
+                    .narrow(clusters.clone());
+                let whitespace_start = trailing_whitespace_start(slice);
+
+                if whitespace_start == clusters.start {
+                    // The item is whitespace in full: reset it, and continue into the item
+                    // before it.
+                    item.bidi_level = base_level;
+                    continue;
+                }
+
+                // The item has non-whitespace content, which ends the trailing whitespace.
+                if whitespace_start != clusters.end && item.bidi_level != base_level {
+                    let mut whitespace_item = item.split_off(slice, whitespace_start);
+                    whitespace_item.bidi_level = base_level;
+                    line_items.insert(idx + 1, whitespace_item);
+                }
+                return;
+            }
+        }
+    }
+}
+
+/// The index of the shaped cluster at which the whitespace at the logical end of `slice` starts
+/// (see [`is_l1_trailing_whitespace`]).
+///
+/// This is the start of `slice` if it's whitespace in full, and the end of `slice` if it doesn't
+/// end in whitespace.
+fn trailing_whitespace_start(slice: ShapedSlice<'_>) -> u32 {
+    slice
+        .atoms_end()
+        .rev()
+        .take_while(|atom| {
+            atom.characters()
+                .iter()
+                .all(|character| is_l1_trailing_whitespace(character.whitespace))
+        })
+        .last()
+        .map_or(slice.shaped_clusters_range().end, |atom| {
+            atom.shaped_clusters_range().start
+        })
+}
+
 /// Returns the advance of the whitespace hanging past the end of the line made up of `line_items`,
 /// the index one past its logically last shaped cluster that's eligible for justification (see
 /// [`Justification::justification_end_cluster`]), and the number of justification opportunities
@@ -1905,14 +1999,6 @@ fn hanging_whitespace<B: Brush>(
                 }
             }
             LayoutItemKind::TextRun => {
-                // Trailing whitespace can only hang if it ends up at the line's end edge after bidi
-                // reordering. We don't currently apply UAX #9 L1 (resetting trailing whitespace to
-                // paragraph level), so only logically-last items that match the paragraph level are
-                // guaranteed to be at that edge.
-                if line_item.bidi_level != layout.data.base_level {
-                    break;
-                }
-
                 let effective_spacing = EffectiveSpacing::new(
                     layout.data.runs[line_item.index].spacing,
                     Justification::NONE,

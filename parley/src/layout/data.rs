@@ -176,6 +176,27 @@ impl LineItemData {
     pub(crate) fn is_rtl(&self) -> bool {
         self.bidi_level.is_rtl()
     }
+
+    /// Split this text run item in two at the shaped cluster with index `at`: this item keeps the
+    /// clusters before `at`, and the returned item has the clusters from `at` on.
+    ///
+    /// `slice` is this item's slice of shaped text. `at` must be an atom boundary strictly inside
+    /// of this item, so that neither of the two items is empty.
+    pub(crate) fn split_off(&mut self, slice: ShapedSlice<'_>, at: u32) -> Self {
+        debug_assert_eq!(self.kind, LayoutItemKind::TextRun);
+        debug_assert!(self.shaped_cluster_range.start < at && at < self.shaped_cluster_range.end);
+
+        let tail_clusters = at..self.shaped_cluster_range.end;
+        let tail_text = slice.text_byte_range(slice.narrow(tail_clusters.clone()).char_range());
+        let tail = Self {
+            text_range: tail_text.clone(),
+            shaped_cluster_range: tail_clusters,
+            ..self.clone()
+        };
+        self.shaped_cluster_range.end = at;
+        self.text_range.end = tail_text.start;
+        tail
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -475,11 +496,6 @@ impl ContentWidthsMeasurer {
                 LayoutItemKind::TextRun => {
                     let slice = layout_data.shaped_text.run_slice(item.index as u32);
                     let run_spacing = layout_data.runs[item.index].spacing;
-                    // Trailing whitespace can only hang if it ends up at the line's end edge after
-                    // bidi reordering. We don't currently apply UAX #9 L1 (resetting trailing
-                    // whitespace to paragraph level), so only logically-last items that match the
-                    // paragraph level are guaranteed to be at that edge.
-                    let can_hang = item.bidi_level == layout_data.base_level;
                     let is_rtl = item.bidi_level.is_rtl();
 
                     if run_spacing.is_zero() {
@@ -487,7 +503,6 @@ impl ContentWidthsMeasurer {
                             &layout_data.styles,
                             slice,
                             run_spacing,
-                            can_hang,
                             is_rtl,
                         );
                     } else {
@@ -495,7 +510,6 @@ impl ContentWidthsMeasurer {
                             &layout_data.styles,
                             slice,
                             run_spacing,
-                            can_hang,
                             is_rtl,
                         );
                     }
@@ -538,7 +552,6 @@ impl ContentWidthsMeasurer {
         styles: &[Style<B>],
         slice: ShapedSlice<'_>,
         spacing: Spacing,
-        can_hang: bool,
         is_rtl: bool,
     ) {
         let clusters = slice.shaped_clusters();
@@ -592,8 +605,7 @@ impl ContentWidthsMeasurer {
 
             // A cluster hangs if all of its characters hang. Its first character is checked via the
             // cached flags so the common case never touches `characters`.
-            let hangs = can_hang
-                && whitespace_hangs(whitespace, style)
+            let hangs = whitespace_hangs(whitespace, style)
                 && (cluster.char_len() == 1
                     || slice
                         .characters_in(cluster.chars_range())
