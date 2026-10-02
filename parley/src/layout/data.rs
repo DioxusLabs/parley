@@ -7,7 +7,7 @@ use crate::layout::style_metrics::{BoxMetrics, StyleMetrics};
 use crate::layout::whitespace::whitespace_hangs;
 use crate::layout::{ContentWidths, LineMetrics, Style};
 use crate::resolve::ResolvedStyle;
-use crate::span_box::{InlineItem, LayoutSpanBox, SpanEdge};
+use crate::span_box::{InlineItem, LayoutSpanBox, NO_SPAN_BOX, SpanEdge};
 use crate::style::Brush;
 use crate::{
     IndentOptions, InlineBoxKind, LineHeight, OverflowWrap, TextWrapMode, WhiteSpaceCollapse,
@@ -333,6 +333,31 @@ impl<B: Brush> LayoutData<B> {
             LayoutItemKind::SpanStart => span_box.inline_start,
             _ => span_box.inline_end,
         }
+    }
+
+    /// The span box that directly contains a line item, or [`NO_SPAN_BOX`]. For the edge of a
+    /// span box, this is that span box.
+    ///
+    /// A text run can cover several span boxes, but only ones without edge items, so that the
+    /// closest span box with edge items is the same for all of the run.
+    pub(crate) fn line_item_span_box(&self, item: &LineItemData) -> u32 {
+        let style_index = match item.kind {
+            LayoutItemKind::SpanStart | LayoutItemKind::SpanEnd => return item.index as u32,
+            LayoutItemKind::InlineBox => self.inline_boxes[item.index].parent_style_index,
+            LayoutItemKind::TextRun => {
+                let clusters = self.shaped_text.shaped_clusters();
+                let index = (item.shaped_cluster_range.start as usize)
+                    .min(clusters.len().saturating_sub(1));
+                match clusters.get(index) {
+                    Some(cluster) => cluster.style_index,
+                    None => return NO_SPAN_BOX,
+                }
+            }
+        };
+        self.style_span_boxes
+            .get(usize::from(style_index))
+            .copied()
+            .unwrap_or(NO_SPAN_BOX)
     }
 
     /// Push an inline box or an edge of a span box to the list of items.

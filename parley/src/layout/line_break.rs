@@ -26,6 +26,7 @@ use crate::{
     WhiteSpaceCollapse,
 };
 
+use crate::span_box::NO_SPAN_BOX;
 use core::ops::Range;
 use parley_engine::Atom;
 use parley_engine::shape::{Character, Whitespace};
@@ -1200,6 +1201,20 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     let span_box = &self.layout.data.span_boxes[item.index];
                     let advance = span_box.inline_end;
 
+                    // A span box with no content has no following content for its start edge
+                    // to stay with: it stays with the content preceding it instead, so a break
+                    // before the content following it is taken after it.
+                    let start_item_idx = self.state.item_idx.checked_sub(1).filter(|idx| {
+                        let prev = &self.layout.data.items[*idx];
+                        prev.kind == LayoutItemKind::SpanStart && prev.index == item.index
+                    });
+                    if start_item_idx.is_some()
+                        && self.state.pending_span_starts.as_ref().map(|s| s.item_idx)
+                            == start_item_idx
+                    {
+                        self.state.pending_span_starts = None;
+                    }
+
                     // The end edge stays on the same line as the content preceding it. If it
                     // doesn't fit, that content is moved to the next line along with it, by
                     // taking the last line-breaking opportunity before that content.
@@ -1970,7 +1985,11 @@ fn commit_line<B: Brush>(
     // Reorder the items within the line (if required). Reordering is required if the line contains
     // a mix of bidi levels (a mix of LTR and RTL text)
     if needs_reorder && end_item_idx - start_item_idx > 1 {
-        reorder_line_items(&mut lines.line_items[start_item_idx..end_item_idx]);
+        let line_items = &mut lines.line_items[start_item_idx..end_item_idx];
+        reorder_line_items(line_items);
+        if !layout.data.span_boxes.is_empty() {
+            place_span_edges(layout, line_items);
+        }
     }
 
     lines.lines.push(LineData {
@@ -2177,6 +2196,95 @@ fn hanging_whitespace<B: Brush>(
         collapsible_advance,
         justification_end_cluster,
         opportunities: hanging_opportunities,
+    }
+}
+
+/// Moves the edges of span boxes to the visual ends of their span box on the line, after the
+/// line's items have been reordered.
+///
+/// Reordering can leave an edge in the middle of the content of its span box, or on the wrong
+/// side of it. As in CSS (CSS 2 § 8.6), edges are placed in visual order: a start edge goes
+/// before the first item of its span box on the line in the paragraph's direction, and an end
+/// edge after the last.
+fn place_span_edges<B: Brush>(layout: &Layout<B>, line_items: &mut [LineItemData]) {
+    let data = &layout.data;
+    let is_rtl = data.base_level.is_rtl();
+    // Whether `item` is (an edge of) `span_box` or inside of it.
+    let is_within = |item: &LineItemData, span_box: u32| {
+        let mut item_box = data.line_item_span_box(item);
+        while item_box != NO_SPAN_BOX {
+            if item_box == span_box {
+                return true;
+            }
+            item_box = data.span_boxes[item_box as usize].parent;
+        }
+        false
+    };
+    let clusters = data.shaped_text.shaped_clusters();
+    let is_empty_run = |item: &LineItemData| {
+        item.kind == LayoutItemKind::TextRun
+            && clusters
+                .get(
+                    item.shaped_cluster_range.start as usize
+                        ..item.shaped_cluster_range.end as usize,
+                )
+                .is_none_or(|clusters| clusters.iter().all(|cluster| cluster.advance == 0.))
+    };
+    let is_edge = |item: &LineItemData| {
+        matches!(
+            item.kind,
+            LayoutItemKind::SpanStart | LayoutItemKind::SpanEnd
+        )
+    };
+
+    // The edges on the line, those of inner span boxes first (a span box always comes after the
+    // ones enclosing it), so that the edges inside of a span box are in place when its own edges
+    // are. Moving an edge changes the positions of others, so they are looked up again by kind
+    // and span box.
+    let mut edges: SmallVec<[(LayoutItemKind, usize); 8]> = line_items
+        .iter()
+        .filter(|item| is_edge(item))
+        .map(|item| (item.kind, item.index))
+        .collect();
+    edges.sort_by_key(|(_, span_box)| core::cmp::Reverse(*span_box));
+    for (kind, span_box) in edges {
+        let Some(pos) = line_items
+            .iter()
+            .position(|item| item.kind == kind && item.index == span_box)
+        else {
+            continue;
+        };
+        // The first and last of the other items of the span box. Its other edge, and text runs
+        // that take up no space (e.g. ones made up of bidi control characters), only count if
+        // there is nothing else.
+        let range_of = |content_only: bool| {
+            let mut others = line_items
+                .iter()
+                .enumerate()
+                .filter(|(i, item)| {
+                    let is_content =
+                        !is_empty_run(item) && !(is_edge(item) && item.index == span_box);
+                    *i != pos && is_within(item, span_box as u32) && (is_content || !content_only)
+                })
+                .map(|(i, _)| i);
+            let first = others.next()?;
+            Some((first, others.next_back().unwrap_or(first)))
+        };
+        let Some((first, last)) = range_of(true).or_else(|| range_of(false)) else {
+            continue;
+        };
+        let on_left = (kind == LayoutItemKind::SpanStart) != is_rtl;
+        if on_left {
+            if pos < first {
+                line_items[pos..first].rotate_left(1);
+            } else {
+                line_items[first..=pos].rotate_right(1);
+            }
+        } else if pos < last {
+            line_items[pos..=last].rotate_left(1);
+        } else {
+            line_items[last + 1..=pos].rotate_right(1);
+        }
     }
 }
 

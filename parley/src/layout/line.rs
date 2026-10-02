@@ -3,15 +3,17 @@
 
 use crate::layout::Style;
 use crate::layout::data::BreakReason;
-use crate::layout::data::{LayoutItemKind, LineData};
+use crate::layout::data::{LayoutItemKind, LineData, LineItemData};
 use crate::layout::layout::Layout;
 use crate::layout::run::Run;
-use crate::layout::spacing::EffectiveSpacing;
-use crate::span_box::{LayoutSpanBox, NO_SPAN_BOX};
+use crate::layout::spacing::{EffectiveSpacing, Justification};
+use crate::layout::whitespace::atom_hanging_advance;
+use crate::span_box::NO_SPAN_BOX;
 use crate::style::Brush;
-use crate::{BaselineShift, InlineBox, InlineBoxKind};
+use crate::{BaselineShift, InlineBox, InlineBoxKind, WhiteSpaceCollapse};
 
 use core::ops::Range;
+use parley_engine::shape::Whitespace;
 use parley_engine::{Atom, Atoms, Glyph};
 use smallvec::SmallVec;
 
@@ -155,10 +157,10 @@ impl<'a, B: Brush> Line<'a, B> {
     /// Fragments are in the order their spans were pushed, so a span's fragment always comes
     /// after those of the spans enclosing it.
     ///
-    /// Note that if a span's content is split up by bidirectional reordering, its fragment is the
-    /// union of the pieces.
+    /// A span has one fragment on a line, unless bidirectional reordering splits up its content,
+    /// in which case it has one for each piece, in visual order.
     ///
-    /// Fragments do not include whitespace that hangs past the end of the line.
+    /// Fragments do not include collapsible whitespace that hangs past the end of the line.
     ///
     /// The cost of this function is linear in the amount of content on the line.
     pub fn span_fragments(&self) -> impl Iterator<Item = SpanFragment> + use<B> {
@@ -172,57 +174,62 @@ impl<'a, B: Brush> Line<'a, B> {
             return fragments;
         }
 
-        // The span boxes with a fragment on the line, with the extent of the content found so far
-        // and the positions of the outer side of their left and right edges, if on the line.
+        // The fragments found so far. Walking the line in visual order, a span box gets a new
+        // fragment whenever a piece of it does not directly follow the previous one.
         struct Extent {
             span_box: u32,
             min: f32,
             max: f32,
-            left_edge: Option<f32>,
-            right_edge: Option<f32>,
+            /// The number of the last piece of content added to the extent.
+            last_piece: u32,
             has_start_edge: bool,
             has_end_edge: bool,
-            is_rtl: bool,
         }
         let mut extents = SmallVec::<[Extent; 8]>::new();
-        // Grows the extent of `span_box` and all span boxes enclosing it to include `x0..x1`.
-        // Returns the index of `span_box`'s entry.
-        fn grow(
-            extents: &mut SmallVec<[Extent; 8]>,
-            span_boxes: &[LayoutSpanBox],
-            mut span_box: u32,
-            x0: f32,
-            x1: f32,
-        ) -> Option<usize> {
-            let (min, max) = (x0.min(x1), x0.max(x1));
+        let mut piece = 0_u32;
+        // Adds the piece of content `x0..x1` to the fragments of `span_box` and of all span
+        // boxes enclosing it. Returns the index of `span_box`'s entry.
+        let mut grow = |extents: &mut SmallVec<[Extent; 8]>,
+                        mut span_box: u32,
+                        x0: f32,
+                        x1: f32|
+         -> Option<usize> {
+            // Text that takes up no space (e.g. bidi control characters) does not separate the
+            // pieces on either side of it.
+            let is_empty = x0 == x1;
+            if !is_empty {
+                piece += 1;
+            }
             let mut first = None;
             while span_box != NO_SPAN_BOX {
-                let index = match extents.iter().rposition(|e| e.span_box == span_box) {
+                let index = match extents
+                    .iter()
+                    .rposition(|e| e.span_box == span_box)
+                    .filter(|&index| extents[index].last_piece + u32::from(!is_empty) >= piece)
+                {
                     Some(index) => {
                         let extent = &mut extents[index];
-                        extent.min = extent.min.min(min);
-                        extent.max = extent.max.max(max);
+                        extent.max = extent.max.max(x1);
+                        extent.last_piece = piece;
                         index
                     }
                     None => {
                         extents.push(Extent {
                             span_box,
-                            min,
-                            max,
-                            left_edge: None,
-                            right_edge: None,
+                            min: x0,
+                            max: x1,
+                            last_piece: piece,
                             has_start_edge: false,
                             has_end_edge: false,
-                            is_rtl: false,
                         });
                         extents.len() - 1
                     }
                 };
                 first.get_or_insert(index);
-                span_box = span_boxes[span_box as usize].parent;
+                span_box = data.span_boxes[span_box as usize].parent;
             }
             first
-        }
+        };
         let style_span_box = |style_index: u16| {
             data.style_span_boxes
                 .get(usize::from(style_index))
@@ -230,7 +237,8 @@ impl<'a, B: Brush> Line<'a, B> {
                 .unwrap_or(NO_SPAN_BOX)
         };
 
-        let mut x = self.data.metrics.inline_min_coord + self.data.metrics.offset;
+        let line_start = self.data.metrics.inline_min_coord + self.data.metrics.offset;
+        let mut x = line_start;
         let line_items = &data.line_items[self.data.item_range.clone()];
         for (item_index, line_item) in line_items.iter().enumerate() {
             match line_item.kind {
@@ -239,23 +247,21 @@ impl<'a, B: Brush> Line<'a, B> {
                         continue;
                     };
                     // Consecutive clusters of the same style are added in one go.
-                    let mut piece: Option<(u16, f32)> = None;
+                    let mut current: Option<(u16, f32)> = None;
                     for cluster in run.visual_clusters() {
                         let style_index = cluster.style_index();
-                        match piece {
-                            Some((piece_style, _)) if piece_style == style_index => {}
-                            Some((piece_style, piece_start)) => {
-                                let span_box = style_span_box(piece_style);
-                                grow(&mut extents, &data.span_boxes, span_box, piece_start, x);
-                                piece = Some((style_index, x));
+                        match current {
+                            Some((current_style, _)) if current_style == style_index => {}
+                            Some((current_style, start)) => {
+                                grow(&mut extents, style_span_box(current_style), start, x);
+                                current = Some((style_index, x));
                             }
-                            None => piece = Some((style_index, x)),
+                            None => current = Some((style_index, x)),
                         }
                         x += cluster.advance();
                     }
-                    if let Some((piece_style, piece_start)) = piece {
-                        let span_box = style_span_box(piece_style);
-                        grow(&mut extents, &data.span_boxes, span_box, piece_start, x);
+                    if let Some((current_style, start)) = current {
+                        grow(&mut extents, style_span_box(current_style), start, x);
                     }
                 }
                 LayoutItemKind::InlineBox => {
@@ -263,30 +269,18 @@ impl<'a, B: Brush> Line<'a, B> {
                     if layout_box.inline_box.kind == InlineBoxKind::InFlow {
                         let span_box = style_span_box(layout_box.parent_style_index);
                         let end = x + layout_box.inline_box.width;
-                        grow(&mut extents, &data.span_boxes, span_box, x, end);
+                        grow(&mut extents, span_box, x, end);
                         x = end;
                     }
                 }
                 LayoutItemKind::SpanStart | LayoutItemKind::SpanEnd => {
                     let end = x + data.span_edge_advance(line_item.kind, line_item.index);
                     let span_box = line_item.index as u32;
-                    if let Some(index) = grow(&mut extents, &data.span_boxes, span_box, x, end) {
-                        let extent = &mut extents[index];
-                        let is_start = line_item.kind == LayoutItemKind::SpanStart;
-                        // The outer side of the edge is the side away from the span's content.
-                        if is_start != line_item.is_rtl() {
-                            extent.left_edge = Some(x);
+                    if let Some(index) = grow(&mut extents, span_box, x, end) {
+                        if line_item.kind == LayoutItemKind::SpanStart {
+                            extents[index].has_start_edge = true;
                         } else {
-                            extent.right_edge = Some(end);
-                        }
-                        if is_start {
-                            extent.has_start_edge = true;
-                            extent.is_rtl = line_item.is_rtl();
-                        } else {
-                            if !extent.has_start_edge {
-                                extent.is_rtl = line_item.is_rtl();
-                            }
-                            extent.has_end_edge = true;
+                            extents[index].has_end_edge = true;
                         }
                     }
                     x = end;
@@ -294,57 +288,170 @@ impl<'a, B: Brush> Line<'a, B> {
             }
         }
 
-        // Whitespace hanging past the end of the line is not part of any fragment. It is at the
-        // end of the line in the paragraph's direction.
-        let line_start = self.data.metrics.inline_min_coord + self.data.metrics.offset;
-        let hanging = self.data.metrics.hanging_advance.max(0.);
-        let (content_start, content_end) = if data.base_level.is_rtl() {
-            ((line_start + hanging).min(x), x)
-        } else {
-            (line_start, (x - hanging).max(line_start))
-        };
+        // Collapsible whitespace hanging past the end of the line is not part of any fragment
+        // (preserved whitespace is). It is at the end of the line in the paragraph's direction.
+        let is_rtl = data.base_level.is_rtl();
+        let hanging = self.collapsible_hanging_advance();
         if hanging != 0. {
-            let clamp = |coord: f32| coord.clamp(content_start, content_end);
+            let (content_start, content_end) = if is_rtl {
+                ((line_start + hanging).min(x), x)
+            } else {
+                (line_start, (x - hanging).max(line_start))
+            };
             for extent in &mut extents {
-                extent.min = clamp(extent.min);
-                extent.max = clamp(extent.max);
-                extent.left_edge = extent.left_edge.map(clamp);
-                extent.right_edge = extent.right_edge.map(clamp);
+                extent.min = extent.min.clamp(content_start, content_end);
+                extent.max = extent.max.clamp(content_start, content_end);
             }
         }
 
-        extents.sort_unstable_by_key(|extent| extent.span_box);
-        let line_text_range = &self.data.text_range;
-        fragments.extend(extents.iter().map(|extent| {
-            let span_box = &data.span_boxes[extent.span_box as usize];
-            let (has_start_edge, has_end_edge, is_rtl) = if span_box.has_edge_items {
-                (extent.has_start_edge, extent.has_end_edge, extent.is_rtl)
+        // The sort is stable, so the fragments of each span box stay in visual order.
+        extents.sort_by_key(|extent| extent.span_box);
+        // A piece that takes up no space is only a fragment if it is all there is of the span
+        // box on the line.
+        let mut index = 0;
+        while index < extents.len() {
+            let span_box = extents[index].span_box;
+            let end = index
+                + extents[index..]
+                    .iter()
+                    .take_while(|extent| extent.span_box == span_box)
+                    .count();
+            let is_empty = |e: &Extent| e.min == e.max && !e.has_start_edge && !e.has_end_edge;
+            if extents[index..end].iter().any(|extent| !is_empty(extent)) {
+                let mut kept = index;
+                for i in index..end {
+                    if !is_empty(&extents[i]) {
+                        extents.swap(kept, i);
+                        kept += 1;
+                    }
+                }
+                extents.drain(kept..end);
+                index = kept;
             } else {
+                index = end;
+            }
+        }
+        let line_text_range = &self.data.text_range;
+        for (index, extent) in extents.iter().enumerate() {
+            let span_box = &data.span_boxes[extent.span_box as usize];
+            let (has_start_edge, has_end_edge) = if span_box.has_edge_items {
+                (extent.has_start_edge, extent.has_end_edge)
+            } else {
+                // The start of the span box is on its first fragment on the line in the
+                // paragraph's direction, and the end on its last.
+                let is_leftmost = index == 0 || extents[index - 1].span_box != extent.span_box;
+                let is_rightmost = extents
+                    .get(index + 1)
+                    .is_none_or(|next| next.span_box != extent.span_box);
+                let (is_first, is_last) = if is_rtl {
+                    (is_rightmost, is_leftmost)
+                } else {
+                    (is_leftmost, is_rightmost)
+                };
                 (
-                    span_box.text_range.start >= line_text_range.start,
-                    span_box.text_range.end <= line_text_range.end,
-                    data.base_level.is_rtl(),
+                    is_first && span_box.text_range.start >= line_text_range.start,
+                    is_last && span_box.text_range.end <= line_text_range.end,
                 )
             };
-            let start = extent.left_edge.unwrap_or(extent.min);
-            let end = extent.right_edge.unwrap_or(extent.max);
             let (ascent, descent) = data
                 .style_metrics
                 .get(usize::from(span_box.style_index))
                 .map_or((0., 0.), |metrics| (metrics.ascent, metrics.descent));
-            SpanFragment {
+            fragments.push(SpanFragment {
                 style_index: span_box.style_index,
-                x: start,
-                advance: end - start,
+                x: extent.min,
+                advance: extent.max - extent.min,
                 baseline: self.style_baseline(span_box.style_index),
                 ascent,
                 descent,
                 has_start_edge,
                 has_end_edge,
                 is_rtl,
-            }
-        }));
+            });
+        }
         fragments
+    }
+
+    /// The advance of the collapsible whitespace hanging at the end of the line.
+    ///
+    /// This leaves out hanging whitespace that is preserved or that does not collapse, like the
+    /// ideographic space, and collapsible whitespace before it.
+    fn collapsible_hanging_advance(&self) -> f32 {
+        let data = &self.layout.data;
+        let hanging = self.data.metrics.hanging_advance.max(0.);
+        if hanging == 0. {
+            return 0.;
+        }
+        let line_items = &data.line_items[self.data.item_range.clone()];
+        // Hanging whitespace is at the end of the line in the paragraph's direction.
+        let (mut forward, mut backward);
+        let items: &mut dyn Iterator<Item = &LineItemData> = if data.base_level.is_rtl() {
+            forward = line_items.iter();
+            &mut forward
+        } else {
+            backward = line_items.iter().rev();
+            &mut backward
+        };
+        let mut advance = 0.;
+        'items: for line_item in items {
+            match line_item.kind {
+                LayoutItemKind::InlineBox => {
+                    let inline_box = &data.inline_boxes[line_item.index].inline_box;
+                    if inline_box.kind == InlineBoxKind::InFlow {
+                        break;
+                    }
+                }
+                LayoutItemKind::SpanStart | LayoutItemKind::SpanEnd => {
+                    if data.span_edge_advance(line_item.kind, line_item.index) != 0. {
+                        break;
+                    }
+                }
+                LayoutItemKind::TextRun => {
+                    let spacing = EffectiveSpacing::new(
+                        data.runs[line_item.index].spacing,
+                        Justification::NONE,
+                    );
+                    let slice = data
+                        .shaped_text
+                        .run_slice(line_item.index as u32)
+                        .narrow(line_item.shaped_cluster_range.clone());
+                    for atom in slice.atoms_end().rev() {
+                        let whitespace = atom.characters()[0].whitespace;
+                        let collapse = atom
+                            .shaped_clusters()
+                            .last()
+                            .and_then(|cluster| data.styles.get(usize::from(cluster.style_index)))
+                            .map(|style| style.white_space_collapse);
+                        let is_collapsible = match whitespace {
+                            Whitespace::Newline => true,
+                            Whitespace::Space | Whitespace::Tab => matches!(
+                                collapse,
+                                Some(
+                                    WhiteSpaceCollapse::Collapse
+                                        | WhiteSpaceCollapse::PreserveBreaks
+                                )
+                            ),
+                            _ => false,
+                        };
+                        if !is_collapsible {
+                            break 'items;
+                        }
+                        let (atom_advance, all_hang) = atom_hanging_advance(
+                            slice,
+                            &atom,
+                            &data.styles,
+                            spacing,
+                            line_item.is_rtl(),
+                        );
+                        advance += atom_advance;
+                        if !all_hang {
+                            break 'items;
+                        }
+                    }
+                }
+            }
+        }
+        advance.clamp(0., hanging)
     }
 
     /// Returns an iterator over the glyph runs for the line.
@@ -503,16 +610,19 @@ pub struct SpanFragment {
     /// of the span's font).
     pub descent: f32,
     /// Whether the fragment has the span's start edge: `false` if the span started on an earlier
-    /// line.
+    /// line, or if this is not the first of the span's fragments on the line (in the direction
+    /// of the paragraph).
     pub has_start_edge: bool,
     /// Whether the fragment has the span's end edge: `false` if the span continues on a later
-    /// line.
+    /// line, or if this is not the last of the span's fragments on the line (in the direction
+    /// of the paragraph).
     pub has_end_edge: bool,
     /// Whether the start edge is on the right of the fragment and the end edge on the left,
     /// rather than the other way around.
     ///
-    /// The edges are reordered along with the text next to them, so this is the direction of
-    /// that text. (This differs from CSS, where it is the direction of the span itself.)
+    /// Edges are placed in visual order, in the direction of the paragraph, so this is whether
+    /// the paragraph is right-to-left. (This differs from CSS, where it is the direction of the
+    /// span itself.)
     pub is_rtl: bool,
 }
 

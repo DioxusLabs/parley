@@ -28,6 +28,14 @@ fn span(inline_start: f32, inline_end: f32) -> TextStyle<'static, 'static, Color
     }
 }
 
+/// Like [`span`], but with collapsible whitespace.
+fn collapsing_span(inline_start: f32, inline_end: f32) -> TextStyle<'static, 'static, ColorBrush> {
+    TextStyle {
+        white_space_collapse: WhiteSpaceCollapse::Collapse,
+        ..span(inline_start, inline_end)
+    }
+}
+
 fn build(
     env: &mut TestEnv,
     max_advance: Option<f32>,
@@ -207,7 +215,7 @@ fn span_edges_when_wrapped() {
 
     let layout = build(&mut env, Some(aaa_bbb + 10.), |builder| {
         builder.push_text("aaa ");
-        builder.push_style_span(span(8., 4.));
+        builder.push_style_span(collapsing_span(8., 4.));
         builder.push_text("bbb cccccc ccc");
         builder.pop_style_span();
         builder.push_text(" ddd");
@@ -218,7 +226,7 @@ fn span_edges_when_wrapped() {
     let [first, middle, last] = [fragments[0][0], fragments[1][0], fragments[2][0]];
     assert!(first.has_start_edge && !first.has_end_edge);
     assert_close(first.x, aaa_);
-    // The space the line was wrapped at hangs, and is not part of the fragment.
+    // The collapsible space the line was wrapped at hangs, and is not part of the fragment.
     assert_close(first.advance, 8. + bbb);
 
     assert!(!middle.has_start_edge && !middle.has_end_edge);
@@ -381,6 +389,43 @@ fn empty_span_with_edges() {
     assert_eq!(line_fragments.len(), 1);
     assert_close(line_fragments[0].advance, 12.);
     assert_close(layout.calculate_content_widths().min, 12.);
+}
+
+/// An empty span stays on the same line as the content preceding it, rather than moving to the
+/// next line with the content following it.
+#[test]
+fn empty_span_stays_with_preceding_content() {
+    let mut env = TestEnv::new(test_name!(), None);
+    let aaa_ = width_of(&mut env, "aaa bbb") - width_of(&mut env, "bbb");
+
+    for edge in [0., 2.] {
+        let layout = build(&mut env, Some(aaa_ + 10.), |builder| {
+            builder.push_text("aaa ");
+            builder.push_style_span(span(edge, edge));
+            builder.pop_style_span();
+            builder.push_text("bbb");
+        });
+        assert_eq!(layout.len(), 2);
+        let fragments = fragments(&layout);
+        assert_eq!(fragments[0].len(), 1);
+        assert!(fragments[0][0].has_start_edge && fragments[0][0].has_end_edge);
+        assert!(fragments[1].is_empty());
+        assert_close(item_extents(&layout)[1][0].0, 0.);
+    }
+
+    // Unless it is inside of a span that starts before that content.
+    let layout = build(&mut env, Some(aaa_ + 10.), |builder| {
+        builder.push_text("aaa ");
+        builder.push_style_span(span(2., 2.));
+        builder.push_style_span(span(2., 2.));
+        builder.pop_style_span();
+        builder.push_text("bbb");
+        builder.pop_style_span();
+    });
+    assert_eq!(layout.len(), 2);
+    let fragments = fragments(&layout);
+    assert!(fragments[0].is_empty());
+    assert_eq!(fragments[1].len(), 2);
 }
 
 /// An empty span without edges has a zero-sized fragment where it is in the text.
@@ -559,8 +604,8 @@ fn span_edges_rtl() {
     assert_close(before.1, fragment.x + fragment.advance);
 }
 
-/// Whitespace hanging at the end of a line in a right-to-left paragraph, which is on the left, is
-/// not part of the fragment.
+/// Collapsible whitespace hanging at the end of a line in a right-to-left paragraph, which is on
+/// the left, is not part of the fragment.
 #[test]
 fn span_fragments_exclude_hanging_whitespace_rtl() {
     let mut env = TestEnv::new(test_name!(), None);
@@ -568,7 +613,7 @@ fn span_fragments_exclude_hanging_whitespace_rtl() {
 
     let layout = build(&mut env, Some(word + 10.), |builder| {
         builder.set_base_direction(BaseDirection::Rtl);
-        builder.push_style_span(span(0., 0.));
+        builder.push_style_span(collapsing_span(0., 0.));
         builder.push_text("ررر ررر");
         builder.pop_style_span();
     });
@@ -585,8 +630,47 @@ fn span_fragments_exclude_hanging_whitespace_rtl() {
     assert_close(first.x + first.advance, word + 10.);
 }
 
+/// Preserved whitespace hanging at the end of a line is part of the fragment.
+#[test]
+fn span_fragments_include_preserved_hanging_whitespace() {
+    let mut env = TestEnv::new(test_name!(), None);
+    let aaa = width_of(&mut env, "aaa");
+    let aaa_ = width_of(&mut env, "aaa ");
+
+    let layout = build(&mut env, Some(aaa + 1.), |builder| {
+        builder.push_style_span(span(0., 0.));
+        builder.push_text("aaa aaa");
+        builder.pop_style_span();
+    });
+
+    assert_eq!(layout.len(), 2);
+    let first = fragments(&layout)[0][0];
+    assert_close(first.x, 0.);
+    assert_close(first.advance, aaa_);
+}
+
+/// Hanging whitespace that does not collapse, like the ideographic space, is part of the fragment
+/// even when whitespace is collapsible.
+#[test]
+fn span_fragments_include_hanging_ideographic_space() {
+    let mut env = TestEnv::new(test_name!(), None);
+    let aaa = width_of(&mut env, "aaa");
+    let aaa_ = width_of(&mut env, "aaa\u{3000}");
+
+    let layout = build(&mut env, Some(aaa + 1.), |builder| {
+        builder.push_style_span(collapsing_span(0., 0.));
+        builder.push_text("aaa\u{3000}aaa");
+        builder.pop_style_span();
+    });
+
+    assert_eq!(layout.len(), 2);
+    let first = fragments(&layout)[0][0];
+    assert_close(first.advance, aaa_);
+}
+
 /// Right-to-left text in a left-to-right paragraph keeps its order when part of it is in a span
-/// with edges.
+/// with edges, and the edges are placed in the direction of the paragraph: the start edge on the
+/// left of the span's text and the end edge on its right.
 #[test]
 fn span_edges_in_rtl_text_in_ltr_paragraph() {
     let mut env = TestEnv::new(test_name!(), None);
@@ -600,8 +684,10 @@ fn span_edges_in_rtl_text_in_ltr_paragraph() {
     });
 
     assert!(!layout.is_rtl());
-    let fragment = fragments(&layout)[0][0];
-    assert!(fragment.is_rtl && fragment.has_start_edge && fragment.has_end_edge);
+    let fragments = fragments(&layout);
+    assert_eq!(fragments[0].len(), 1);
+    let fragment = fragments[0][0];
+    assert!(!fragment.is_rtl && fragment.has_start_edge && fragment.has_end_edge);
 
     // The right-to-left text (bytes 2 to 16) is in reverse order, as it is without the span.
     let mut rtl_runs: Vec<_> = runs(&layout)
@@ -612,10 +698,72 @@ fn span_edges_in_rtl_text_in_ltr_paragraph() {
     rtl_runs.sort_by(|a, b| b.1.total_cmp(&a.1));
     assert!(rtl_runs.is_sorted_by_key(|run| run.0));
 
-    // The start edge is on the right of the span's text, and the end edge on the left.
     let inside = *rtl_runs.iter().find(|run| run.0 == 7).unwrap();
-    assert_close(inside.1, fragment.x + 4.);
-    assert_close(fragment.advance, 4. + inside.2 + 8.);
+    assert_close(inside.1, fragment.x + 8.);
+    assert_close(fragment.advance, 8. + inside.2 + 4.);
+}
+
+/// A span whose content is split up by reordering has a fragment for each piece. The start edge
+/// is on the first piece in the direction of the paragraph, and the end edge on the last.
+#[test]
+fn span_split_by_reordering() {
+    let mut env = TestEnv::new(test_name!(), None);
+
+    // Visually: "a ", then the span's right-to-left text, then the right-to-left text before the
+    // span, then the span's left-to-right text.
+    let layout = build(&mut env, None, |builder| {
+        builder.push_text("a دد");
+        builder.push_style_span(span(8., 4.));
+        builder.push_text("رر bb");
+        builder.pop_style_span();
+    });
+
+    let runs = runs(&layout);
+    let run_at = |start: usize| *runs.iter().find(|run| run.0 == start).unwrap();
+    let (a, before, rtl_inside) = (run_at(0), run_at(2), run_at(6));
+    let last = *runs.iter().max_by(|a, b| a.1.total_cmp(&b.1)).unwrap();
+
+    let fragments = fragments(&layout);
+    let [first, second] = fragments[0][..] else {
+        panic!("expected two fragments: {fragments:?}");
+    };
+    assert!(first.has_start_edge && !first.has_end_edge);
+    assert_close(first.x, a.1 + a.2);
+    assert_close(rtl_inside.1, first.x + 8.);
+    assert_close(first.advance, 8. + rtl_inside.2);
+    assert_close(before.1, first.x + first.advance);
+
+    assert!(!second.has_start_edge && second.has_end_edge);
+    assert_close(second.x, before.1 + before.2);
+    assert_close(second.x + second.advance, last.1 + last.2 + 4.);
+    assert_close(layout.full_width(), second.x + second.advance);
+}
+
+/// Bidi control characters in a span, which take up no space and can end up away from the rest of
+/// the span, are not what the edges are placed next to and do not get a fragment of their own.
+#[test]
+fn span_edges_ignore_bidi_controls() {
+    let mut env = TestEnv::new(test_name!(), None);
+
+    // Visually "TEST", then the span with "TEST": the override in the span reverses the text
+    // after it, and puts it after the text that follows the span.
+    let layout = build(&mut env, None, |builder| {
+        builder.push_text("TE");
+        builder.push_style_span(span(8., 4.));
+        builder.push_text("\u{202E}TSET");
+        builder.pop_style_span();
+        builder.push_text("\u{202D}ST");
+    });
+
+    let outside = width_of(&mut env, "TEST");
+    let fragments = fragments(&layout);
+    let [fragment] = fragments[0][..] else {
+        panic!("expected one fragment: {fragments:?}");
+    };
+    assert!(fragment.has_start_edge && fragment.has_end_edge);
+    assert_close(fragment.x, outside);
+    assert_close(fragment.advance, 8. + outside + 4.);
+    assert_close(layout.full_width(), fragment.x + fragment.advance);
 }
 
 /// Text isn't shaped across a non-zero edge.
@@ -692,4 +840,58 @@ fn span_edges_rebreak() {
 
     layout.break_all_lines(Some(40.));
     assert_eq!(fragments(&layout), narrow);
+}
+
+/// Two spans whose content is interleaved by reordering (as in the CSS 2 test `bidi-005a`): each
+/// has its start edge before its leftmost piece and its end edge after its rightmost piece.
+#[test]
+fn interleaved_spans_split_by_reordering() {
+    let mut env = TestEnv::new(test_name!(), None);
+
+    // Visually "abcdefghijklm", with "c", "e" and "j" in the first span and "b", "d", "i" and
+    // "k" in the second.
+    let layout = build(&mut env, None, |builder| {
+        builder.push_text("a\u{202E}l\u{202D}");
+        builder.push_style_span(span(8., 4.));
+        builder.push_text("c\u{202E}j\u{202D}e\u{202E}");
+        builder.pop_style_span();
+        builder.push_text("h\u{202D}g\u{202C}f");
+        builder.push_style_span(span(8., 4.));
+        builder.push_text("\u{202C}i\u{202C}d\u{202C}k\u{202C}b");
+        builder.pop_style_span();
+        builder.push_text("\u{202C}m");
+    });
+
+    let runs = runs(&layout);
+    let run_at = |start: usize| *runs.iter().find(|run| run.0 == start).unwrap();
+    let all_fragments = fragments(&layout);
+    let style_of_first = all_fragments[0][0].style_index;
+    let (first, second): (Vec<SpanFragment>, Vec<SpanFragment>) = all_fragments[0]
+        .iter()
+        .partition(|fragment| fragment.style_index == style_of_first);
+
+    // (start of the text run, has start edge, has end edge)
+    let expected_first = [(8, true, false), (16, false, false), (12, false, true)];
+    let expected_second = [
+        (44, true, false),
+        (36, false, false),
+        (32, false, false),
+        (40, false, true),
+    ];
+    for (fragments, expected) in [
+        (&first, &expected_first[..]),
+        (&second, &expected_second[..]),
+    ] {
+        assert_eq!(fragments.len(), expected.len(), "{fragments:?}");
+        for (fragment, &(run_start, has_start_edge, has_end_edge)) in fragments.iter().zip(expected)
+        {
+            let run = run_at(run_start);
+            assert_eq!(fragment.has_start_edge, has_start_edge);
+            assert_eq!(fragment.has_end_edge, has_end_edge);
+            let start = if has_start_edge { 8. } else { 0. };
+            let end = if has_end_edge { 4. } else { 0. };
+            assert_close(fragment.x + start, run.1);
+            assert_close(fragment.advance, start + run.2 + end);
+        }
+    }
 }
