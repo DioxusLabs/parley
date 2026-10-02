@@ -234,7 +234,7 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) inline_boxes: Vec<LayoutInlineBox>,
     /// The span boxes of the layout. See [`crate::span_box`].
     pub(crate) span_boxes: Vec<LayoutSpanBox>,
-    /// The closest enclosing span box of each style, or [`NO_SPAN_BOX`](crate::span_box::NO_SPAN_BOX).
+    /// The closest enclosing span box of each style, or [`NO_SPAN_BOX`].
     pub(crate) style_span_boxes: Vec<u32>,
 
     // Output of shaping (input to line breaking)
