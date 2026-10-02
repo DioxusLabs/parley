@@ -7,11 +7,13 @@ use crate::layout::data::{LayoutItemKind, LineData};
 use crate::layout::layout::Layout;
 use crate::layout::run::Run;
 use crate::layout::spacing::EffectiveSpacing;
+use crate::span_box::{LayoutSpanBox, NO_SPAN_BOX};
 use crate::style::Brush;
 use crate::{BaselineShift, InlineBox, InlineBoxKind};
 
 use core::ops::Range;
 use parley_engine::{Atom, Atoms, Glyph};
+use smallvec::SmallVec;
 
 /// Line in a text layout.
 #[derive(Copy, Clone)]
@@ -67,6 +69,9 @@ impl<'a, B: Brush> Line<'a, B> {
             }),
             LayoutItemKind::InlineBox => {
                 LineItem::InlineBox(&self.layout.data.inline_boxes.get(item.index)?.inline_box)
+            }
+            LayoutItemKind::SpanStart | LayoutItemKind::SpanEnd => {
+                LineItem::SpanEdge(self.layout.data.span_edge_advance(item.kind, item.index))
             }
         })
     }
@@ -135,7 +140,190 @@ impl<'a, B: Brush> Line<'a, B> {
                 LayoutItemKind::InlineBox => {
                     LineItem::InlineBox(&copy.layout.data.inline_boxes[line_data.index].inline_box)
                 }
+                LayoutItemKind::SpanStart | LayoutItemKind::SpanEnd => LineItem::SpanEdge(
+                    copy.layout
+                        .data
+                        .span_edge_advance(line_data.kind, line_data.index),
+                ),
             })
+    }
+
+    /// Returns the fragments of the span boxes on the line: for each style span pushed with
+    /// [`TreeBuilder::push_style_span`](crate::TreeBuilder::push_style_span) that has content or
+    /// an edge on the line, the inline-axis extent of the part of it that is on this line.
+    ///
+    /// Fragments are in the order their spans were pushed, so a span's fragment always comes
+    /// after those of the spans enclosing it.
+    ///
+    /// Note that if a span's content is split up by bidirectional reordering, its fragment is the
+    /// union of the pieces.
+    ///
+    /// The cost of this function is linear in the amount of content on the line.
+    pub fn span_fragments(&self) -> impl Iterator<Item = SpanFragment> + use<B> {
+        self.collect_span_fragments().into_iter()
+    }
+
+    fn collect_span_fragments(&self) -> SmallVec<[SpanFragment; 8]> {
+        let data = &self.layout.data;
+        let mut fragments = SmallVec::<[SpanFragment; 8]>::new();
+        if data.span_boxes.is_empty() {
+            return fragments;
+        }
+
+        // The span boxes with a fragment on the line, with the extent of the content found so far
+        // and the positions of the outer side of their left and right edges, if on the line.
+        struct Extent {
+            span_box: u32,
+            min: f32,
+            max: f32,
+            left_edge: Option<f32>,
+            right_edge: Option<f32>,
+            has_start_edge: bool,
+            has_end_edge: bool,
+            is_rtl: bool,
+        }
+        let mut extents = SmallVec::<[Extent; 8]>::new();
+        // Grows the extent of `span_box` and all span boxes enclosing it to include `x0..x1`.
+        // Returns the index of `span_box`'s entry.
+        fn grow(
+            extents: &mut SmallVec<[Extent; 8]>,
+            span_boxes: &[LayoutSpanBox],
+            mut span_box: u32,
+            x0: f32,
+            x1: f32,
+        ) -> Option<usize> {
+            let (min, max) = (x0.min(x1), x0.max(x1));
+            let mut first = None;
+            while span_box != NO_SPAN_BOX {
+                let index = match extents.iter().rposition(|e| e.span_box == span_box) {
+                    Some(index) => {
+                        let extent = &mut extents[index];
+                        extent.min = extent.min.min(min);
+                        extent.max = extent.max.max(max);
+                        index
+                    }
+                    None => {
+                        extents.push(Extent {
+                            span_box,
+                            min,
+                            max,
+                            left_edge: None,
+                            right_edge: None,
+                            has_start_edge: false,
+                            has_end_edge: false,
+                            is_rtl: false,
+                        });
+                        extents.len() - 1
+                    }
+                };
+                first.get_or_insert(index);
+                span_box = span_boxes[span_box as usize].parent;
+            }
+            first
+        }
+        let style_span_box = |style_index: u16| {
+            data.style_span_boxes
+                .get(usize::from(style_index))
+                .copied()
+                .unwrap_or(NO_SPAN_BOX)
+        };
+
+        let mut x = self.data.metrics.inline_min_coord + self.data.metrics.offset;
+        let line_items = &data.line_items[self.data.item_range.clone()];
+        for (item_index, line_item) in line_items.iter().enumerate() {
+            match line_item.kind {
+                LayoutItemKind::TextRun => {
+                    let Some(LineItem::Run(run)) = self.item(item_index) else {
+                        continue;
+                    };
+                    // Consecutive clusters of the same style are added in one go.
+                    let mut piece: Option<(u16, f32)> = None;
+                    for cluster in run.visual_clusters() {
+                        let style_index = cluster.style_index();
+                        match piece {
+                            Some((piece_style, _)) if piece_style == style_index => {}
+                            Some((piece_style, piece_start)) => {
+                                let span_box = style_span_box(piece_style);
+                                grow(&mut extents, &data.span_boxes, span_box, piece_start, x);
+                                piece = Some((style_index, x));
+                            }
+                            None => piece = Some((style_index, x)),
+                        }
+                        x += cluster.advance();
+                    }
+                    if let Some((piece_style, piece_start)) = piece {
+                        let span_box = style_span_box(piece_style);
+                        grow(&mut extents, &data.span_boxes, span_box, piece_start, x);
+                    }
+                }
+                LayoutItemKind::InlineBox => {
+                    let layout_box = &data.inline_boxes[line_item.index];
+                    if layout_box.inline_box.kind == InlineBoxKind::InFlow {
+                        let span_box = style_span_box(layout_box.parent_style_index);
+                        let end = x + layout_box.inline_box.width;
+                        grow(&mut extents, &data.span_boxes, span_box, x, end);
+                        x = end;
+                    }
+                }
+                LayoutItemKind::SpanStart | LayoutItemKind::SpanEnd => {
+                    let end = x + data.span_edge_advance(line_item.kind, line_item.index);
+                    let span_box = line_item.index as u32;
+                    if let Some(index) = grow(&mut extents, &data.span_boxes, span_box, x, end) {
+                        let extent = &mut extents[index];
+                        let is_start = line_item.kind == LayoutItemKind::SpanStart;
+                        // The outer side of the edge is the side away from the span's content.
+                        if is_start != line_item.is_rtl() {
+                            extent.left_edge = Some(x);
+                        } else {
+                            extent.right_edge = Some(end);
+                        }
+                        if is_start {
+                            extent.has_start_edge = true;
+                            extent.is_rtl = line_item.is_rtl();
+                        } else {
+                            if !extent.has_start_edge {
+                                extent.is_rtl = line_item.is_rtl();
+                            }
+                            extent.has_end_edge = true;
+                        }
+                    }
+                    x = end;
+                }
+            }
+        }
+
+        extents.sort_unstable_by_key(|extent| extent.span_box);
+        let line_text_range = &self.data.text_range;
+        fragments.extend(extents.iter().map(|extent| {
+            let span_box = &data.span_boxes[extent.span_box as usize];
+            let (has_start_edge, has_end_edge, is_rtl) = if span_box.has_edge_items {
+                (extent.has_start_edge, extent.has_end_edge, extent.is_rtl)
+            } else {
+                (
+                    span_box.text_range.start >= line_text_range.start,
+                    span_box.text_range.end <= line_text_range.end,
+                    data.base_level.is_rtl(),
+                )
+            };
+            let start = extent.left_edge.unwrap_or(extent.min);
+            let end = extent.right_edge.unwrap_or(extent.max);
+            let (ascent, descent) = data
+                .style_metrics
+                .get(usize::from(span_box.style_index))
+                .map_or((0., 0.), |metrics| (metrics.ascent, metrics.descent));
+            SpanFragment {
+                style_index: span_box.style_index,
+                x: start,
+                advance: end - start,
+                baseline: self.style_baseline(span_box.style_index),
+                ascent,
+                descent,
+                has_start_edge,
+                has_end_edge,
+                is_rtl,
+            }
+        }));
+        fragments
     }
 
     /// Returns an iterator over the glyph runs for the line.
@@ -241,11 +429,13 @@ impl LineMetrics {
     }
 }
 
-/// A line item and its corresponding data (a run or inline box). Unlike a
-/// [`PositionedLayoutItem`], runs are not guaranteed to be split by style.
+/// A line item and its corresponding data (a run, an inline box, or an edge of a span box).
+/// Unlike a [`PositionedLayoutItem`], runs are not guaranteed to be split by style.
 pub(crate) enum LineItem<'a, B: Brush> {
     Run(Run<'a, B>),
     InlineBox(&'a InlineBox),
+    /// An edge of a [span box](crate::span_box), with its advance.
+    SpanEdge(f32),
 }
 
 impl<'a, B: Brush> LineItem<'a, B> {
@@ -262,6 +452,47 @@ impl<'a, B: Brush> LineItem<'a, B> {
 pub enum PositionedLayoutItem<'a, B: Brush> {
     GlyphRun(GlyphRun<'a, B>),
     InlineBox(PositionedInlineBox),
+}
+
+/// The part of a span box that is on one line.
+///
+/// Every style span pushed with
+/// [`TreeBuilder::push_style_span`](crate::TreeBuilder::push_style_span) generates a span box,
+/// which is broken into one fragment per line the span has content on. See
+/// [`Line::span_fragments`].
+///
+/// The fragment only describes the span box along the inline axis and the position of its
+/// baseline and content area; following CSS, any block-axis padding and border do not take part
+/// in layout and can be added around the content area by the caller.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpanFragment {
+    /// The index of the span's style in [`Layout::styles`].
+    pub style_index: u16,
+    /// The inline-axis coordinate of the fragment's left side, including its edge (see
+    /// [`TextStyle::inline_start`](crate::TextStyle::inline_start)) if it has one on that side.
+    pub x: f32,
+    /// The inline-axis size of the fragment, including its edges.
+    pub advance: f32,
+    /// The block-axis coordinate of the baseline of the span box.
+    pub baseline: f32,
+    /// The distance from the baseline to the top of the span box's content area (the ascent of
+    /// the span's font).
+    pub ascent: f32,
+    /// The distance from the baseline to the bottom of the span box's content area (the descent
+    /// of the span's font).
+    pub descent: f32,
+    /// Whether the fragment has the span's start edge: `false` if the span started on an earlier
+    /// line.
+    pub has_start_edge: bool,
+    /// Whether the fragment has the span's end edge: `false` if the span continues on a later
+    /// line.
+    pub has_end_edge: bool,
+    /// Whether the start edge is on the right of the fragment and the end edge on the left,
+    /// rather than the other way around.
+    ///
+    /// The edges are reordered along with the text next to them, so this is the direction of
+    /// that text. (This differs from CSS, where it is the direction of the span itself.)
+    pub is_rtl: bool,
 }
 
 /// The computed position of an inline box within a layout
@@ -430,6 +661,10 @@ impl<'a, B: Brush> Iterator for GlyphRunIter<'a, B> {
         loop {
             let item = self.line.item(self.item_index)?;
             match item {
+                LineItem::SpanEdge(advance) => {
+                    self.item_index += 1;
+                    self.offset += advance;
+                }
                 LineItem::InlineBox(inline_box) => {
                     let x = self.offset
                         + self.line.data.metrics.inline_min_coord

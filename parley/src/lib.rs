@@ -115,6 +115,7 @@ mod font;
 mod inline_box;
 mod resolve;
 mod shape;
+mod span_box;
 mod util;
 
 pub mod editing;

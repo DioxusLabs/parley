@@ -6,4 +6,5 @@ mod font_selection;
 mod font_shaping;
 mod interactions;
 mod spacing;
+mod span_edges;
 mod vertical_align;

@@ -7,6 +7,7 @@ use crate::layout::style_metrics::{BoxMetrics, StyleMetrics};
 use crate::layout::whitespace::whitespace_hangs;
 use crate::layout::{ContentWidths, LineMetrics, Style};
 use crate::resolve::ResolvedStyle;
+use crate::span_box::{InlineItem, LayoutSpanBox, SpanEdge};
 use crate::style::Brush;
 use crate::{
     IndentOptions, InlineBoxKind, LineHeight, OverflowWrap, TextWrapMode, WhiteSpaceCollapse,
@@ -178,10 +179,31 @@ impl LineItemData {
     }
 }
 
+/// The bidi level of an edge of a span box between runs of the given levels (`None` at the start
+/// and end of the paragraph, which have the paragraph's level `base_level`).
+///
+/// This is the lower of the two levels. An edge between text of a single direction is then
+/// reordered together with that text, so that it stays between the same characters, and an edge
+/// where the direction changes stays on the side of the text with the lower level, as a neutral
+/// character would.
+pub(crate) fn span_edge_bidi_level(
+    before: Option<BidiLevel>,
+    after: Option<BidiLevel>,
+    base_level: BidiLevel,
+) -> BidiLevel {
+    let before = before.unwrap_or(base_level);
+    let after = after.unwrap_or(base_level);
+    before.min(after)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LayoutItemKind {
     TextRun,
     InlineBox,
+    /// The start edge of a [span box](crate::span_box).
+    SpanStart,
+    /// The end edge of a [span box](crate::span_box).
+    SpanEnd,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -210,6 +232,10 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) styles: Vec<Style<B>>,
     pub(crate) style_metrics: Vec<StyleMetrics>,
     pub(crate) inline_boxes: Vec<LayoutInlineBox>,
+    /// The span boxes of the layout. See [`crate::span_box`].
+    pub(crate) span_boxes: Vec<LayoutSpanBox>,
+    /// The closest enclosing span box of each style, or [`NO_SPAN_BOX`](crate::span_box::NO_SPAN_BOX).
+    pub(crate) style_span_boxes: Vec<u32>,
 
     // Output of shaping (input to line breaking)
     pub(crate) shaped_text: ShapedText,
@@ -257,6 +283,8 @@ impl<B: Brush> Default for LayoutData<B> {
             styles: Vec::new(),
             style_metrics: Vec::new(),
             inline_boxes: Vec::new(),
+            span_boxes: Vec::new(),
+            style_span_boxes: Vec::new(),
             shaped_text: ShapedText::new(),
             runs: Vec::new(),
             items: Vec::new(),
@@ -286,6 +314,8 @@ impl<B: Brush> LayoutData<B> {
         self.styles.clear();
         self.style_metrics.clear();
         self.inline_boxes.clear();
+        self.span_boxes.clear();
+        self.style_span_boxes.clear();
         self.shaped_text.clear();
         self.runs.clear();
         self.items.clear();
@@ -295,12 +325,40 @@ impl<B: Brush> LayoutData<B> {
         self.alignment = None;
     }
 
-    /// Push an inline box to the list of items
-    pub(crate) fn push_inline_box(&mut self, index: usize, bidi_level: BidiLevel) {
-        self.items.push(LayoutItem {
-            kind: LayoutItemKind::InlineBox,
-            index,
-            bidi_level,
+    /// The advance of the edge of span box `index` that an item of the given kind stands for.
+    #[inline]
+    pub(crate) fn span_edge_advance(&self, kind: LayoutItemKind, index: usize) -> f32 {
+        let span_box = &self.span_boxes[index];
+        match kind {
+            LayoutItemKind::SpanStart => span_box.inline_start,
+            _ => span_box.inline_end,
+        }
+    }
+
+    /// Push an inline box or an edge of a span box to the list of items.
+    ///
+    /// `bidi_level` is the level given to inline boxes, and `edge_bidi_level` the one given to
+    /// the edges of span boxes (see [`span_edge_bidi_level`]).
+    pub(crate) fn push_inline_item(
+        &mut self,
+        item: InlineItem,
+        bidi_level: BidiLevel,
+        edge_bidi_level: BidiLevel,
+    ) {
+        self.items.push(match item {
+            InlineItem::InlineBox(index) => LayoutItem {
+                kind: LayoutItemKind::InlineBox,
+                index,
+                bidi_level,
+            },
+            InlineItem::SpanEdge(span_box, edge) => LayoutItem {
+                kind: match edge {
+                    SpanEdge::Start => LayoutItemKind::SpanStart,
+                    SpanEdge::End => LayoutItemKind::SpanEnd,
+                },
+                index: span_box as usize,
+                bidi_level: edge_bidi_level,
+            },
         });
     }
     /// Processes a shaped run into [`RunData`] and a [`LayoutItem`].
@@ -502,6 +560,16 @@ impl ContentWidthsMeasurer {
                 }
                 LayoutItemKind::InlineBox => {
                     self.measure_inline_box(&layout_data.inline_boxes[item.index].inline_box);
+                }
+                LayoutItemKind::SpanStart | LayoutItemKind::SpanEnd => {
+                    // The edges of a span box are not soft wrap opportunities.
+                    let advance = layout_data.span_edge_advance(item.kind, item.index);
+                    if advance != 0. {
+                        // Whitespace before a non-zero edge is not at the end of the line.
+                        self.running_hanging_whitespace = 0.0;
+                        self.running_min_width += advance;
+                        self.running_max_width += advance;
+                    }
                 }
             }
         }

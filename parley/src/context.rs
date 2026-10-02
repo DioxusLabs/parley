@@ -17,6 +17,7 @@ use super::style::{Brush, TextStyle};
 
 use crate::builder::TreeBuilder;
 use crate::inline_box::LayoutInlineBox;
+use crate::span_box::{InlineItem, LayoutSpanBox, SpanBoundary};
 
 /// Shared scratch space used when constructing text layouts.
 ///
@@ -26,6 +27,14 @@ pub struct LayoutContext<B: Brush = [u8; 4]> {
     pub(crate) style_table: Vec<ResolvedStyle<B>>,
     pub(crate) style_runs: Vec<StyleRun>,
     pub(crate) inline_boxes: Vec<LayoutInlineBox>,
+    /// The span boxes of the layout being built. See [`crate::span_box`].
+    pub(crate) span_boxes: Vec<LayoutSpanBox>,
+    /// The positions of the edges of the span boxes that have edge items, in text order.
+    pub(crate) span_boundaries: Vec<SpanBoundary>,
+    /// The closest enclosing span box of each style in the style table.
+    pub(crate) style_span_boxes: Vec<u32>,
+    /// Inline boxes and span box edges in layout order, with their text indices.
+    pub(crate) inline_items: Vec<(usize, InlineItem)>,
 
     // Reusable text analysis
     pub(crate) analyzer: Analyzer,
@@ -52,6 +61,10 @@ impl<B: Brush> LayoutContext<B> {
             style_table: vec![],
             style_runs: vec![],
             inline_boxes: vec![],
+            span_boxes: vec![],
+            span_boundaries: vec![],
+            style_span_boxes: vec![],
+            inline_items: vec![],
             analyzer: Analyzer::new(),
             analysis: Analysis::new(),
             line_break: Vec::new(),
@@ -188,6 +201,10 @@ impl<B: Brush> LayoutContext<B> {
         self.style_table.clear();
         self.style_runs.clear();
         self.inline_boxes.clear();
+        self.span_boxes.clear();
+        self.span_boundaries.clear();
+        self.style_span_boxes.clear();
+        self.inline_items.clear();
     }
 }
 
