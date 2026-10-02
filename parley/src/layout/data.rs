@@ -176,6 +176,27 @@ impl LineItemData {
     pub(crate) fn is_rtl(&self) -> bool {
         self.bidi_level.is_rtl()
     }
+
+    /// Split this text run item in two at the shaped cluster with index `at`: this item keeps the
+    /// clusters before `at`, and the returned item has the clusters from `at` on.
+    ///
+    /// `slice` is this item's slice of shaped text. `at` must be an atom boundary strictly inside
+    /// of this item, so that neither of the two items is empty.
+    pub(crate) fn split_off(&mut self, slice: ShapedSlice<'_>, at: u32) -> Self {
+        debug_assert_eq!(self.kind, LayoutItemKind::TextRun);
+        debug_assert!(self.shaped_cluster_range.start < at && at < self.shaped_cluster_range.end);
+
+        let tail_clusters = at..self.shaped_cluster_range.end;
+        let tail_text = slice.text_byte_range(slice.narrow(tail_clusters.clone()).char_range());
+        let tail = Self {
+            text_range: tail_text.clone(),
+            shaped_cluster_range: tail_clusters,
+            ..self.clone()
+        };
+        self.shaped_cluster_range.end = at;
+        self.text_range.end = tail_text.start;
+        tail
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
