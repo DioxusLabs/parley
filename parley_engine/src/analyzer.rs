@@ -3,7 +3,10 @@
 
 //! The analyzer API.
 
+use alloc::vec::Vec;
 use core::ops::Range;
+
+use icu_properties::props::BidiClass;
 
 use parlance::{BaseDirection, Language, LineBreak, WordBreak};
 
@@ -15,6 +18,8 @@ use crate::analysis::{Analysis, analyze_text};
 #[derive(Default)]
 pub struct Analyzer {
     pub(crate) bidi: BidiResolver,
+    /// Per-character bidi classes collected during analysis, fed to [`BidiResolver`].
+    pub(crate) bidi_classes: Vec<BidiClass>,
 }
 
 impl core::fmt::Debug for Analyzer {

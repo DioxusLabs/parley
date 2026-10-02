@@ -14,7 +14,9 @@ use icu_normalizer::properties::{
     CanonicalComposition, CanonicalCompositionBorrowed, CanonicalDecomposition,
     CanonicalDecompositionBorrowed,
 };
-use icu_properties::props::{BidiMirroringGlyph, GeneralCategory, GraphemeClusterBreak, Script};
+use icu_properties::props::{
+    BidiClass, BidiMirroringGlyph, GeneralCategory, GraphemeClusterBreak, Script,
+};
 use icu_properties::{
     CodePointMapData, CodePointMapDataBorrowed, PropertyNamesShort, PropertyNamesShortBorrowed,
 };
@@ -765,6 +767,9 @@ pub(crate) fn analyze_text(
 
     let mut needs_bidi_resolution = false;
 
+    let bidi_classes = &mut analyzer.bidi_classes;
+    bidi_classes.clear();
+    bidi_classes.reserve(text.len());
     analysis.info.reserve(text.len());
     for (is_soft_wrap_opportunity, is_word, is_grapheme_start, ch, properties) in boundary_iter {
         let script = properties.script();
@@ -789,6 +794,7 @@ pub(crate) fn analyze_text(
         };
 
         needs_bidi_resolution |= bidi::needs_bidi_resolution(bidi_class);
+        bidi_classes.push(bidi_class);
 
         analysis.info.push(CharInfo::new(
             script,
@@ -809,13 +815,20 @@ pub(crate) fn analyze_text(
     }
 
     if needs_bidi_resolution || options.base_direction == BaseDirection::Rtl {
+        let brackets = data_sources.brackets();
         analyzer.bidi.resolve(
-            text.chars().map(|ch| {
-                let bidi_class = data_sources.properties(ch).bidi_class();
-                // TODO: maybe extend Properties to u64 to fit BidiMirroringGlyph
-                let bracket = data_sources.brackets().get(ch);
-                (ch, (bidi_class, bracket))
-            }),
+            text.chars()
+                .zip(analyzer.bidi_classes.iter().copied())
+                .map(|(ch, bidi_class)| {
+                    // Only characters with a Bidi_Class of ON can be paired brackets
+                    // (see `bidi::test::paired_brackets_are_other_neutral`).
+                    let bracket = if bidi_class == BidiClass::OtherNeutral {
+                        brackets.get(ch)
+                    } else {
+                        BidiMirroringGlyph::default()
+                    };
+                    (ch, (bidi_class, bracket))
+                }),
             options.base_direction,
         );
         core::mem::swap(&mut analysis.levels, &mut analyzer.bidi.levels);
