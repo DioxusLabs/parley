@@ -438,6 +438,20 @@ fn trailing_whitespace_resets_to_paragraph_level() {
             "{test_case_name}: {ws_text:?}"
         );
         nearly_eq(ws.advance(), metrics.hanging_advance);
+        // The whitespace is laid out in the paragraph's direction, rather than in that of the text
+        // it was shaped with.
+        let is_rtl = direction == BaseDirection::Rtl;
+        assert_eq!(ws.run().is_rtl(), is_rtl, "{test_case_name}");
+        assert_eq!(ink.run().is_rtl(), !is_rtl, "{test_case_name}");
+        let mut ws_starts: Vec<_> = ws
+            .run()
+            .visual_clusters()
+            .map(|cluster| cluster.text_range().start)
+            .collect();
+        if is_rtl {
+            ws_starts.reverse();
+        }
+        assert!(ws_starts.is_sorted(), "{test_case_name}: {ws_starts:?}");
         if direction == BaseDirection::Rtl {
             nearly_eq(ws.offset() + ws.advance(), ink.offset());
             nearly_eq(ink.offset() + ink.advance(), width);
