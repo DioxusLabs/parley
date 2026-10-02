@@ -158,6 +158,8 @@ impl<'a, B: Brush> Line<'a, B> {
     /// Note that if a span's content is split up by bidirectional reordering, its fragment is the
     /// union of the pieces.
     ///
+    /// Fragments do not include whitespace that hangs past the end of the line.
+    ///
     /// The cost of this function is linear in the amount of content on the line.
     pub fn span_fragments(&self) -> impl Iterator<Item = SpanFragment> + use<B> {
         self.collect_span_fragments().into_iter()
@@ -289,6 +291,25 @@ impl<'a, B: Brush> Line<'a, B> {
                     }
                     x = end;
                 }
+            }
+        }
+
+        // Whitespace hanging past the end of the line is not part of any fragment. It is at the
+        // end of the line in the paragraph's direction.
+        let line_start = self.data.metrics.inline_min_coord + self.data.metrics.offset;
+        let hanging = self.data.metrics.hanging_advance.max(0.);
+        let (content_start, content_end) = if data.base_level.is_rtl() {
+            ((line_start + hanging).min(x), x)
+        } else {
+            (line_start, (x - hanging).max(line_start))
+        };
+        if hanging != 0. {
+            let clamp = |coord: f32| coord.clamp(content_start, content_end);
+            for extent in &mut extents {
+                extent.min = clamp(extent.min);
+                extent.max = clamp(extent.max);
+                extent.left_edge = extent.left_edge.map(clamp);
+                extent.right_edge = extent.right_edge.map(clamp);
             }
         }
 

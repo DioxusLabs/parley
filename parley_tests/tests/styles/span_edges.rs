@@ -218,10 +218,12 @@ fn span_edges_when_wrapped() {
     let [first, middle, last] = [fragments[0][0], fragments[1][0], fragments[2][0]];
     assert!(first.has_start_edge && !first.has_end_edge);
     assert_close(first.x, aaa_);
-    assert!(first.advance >= 8. + bbb);
+    // The space the line was wrapped at hangs, and is not part of the fragment.
+    assert_close(first.advance, 8. + bbb);
 
     assert!(!middle.has_start_edge && !middle.has_end_edge);
     assert_close(middle.x, 0.);
+    assert_close(middle.advance, width_of(&mut env, "cccccc"));
 
     assert!(!last.has_start_edge && last.has_end_edge);
     assert_close(last.x, 0.);
@@ -555,6 +557,32 @@ fn span_edges_rtl() {
     assert_close(inside.1, fragment.x + 4.);
     assert_close(fragment.advance, 4. + inside.2 + 8.);
     assert_close(before.1, fragment.x + fragment.advance);
+}
+
+/// Whitespace hanging at the end of a line in a right-to-left paragraph, which is on the left, is
+/// not part of the fragment.
+#[test]
+fn span_fragments_exclude_hanging_whitespace_rtl() {
+    let mut env = TestEnv::new(test_name!(), None);
+    let word = width_of(&mut env, "ررر");
+
+    let layout = build(&mut env, Some(word + 10.), |builder| {
+        builder.set_base_direction(BaseDirection::Rtl);
+        builder.push_style_span(span(0., 0.));
+        builder.push_text("ررر ررر");
+        builder.pop_style_span();
+    });
+
+    assert_eq!(layout.len(), 2);
+    let fragments = fragments(&layout);
+    let (first, last) = (fragments[0][0], fragments[1][0]);
+    assert_close(first.advance, word);
+    assert_close(last.advance, word);
+    // The hanging space is the leftmost glyph run on the first line: the fragment starts where
+    // it ends.
+    let space_run = runs(&layout)[0];
+    assert_close(space_run.1 + space_run.2, first.x);
+    assert_close(first.x + first.advance, word + 10.);
 }
 
 /// Right-to-left text in a left-to-right paragraph keeps its order when part of it is in a span
