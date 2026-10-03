@@ -450,7 +450,13 @@ impl Inner {
                 #[allow(unused_mut)]
                 let mut system = system.fonts.lock().unwrap();
                 if let Some(family) = system.fallback(selector) {
-                    self.data.fallbacks.set(selector, core::iter::once(family));
+                    if !self.data.fallbacks.set(selector, core::iter::once(family)) {
+                        // The script and locale pair isn't tracked by the fallback map (e.g.
+                        // `Latn` with any locale). Such keys carry no locale and are looked
+                        // up under the script's default entry, so store the family there to
+                        // avoid querying the system again on every lookup.
+                        self.data.fallbacks.set(script, core::iter::once(family));
+                    }
                     self.fallback_cache.set(script, lang_key, &[family]);
                 }
             }
