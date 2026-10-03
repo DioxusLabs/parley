@@ -3,17 +3,15 @@
 
 use crate::layout::Style;
 use crate::layout::data::BreakReason;
-use crate::layout::data::{LayoutItemKind, LineData, LineItemData};
+use crate::layout::data::{LayoutItemKind, LineData};
 use crate::layout::layout::Layout;
 use crate::layout::run::Run;
-use crate::layout::spacing::{EffectiveSpacing, Justification};
-use crate::layout::whitespace::atom_hanging_advance;
+use crate::layout::spacing::EffectiveSpacing;
 use crate::span_box::NO_SPAN_BOX;
 use crate::style::Brush;
-use crate::{BaselineShift, InlineBox, InlineBoxKind, WhiteSpaceCollapse};
+use crate::{BaselineShift, InlineBox, InlineBoxKind};
 
 use core::ops::Range;
-use parley_engine::shape::Whitespace;
 use parley_engine::{Atom, Atoms, Glyph};
 use smallvec::SmallVec;
 
@@ -291,7 +289,7 @@ impl<'a, B: Brush> Line<'a, B> {
         // Collapsible whitespace hanging past the end of the line is not part of any fragment
         // (preserved whitespace is). It is at the end of the line in the paragraph's direction.
         let is_rtl = data.base_level.is_rtl();
-        let hanging = self.collapsible_hanging_advance();
+        let hanging = self.data.metrics.collapsible_hanging_advance;
         if hanging != 0. {
             let (content_start, content_end) = if is_rtl {
                 ((line_start + hanging).min(x), x)
@@ -370,88 +368,6 @@ impl<'a, B: Brush> Line<'a, B> {
             });
         }
         fragments
-    }
-
-    /// The advance of the collapsible whitespace hanging at the end of the line.
-    ///
-    /// This leaves out hanging whitespace that is preserved or that does not collapse, like the
-    /// ideographic space, and collapsible whitespace before it.
-    fn collapsible_hanging_advance(&self) -> f32 {
-        let data = &self.layout.data;
-        let hanging = self.data.metrics.hanging_advance.max(0.);
-        if hanging == 0. {
-            return 0.;
-        }
-        let line_items = &data.line_items[self.data.item_range.clone()];
-        // Hanging whitespace is at the end of the line in the paragraph's direction.
-        let (mut forward, mut backward);
-        let items: &mut dyn Iterator<Item = &LineItemData> = if data.base_level.is_rtl() {
-            forward = line_items.iter();
-            &mut forward
-        } else {
-            backward = line_items.iter().rev();
-            &mut backward
-        };
-        let mut advance = 0.;
-        'items: for line_item in items {
-            match line_item.kind {
-                LayoutItemKind::InlineBox => {
-                    let inline_box = &data.inline_boxes[line_item.index].inline_box;
-                    if inline_box.kind == InlineBoxKind::InFlow {
-                        break;
-                    }
-                }
-                LayoutItemKind::SpanStart | LayoutItemKind::SpanEnd => {
-                    if data.span_edge_advance(line_item.kind, line_item.index) != 0. {
-                        break;
-                    }
-                }
-                LayoutItemKind::TextRun => {
-                    let spacing = EffectiveSpacing::new(
-                        data.runs[line_item.index].spacing,
-                        Justification::NONE,
-                    );
-                    let slice = data
-                        .shaped_text
-                        .run_slice(line_item.index as u32)
-                        .narrow(line_item.shaped_cluster_range.clone());
-                    for atom in slice.atoms_end().rev() {
-                        let whitespace = atom.characters()[0].whitespace;
-                        let collapse = atom
-                            .shaped_clusters()
-                            .last()
-                            .and_then(|cluster| data.styles.get(usize::from(cluster.style_index)))
-                            .map(|style| style.white_space_collapse);
-                        let is_collapsible = match whitespace {
-                            Whitespace::Newline => true,
-                            Whitespace::Space | Whitespace::Tab => matches!(
-                                collapse,
-                                Some(
-                                    WhiteSpaceCollapse::Collapse
-                                        | WhiteSpaceCollapse::PreserveBreaks
-                                )
-                            ),
-                            _ => false,
-                        };
-                        if !is_collapsible {
-                            break 'items;
-                        }
-                        let (atom_advance, all_hang) = atom_hanging_advance(
-                            slice,
-                            &atom,
-                            &data.styles,
-                            spacing,
-                            line_item.is_rtl(),
-                        );
-                        advance += atom_advance;
-                        if !all_hang {
-                            break 'items;
-                        }
-                    }
-                }
-            }
-        }
-        advance.clamp(0., hanging)
     }
 
     /// Returns an iterator over the glyph runs for the line.
