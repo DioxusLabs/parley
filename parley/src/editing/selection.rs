@@ -588,6 +588,14 @@ impl Selection {
                                 }
                             }
                         }
+                        LineItem::SpanEdge(advance) => {
+                            box_advance += advance as f64;
+                            if !have_seen_any_runs {
+                                cur_x += box_advance;
+                                box_advance = 0.0;
+                                start_x = cur_x;
+                            }
+                        }
                         LineItem::InlineBox(inline_box) => {
                             box_advance += inline_box.width as f64;
                             // HACK: Don't display selections for inline boxes

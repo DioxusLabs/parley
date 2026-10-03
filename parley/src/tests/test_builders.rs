@@ -229,6 +229,9 @@ fn create_root_style() -> TextStyle<'static, 'static, ColorBrush> {
         // Parent-relative, so it compounds through nested tree spans but not through ranged
         // styles; keep it at the default so both builders agree.
         vertical_align: VerticalAlign::BASELINE,
+        // Only supported by the tree builder, and not on the root style.
+        inline_start: 0.,
+        inline_end: 0.,
         word_spacing: 2.,
         letter_spacing: 1.5,
         word_break: WordBreak::BreakAll,

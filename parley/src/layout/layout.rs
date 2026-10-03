@@ -173,6 +173,28 @@ impl<B: Brush> Layout<B> {
         self.data.inline_boxes.iter_mut().map(|b| &mut b.inline_box)
     }
 
+    /// Mutable access to the edges of the span boxes that have one (see
+    /// [`TextStyle::inline_start`](crate::TextStyle::inline_start)), in the order their spans
+    /// were pushed.
+    ///
+    /// This allows the size of the edges to be changed without rebuilding the layout, e.g. for
+    /// CSS padding given as a percentage of the available width. Changes take effect the next
+    /// time lines are broken.
+    ///
+    /// Only span boxes that were built with a non-zero edge, or that have no content, are
+    /// included: other spans have no edges to resize.
+    pub fn span_edges_mut(&mut self) -> impl Iterator<Item = SpanEdgesMut<'_>> + '_ {
+        self.data
+            .span_boxes
+            .iter_mut()
+            .filter(|span_box| span_box.has_edge_items)
+            .map(|span_box| SpanEdgesMut {
+                style_index: span_box.style_index,
+                inline_start: &mut span_box.inline_start,
+                inline_end: &mut span_box.inline_end,
+            })
+    }
+
     /// Returns an iterator over the lines in the layout.
     pub fn lines(
         &self,
@@ -279,4 +301,15 @@ impl<B: Brush> Default for Layout<B> {
             data: LayoutData::default(),
         }
     }
+}
+
+/// Mutable access to the edges of a span box. See [`Layout::span_edges_mut`].
+#[derive(Debug)]
+pub struct SpanEdgesMut<'a> {
+    /// The index of the span's style in [`Layout::styles`].
+    pub style_index: u16,
+    /// The advance (in layout units) before the span's content.
+    pub inline_start: &'a mut f32,
+    /// The advance (in layout units) after the span's content.
+    pub inline_end: &'a mut f32,
 }

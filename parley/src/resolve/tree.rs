@@ -4,6 +4,7 @@
 //! Hierarchical tree based style application.
 use alloc::{string::String, vec::Vec};
 
+use crate::span_box::{LayoutSpanBox, NO_SPAN_BOX, SpanBoundary, SpanEdge};
 use crate::style::{TextWrapMode, WhiteSpaceCollapse};
 
 use super::{Brush, ResolvedProperty, ResolvedStyle, StyleRun};
@@ -16,6 +17,25 @@ struct StyleTreeNode<B: Brush> {
     /// The style's id when it is used for whitespace that wrapping is allowed after, which differs
     /// from `style_id` only for spans that disable wrapping.
     wrappable_style_id: Option<u16>,
+    /// The index (in [`TreeStyleBuilder::span_boxes`]) of the span's box, if it generates one.
+    span_box: Option<u32>,
+}
+
+/// The box of a span that is still being built. See [`crate::span_box`].
+#[derive(Debug, Clone)]
+struct TreeSpanBox {
+    /// The span's node in the tree.
+    node: usize,
+    /// The closest enclosing span box, or [`NO_SPAN_BOX`].
+    parent: u32,
+    /// Length of the committed text when the span was pushed.
+    start_text_len: usize,
+    /// Number of inline boxes when the span was pushed.
+    start_inline_box_count: usize,
+    /// The positions of the span's start and end in the text.
+    text_range: core::ops::Range<usize>,
+    /// Whether nothing was committed between the span's start and end.
+    is_empty: bool,
 }
 
 /// A collapsible whitespace sequence that has not been committed yet.
@@ -51,6 +71,15 @@ pub(crate) struct TreeStyleBuilder<B: Brush> {
     /// Whether the most recently pushed item is an inline box, in which case pending collapsible
     /// whitespace is not at the start of the inline formatting context.
     last_item_is_inline_box: bool,
+    span_boxes: Vec<TreeSpanBox>,
+    /// The start and end of every span box, in the order they occur in the text.
+    span_boundaries: Vec<SpanBoundary>,
+    /// The boundaries from this index onwards were pushed while the current collapsible
+    /// whitespace sequence was pending. That whitespace began before them, so if it ends up being
+    /// committed they are moved to after it.
+    floating_boundaries_start: usize,
+    /// The number of inline boxes pushed so far.
+    inline_box_count: usize,
 }
 
 impl<B: Brush> Default for TreeStyleBuilder<B> {
@@ -64,6 +93,10 @@ impl<B: Brush> Default for TreeStyleBuilder<B> {
             current_span: usize::MAX,
             pending_whitespace: None,
             last_item_is_inline_box: false,
+            span_boxes: Vec::new(),
+            span_boundaries: Vec::new(),
+            floating_boundaries_start: 0,
+            inline_box_count: 0,
         }
     }
 }
@@ -85,17 +118,25 @@ impl<B: Brush> TreeStyleBuilder<B> {
         self.uncommitted_text.clear();
         self.pending_whitespace = None;
         self.last_item_is_inline_box = false;
+        self.span_boxes.clear();
+        self.span_boundaries.clear();
+        self.floating_boundaries_start = 0;
+        self.inline_box_count = 0;
 
         // The root style is always materialised at index 0 so that it can act as the parent of
         // every other style (and as the strut for otherwise empty lines).
         let mut root_style = root_style;
         root_style.parent = 0;
+        // The root span has no box of its own.
+        root_style.inline_start = 0.;
+        root_style.inline_end = 0.;
         self.style_table.push(root_style.clone());
         self.tree.push(StyleTreeNode {
             parent: None,
             style: root_style,
             style_id: Some(0),
             wrappable_style_id: None,
+            span_box: None,
         });
         self.current_span = 0;
     }
@@ -136,6 +177,9 @@ impl<B: Brush> TreeStyleBuilder<B> {
                         // started in, but is a wrap opportunity if any of the spans it collapses
                         // whitespace from allows wrapping.
                         let wrappable = self.tree[span].style.text_wrap_mode == TextWrapMode::Wrap;
+                        if self.pending_whitespace.is_none() {
+                            self.floating_boundaries_start = self.span_boundaries.len();
+                        }
                         let pending = self
                             .pending_whitespace
                             .get_or_insert(PendingWhitespace { span, wrappable });
@@ -188,6 +232,12 @@ impl<B: Brush> TreeStyleBuilder<B> {
             self.resolve_style_id(pending.span)
         };
         self.commit_styled_text(style_index, " ");
+
+        // Span boundaries pushed while the whitespace was pending come after it.
+        for boundary in &mut self.span_boundaries[self.floating_boundaries_start..] {
+            boundary.index += 1;
+        }
+        self.floating_boundaries_start = self.span_boundaries.len();
     }
 
     /// The style table index of the span that text is currently being pushed into.
@@ -265,33 +315,94 @@ impl<B: Brush> TreeStyleBuilder<B> {
     }
 
     /// Begins a child span with the given style, which subsequent text is attributed to.
+    ///
+    /// The span generates a [span box](crate::span_box).
     pub(crate) fn push_style_span(&mut self, style: ResolvedStyle<B>) {
-        self.commit_uncommitted_text();
-
-        self.tree.push(StyleTreeNode {
-            parent: Some(self.current_span),
-            style,
-            style_id: None,
-            wrappable_style_id: None,
-        });
-        self.current_span = self.tree.len() - 1;
+        self.push_span(style, true);
     }
 
     /// Begins a child span with the current style modified by the given properties.
+    ///
+    /// The span only generates a [span box](crate::span_box) if the properties give it a non-zero
+    /// edge: the edges of the current style are not inherited.
     pub(crate) fn push_style_modification_span(
         &mut self,
         properties: impl Iterator<Item = ResolvedProperty<B>>,
     ) {
         let mut style = self.current_style();
+        style.inline_start = 0.;
+        style.inline_end = 0.;
         for prop in properties {
             style.apply(prop);
         }
-        self.push_style_span(style);
+        let has_span_box = style.inline_start != 0. || style.inline_end != 0.;
+        self.push_span(style, has_span_box);
+    }
+
+    fn push_span(&mut self, style: ResolvedStyle<B>, has_span_box: bool) {
+        self.commit_uncommitted_text();
+
+        let node = self.tree.len();
+        let span_box = has_span_box.then(|| {
+            let span_box = self.span_boxes.len() as u32;
+            self.span_boxes.push(TreeSpanBox {
+                node,
+                parent: self.current_span_box(),
+                start_text_len: self.text.len(),
+                start_inline_box_count: self.inline_box_count,
+                text_range: self.text.len()..self.text.len(),
+                is_empty: false,
+            });
+            self.push_span_boundary(span_box, SpanEdge::Start);
+            span_box
+        });
+        self.tree.push(StyleTreeNode {
+            parent: Some(self.current_span),
+            style,
+            style_id: None,
+            wrappable_style_id: None,
+            span_box,
+        });
+        self.current_span = node;
+    }
+
+    /// The closest span box enclosing the current position, or [`NO_SPAN_BOX`].
+    fn current_span_box(&self) -> u32 {
+        let mut span = Some(self.current_span);
+        while let Some(node) = span {
+            if let Some(span_box) = self.tree[node].span_box {
+                return span_box;
+            }
+            span = self.tree[node].parent;
+        }
+        NO_SPAN_BOX
+    }
+
+    fn push_span_boundary(&mut self, span_box: u32, edge: SpanEdge) {
+        self.span_boundaries.push(SpanBoundary {
+            index: self.text.len(),
+            inline_box_count: self.inline_box_count,
+            span_box,
+            edge,
+        });
+    }
+
+    /// Records that an inline box has been pushed, which orders it relative to the edges of span
+    /// boxes.
+    pub(crate) fn count_inline_box(&mut self) {
+        self.inline_box_count += 1;
     }
 
     /// Ends the current span, returning to its parent.
     pub(crate) fn pop_style_span(&mut self) {
         self.commit_uncommitted_text();
+
+        if let Some(span_box) = self.tree[self.current_span].span_box {
+            let tree_span_box = &mut self.span_boxes[span_box as usize];
+            tree_span_box.is_empty = tree_span_box.start_text_len == self.text.len()
+                && tree_span_box.start_inline_box_count == self.inline_box_count;
+            self.push_span_boundary(span_box, SpanEdge::End);
+        }
 
         self.current_span = self.tree[self.current_span]
             .parent
@@ -315,6 +426,18 @@ impl<B: Brush> TreeStyleBuilder<B> {
 
         self.commit_uncommitted_text();
 
+        // Every span box needs a style to be identified by, including those without any text.
+        for span_box in 0..self.span_boxes.len() {
+            self.resolve_style_id(self.span_boxes[span_box].node);
+        }
+        for boundary in &self.span_boundaries {
+            let text_range = &mut self.span_boxes[boundary.span_box as usize].text_range;
+            match boundary.edge {
+                SpanEdge::Start => text_range.start = boundary.index,
+                SpanEdge::End => text_range.end = boundary.index,
+            }
+        }
+
         style_table.clear();
         style_runs.clear();
         style_table.extend_from_slice(&self.style_table);
@@ -329,6 +452,60 @@ impl<B: Brush> TreeStyleBuilder<B> {
         }
 
         core::mem::take(&mut self.text)
+    }
+
+    /// Computes the [span boxes](crate::span_box), the positions of the edges of those that have
+    /// edge items, and the closest enclosing span box of each style in the style table.
+    ///
+    /// Must be called after [`Self::finish`].
+    pub(crate) fn finish_span_boxes(
+        &mut self,
+        span_boxes: &mut Vec<LayoutSpanBox>,
+        span_boundaries: &mut Vec<SpanBoundary>,
+        style_span_boxes: &mut Vec<u32>,
+    ) {
+        span_boxes.clear();
+        span_boxes.extend(self.span_boxes.iter().map(|span_box| {
+            let node = &self.tree[span_box.node];
+            let inline_start = node.style.inline_start;
+            let inline_end = node.style.inline_end;
+            LayoutSpanBox {
+                style_index: node.style_id.expect("resolved in `finish`"),
+                parent: span_box.parent,
+                inline_start,
+                inline_end,
+                text_range: span_box.text_range.clone(),
+                has_edge_items: span_box.is_empty || inline_start != 0. || inline_end != 0.,
+            }
+        }));
+
+        span_boundaries.clear();
+        span_boundaries.extend(
+            self.span_boundaries
+                .iter()
+                .filter(|boundary| span_boxes[boundary.span_box as usize].has_edge_items),
+        );
+
+        // Nodes are in pre-order, so the span box of a node's parent is known before the node's.
+        style_span_boxes.clear();
+        if span_boxes.is_empty() {
+            return;
+        }
+        style_span_boxes.resize(self.style_table.len(), NO_SPAN_BOX);
+        let mut node_span_boxes: Vec<u32> = Vec::with_capacity(self.tree.len());
+        for node in &self.tree {
+            let span_box = node
+                .span_box
+                .or_else(|| node.parent.map(|parent| node_span_boxes[parent]))
+                .unwrap_or(NO_SPAN_BOX);
+            node_span_boxes.push(span_box);
+            for style_id in [node.style_id, node.wrappable_style_id]
+                .into_iter()
+                .flatten()
+            {
+                style_span_boxes[usize::from(style_id)] = span_box;
+            }
+        }
     }
 }
 

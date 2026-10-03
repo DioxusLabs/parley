@@ -263,6 +263,10 @@ pub enum StyleProperty<'a, B: Brush> {
     LineHeight(LineHeight),
     /// Vertical alignment within the line.
     VerticalAlign(VerticalAlign),
+    /// Extra inline-axis space before the content of the span. See [`TextStyle::inline_start`].
+    InlineStart(f32),
+    /// Extra inline-axis space after the content of the span. See [`TextStyle::inline_end`].
+    InlineEnd(f32),
     /// Extra spacing between words.
     WordSpacing(f32),
     /// Extra spacing between letters.
@@ -320,6 +324,31 @@ pub struct TextStyle<'family, 'settings, B: Brush> {
     pub line_height: LineHeight,
     /// Vertical alignment within the line.
     pub vertical_align: VerticalAlign,
+    /// Extra inline-axis space before the content of the span.
+    ///
+    /// This is the start edge of the span's box: in CSS terms, the sum of the inline-start
+    /// margin, border and padding of a non-atomic inline box such as a `<span>`. It may be
+    /// negative.
+    ///
+    /// The span's content is still shaped, wrapped and reordered like any other text; the edge is
+    /// a fixed advance placed before it:
+    ///
+    /// - The edge is not a soft wrap opportunity: it stays on the line of the content following
+    ///   it.
+    /// - If the span is broken across lines, the edge is only present on the span's first line
+    ///   (CSS `box-decoration-break: slice`).
+    /// - Text is not shaped across a non-zero edge.
+    /// - The edge is placed on the side the paragraph's base direction starts from.
+    ///
+    /// This is a property of the span itself and is not inherited by nested spans. It is only
+    /// supported by [`TreeBuilder`](crate::TreeBuilder), and is ignored on the root style. The
+    /// resulting geometry is reported by [`Line::span_fragments`](crate::Line::span_fragments).
+    pub inline_start: f32,
+    /// Extra inline-axis space after the content of the span.
+    ///
+    /// The counterpart of [`Self::inline_start`]: it stays on the line of the content preceding
+    /// it, and is only present on the span's last line.
+    pub inline_end: f32,
     /// Extra spacing between words.
     pub word_spacing: f32,
     /// Extra spacing between letters.
@@ -358,6 +387,8 @@ impl<B: Brush> Default for TextStyle<'static, 'static, B> {
             strikethrough_brush: None,
             line_height: LineHeight::default(),
             vertical_align: VerticalAlign::default(),
+            inline_start: 0.0,
+            inline_end: 0.0,
             word_spacing: 0.0,
             letter_spacing: 0.0,
             word_break: WordBreak::default(),

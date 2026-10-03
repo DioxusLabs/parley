@@ -162,6 +162,8 @@ impl ResolveContext {
             StyleProperty::StrikethroughBrush(value) => StrikethroughBrush(value.clone()),
             StyleProperty::LineHeight(value) => LineHeight(value.scale(scale)),
             StyleProperty::VerticalAlign(value) => VerticalAlign(value.scale(scale)),
+            StyleProperty::InlineStart(value) => InlineStart(*value * scale),
+            StyleProperty::InlineEnd(value) => InlineEnd(*value * scale),
             StyleProperty::WordSpacing(value) => WordSpacing(*value * scale),
             StyleProperty::LetterSpacing(value) => LetterSpacing(*value * scale),
             StyleProperty::WordBreak(value) => WordBreak(*value),
@@ -203,6 +205,8 @@ impl ResolveContext {
             },
             line_height: raw_style.line_height.scale(scale),
             vertical_align: raw_style.vertical_align.scale(scale),
+            inline_start: raw_style.inline_start * scale,
+            inline_end: raw_style.inline_end * scale,
             word_spacing: raw_style.word_spacing * scale,
             letter_spacing: raw_style.letter_spacing * scale,
             word_break: raw_style.word_break,
@@ -386,6 +390,10 @@ pub(crate) enum ResolvedProperty<B: Brush> {
     LineHeight(LineHeight),
     /// Vertical alignment within the line.
     VerticalAlign(VerticalAlign),
+    /// Extra inline-axis space before the content of the span.
+    InlineStart(f32),
+    /// Extra inline-axis space after the content of the span.
+    InlineEnd(f32),
     /// Extra spacing between words.
     WordSpacing(f32),
     /// Extra spacing between letters.
@@ -434,6 +442,10 @@ pub(crate) struct ResolvedStyle<B: Brush> {
     pub(crate) line_height: LineHeight,
     /// Vertical alignment within the line.
     pub(crate) vertical_align: VerticalAlign,
+    /// Extra inline-axis space before the content of the span. Not inherited.
+    pub(crate) inline_start: f32,
+    /// Extra inline-axis space after the content of the span. Not inherited.
+    pub(crate) inline_end: f32,
     /// Extra spacing between words.
     pub(crate) word_spacing: f32,
     /// Extra spacing between letters.
@@ -474,6 +486,8 @@ impl<B: Brush> ResolvedStyle<B> {
             StrikethroughBrush(value) => self.strikethrough.brush = value,
             LineHeight(value) => self.line_height = value,
             VerticalAlign(value) => self.vertical_align = value,
+            InlineStart(value) => self.inline_start = value,
+            InlineEnd(value) => self.inline_end = value,
             WordSpacing(value) => self.word_spacing = value,
             LetterSpacing(value) => self.letter_spacing = value,
             WordBreak(value) => self.word_break = value,
@@ -506,6 +520,8 @@ impl<B: Brush> ResolvedStyle<B> {
             StrikethroughBrush(value) => self.strikethrough.brush == *value,
             LineHeight(value) => self.line_height.nearly_eq(*value),
             VerticalAlign(value) => self.vertical_align.nearly_eq(*value),
+            InlineStart(value) => nearly_eq(self.inline_start, *value),
+            InlineEnd(value) => nearly_eq(self.inline_end, *value),
             WordSpacing(value) => nearly_eq(self.word_spacing, *value),
             LetterSpacing(value) => nearly_eq(self.letter_spacing, *value),
             WordBreak(value) => self.word_break == *value,

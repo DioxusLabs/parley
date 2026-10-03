@@ -277,6 +277,7 @@ impl<'b, B: Brush> TreeBuilder<'b, B> {
         // TODO: arrange type better here to factor out the index
         inline_box.index = self.lcx.tree_style_builder.committed_text_len();
         let parent_style_index = self.lcx.tree_style_builder.resolve_current_style_id();
+        self.lcx.tree_style_builder.count_inline_box();
         self.lcx.inline_boxes.push(LayoutInlineBox {
             inline_box,
             parent_style_index,
@@ -305,6 +306,11 @@ impl<'b, B: Brush> TreeBuilder<'b, B> {
             .lcx
             .tree_style_builder
             .finish(&mut self.lcx.style_table, &mut self.lcx.style_runs);
+        self.lcx.tree_style_builder.finish_span_boxes(
+            &mut self.lcx.span_boxes,
+            &mut self.lcx.span_boundaries,
+            &mut self.lcx.style_span_boxes,
+        );
 
         // Call generic layout builder method
         build_into_layout(layout, &text, self.lcx, self.fcx, self.options);
@@ -378,12 +384,19 @@ fn build_into_layout<B: Brush>(
     // (as `TreeBuilder` already does).
     lcx.inline_boxes.sort_by_key(|b| b.inline_box.index);
 
+    crate::span_box::merge_inline_items(
+        lcx.inline_boxes.iter().map(|b| b.inline_box.index),
+        &lcx.span_boundaries,
+        &mut lcx.inline_items,
+    );
+
     {
         super::shape::shape_text(
             &lcx.rcx,
             fcx,
             &lcx.style_table,
-            &lcx.inline_boxes,
+            !lcx.inline_boxes.is_empty(),
+            &lcx.inline_items,
             &lcx.analysis,
             &lcx.char_style_indices,
             &mut lcx.scx,
@@ -406,6 +419,12 @@ fn build_into_layout<B: Brush>(
     // Move inline boxes into the layout
     layout.data.inline_boxes.clear();
     core::mem::swap(&mut layout.data.inline_boxes, &mut lcx.inline_boxes);
+
+    // Move span boxes into the layout
+    layout.data.span_boxes.clear();
+    core::mem::swap(&mut layout.data.span_boxes, &mut lcx.span_boxes);
+    layout.data.style_span_boxes.clear();
+    core::mem::swap(&mut layout.data.style_span_boxes, &mut lcx.style_span_boxes);
 }
 
 fn resolve_range(range: impl RangeBounds<usize>, len: usize) -> Range<usize> {
