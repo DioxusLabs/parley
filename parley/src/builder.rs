@@ -76,6 +76,7 @@ impl<'b, B: Brush> RangedBuilder<'b, B> {
             x: 0.,
             y: 0.,
             line_index: usize::MAX,
+            justification_x: 0.,
         });
     }
 
@@ -183,6 +184,7 @@ impl<'b, B: Brush> StyleRunBuilder<'b, B> {
             x: 0.,
             y: 0.,
             line_index: usize::MAX,
+            justification_x: 0.,
         });
     }
 
@@ -290,6 +292,7 @@ impl<'b, B: Brush> TreeBuilder<'b, B> {
             x: 0.,
             y: 0.,
             line_index: usize::MAX,
+            justification_x: 0.,
         });
     }
 

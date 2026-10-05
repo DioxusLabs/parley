@@ -169,3 +169,36 @@ fn positioned_boxes_follow_controls_and_preserved_whitespace() {
         assert_positioned_boxes(&layout);
     }
 }
+
+#[test]
+fn positioned_boxes_follow_line_break_reversion() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let text = "one two three four five six seven eight nine";
+    let mut builder = lcx.ranged_builder(&mut fcx, text, 1., false);
+    builder.push_default(FontFamily::from(FONT_FAMILY_LIST));
+    for (id, index) in [(1, 4), (2, 14), (3, 28), (4, text.len())] {
+        builder.push_inline_box(InlineBox {
+            id,
+            index,
+            kind: InlineBoxKind::InFlow,
+            vertical_align: VerticalAlign::BASELINE,
+            width: 10.,
+            height: 10.,
+            baseline: None,
+        });
+    }
+    let mut layout = builder.build(text);
+    let mut breaker = layout.break_lines();
+    breaker.break_next_with_length(7).unwrap();
+    let checkpoint = breaker.state().clone();
+    breaker.break_next_with_length(7).unwrap();
+    breaker.revert_to(checkpoint);
+    while breaker.break_next_with_length(7).is_some() {}
+    breaker.finish();
+    assert_positioned_boxes(&layout);
+    assert_eq!(layout.positioned_inline_boxes().count(), 4);
+
+    layout.align(Alignment::Justify, AlignmentOptions::default());
+    assert_positioned_boxes(&layout);
+}

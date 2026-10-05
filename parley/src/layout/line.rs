@@ -8,7 +8,7 @@ use crate::layout::layout::Layout;
 use crate::layout::run::Run;
 use crate::layout::spacing::EffectiveSpacing;
 use crate::style::Brush;
-use crate::{BaselineShift, InlineBox, InlineBoxKind};
+use crate::{InlineBox, InlineBoxKind};
 
 use core::ops::Range;
 use parley_engine::{Atom, Atoms, Glyph};
@@ -84,28 +84,11 @@ impl<'a, B: Brush> Line<'a, B> {
 
     /// Block-axis coordinate of the top edge of the layout's inline box `index`.
     pub(crate) fn inline_box_top(&self, index: usize) -> f32 {
-        let layout_box = &self.layout.data.inline_boxes[index];
-        let inline_box = &layout_box.inline_box;
-        match inline_box.vertical_align.shift {
-            BaselineShift::Top => self.data.metrics.block_min_coord,
-            BaselineShift::Bottom => self.data.metrics.block_max_coord - inline_box.height,
-            _ => {
-                let aligned_subtree_root = self
-                    .layout
-                    .data
-                    .style_metrics
-                    .get(usize::from(layout_box.parent_style_index))
-                    .map_or(0, |m| m.aligned_subtree_root);
-                let ascent = inline_box.baseline.unwrap_or(inline_box.height);
-                self.data.metrics.baseline
-                    - self.data.aligned_subtree_offset(
-                        &self.layout.data.aligned_subtree_offsets,
-                        aligned_subtree_root,
-                    )
-                    - layout_box.baseline_offset
-                    - ascent
-            }
-        }
+        self.data.inline_box_top(
+            &self.layout.data,
+            &self.layout.data.aligned_subtree_offsets,
+            index,
+        )
     }
 
     /// Returns an iterator over the runs for the line.

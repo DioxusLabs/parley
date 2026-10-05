@@ -35,6 +35,7 @@ use smallvec::SmallVec;
 struct LineLayout {
     lines: Vec<LineData>,
     line_items: Vec<LineItemData>,
+    positioned_inline_box_indices: Vec<usize>,
     aligned_subtree_offsets: Vec<AlignedSubtreeOffset>,
 }
 
@@ -42,6 +43,10 @@ impl LineLayout {
     fn swap<B: Brush>(&mut self, layout: &mut LayoutData<B>) {
         core::mem::swap(&mut self.lines, &mut layout.lines);
         core::mem::swap(&mut self.line_items, &mut layout.line_items);
+        core::mem::swap(
+            &mut self.positioned_inline_box_indices,
+            &mut layout.positioned_inline_box_indices,
+        );
         core::mem::swap(
             &mut self.aligned_subtree_offsets,
             &mut layout.aligned_subtree_offsets,
@@ -848,6 +853,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         lines.swap(&mut layout.data);
         lines.lines.clear();
         lines.line_items.clear();
+        lines.positioned_inline_box_indices.clear();
         lines.aligned_subtree_offsets.clear();
         for inline_box in &mut layout.data.inline_boxes {
             inline_box.line_index = usize::MAX;
@@ -1002,6 +1008,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         self.state = state;
         self.lines.truncate(self.state.lines);
         self.lines.line_items.truncate(self.state.items);
+        self.lines
+            .positioned_inline_box_indices
+            .retain(|&index| self.layout.data.inline_boxes[index].line_index < self.state.lines);
         self.done = false;
     }
 
@@ -1636,6 +1645,17 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
         line.metrics.inline_min_coord = self.state.line_x;
         line.metrics.inline_max_coord = self.state.line_x + self.state.line_max_advance;
+        for &index in self.lines.positioned_inline_box_indices.iter().rev() {
+            if self.layout.data.inline_boxes[index].line_index != line_idx {
+                break;
+            }
+            let y = line.inline_box_top(
+                &self.layout.data,
+                &self.lines.aligned_subtree_offsets,
+                index,
+            );
+            self.layout.data.inline_boxes[index].y = y;
+        }
         line.metrics.line_height
     }
 }
@@ -1680,13 +1700,12 @@ impl<B: Brush> Drop for BreakLines<'_, B> {
 
         // Save the computed lines to the layout
         self.lines.swap(&mut self.layout.data);
-        self.layout.position_inline_boxes();
     }
 }
 
 #[expect(clippy::cast_possible_truncation, reason = "deferred")]
 fn commit_line<B: Brush>(
-    layout: &Layout<B>,
+    layout: &mut Layout<B>,
     lines: &mut LineLayout,
     state: &mut LineState,
     max_advance: f32,
@@ -1708,6 +1727,13 @@ fn commit_line<B: Brush>(
     let is_text_run = |item: &LayoutItem| item.kind == LayoutItemKind::TextRun;
     let first_run_pos = items_to_commit.iter().position(is_text_run).unwrap_or(0);
     let last_run_pos = items_to_commit.iter().rposition(is_text_run).unwrap_or(0);
+    let has_inline_boxes = !layout.data.inline_boxes.is_empty()
+        && items_to_commit
+            .iter()
+            .any(|item| item.kind == LayoutItemKind::InlineBox);
+    let line_index = lines.lines.len();
+    let first_box = lines.positioned_inline_box_indices.len();
+    let mut advance = 0.;
 
     // Iterate over the items to commit
     let mut last_item_kind = LayoutItemKind::TextRun;
@@ -1721,6 +1747,16 @@ fn commit_line<B: Brush>(
     for (i, item) in items_to_commit.iter().enumerate() {
         match item.kind {
             LayoutItemKind::InlineBox => {
+                if !needs_reorder {
+                    let layout_box = &mut layout.data.inline_boxes[item.index];
+                    layout_box.x = advance;
+                    layout_box.line_index = line_index;
+                    layout_box.justification_x = 0.;
+                    if layout_box.inline_box.kind == InlineBoxKind::InFlow {
+                        advance += layout_box.inline_box.width;
+                    }
+                    lines.positioned_inline_box_indices.push(item.index);
+                }
                 lines.line_items.push(LineItemData {
                     kind: LayoutItemKind::InlineBox,
                     index: item.index,
@@ -1777,6 +1813,13 @@ fn commit_line<B: Brush>(
                 text_start = text_start.min(item_text_range.start);
                 text_end = text_end.max(item_text_range.end);
                 needs_reorder |= shaped_run.bidi_level != BidiLevel::new(0);
+                if has_inline_boxes && !needs_reorder {
+                    let spacing = EffectiveSpacing::new(
+                        layout.data.runs[item.index].spacing,
+                        Justification::NONE,
+                    );
+                    advance += spacing.slice_advance(slice.narrow(cluster_range.clone()));
+                }
 
                 lines.line_items.push(LineItemData {
                     kind: LayoutItemKind::TextRun,
@@ -1837,6 +1880,37 @@ fn commit_line<B: Brush>(
         },
         aligned_subtree_offsets: 0..0,
     });
+
+    if has_inline_boxes && needs_reorder {
+        lines.positioned_inline_box_indices.truncate(first_box);
+        let mut advance = 0.;
+        for item in &lines.line_items[start_item_idx..end_item_idx] {
+            match item.kind {
+                LayoutItemKind::TextRun => {
+                    let spacing = EffectiveSpacing::new(
+                        layout.data.runs[item.index].spacing,
+                        Justification::NONE,
+                    );
+                    let slice = layout
+                        .data
+                        .shaped_text
+                        .run_slice(item.index as u32)
+                        .narrow(item.shaped_cluster_range.clone());
+                    advance += spacing.slice_advance(slice);
+                }
+                LayoutItemKind::InlineBox => {
+                    let layout_box = &mut layout.data.inline_boxes[item.index];
+                    layout_box.x = advance;
+                    layout_box.line_index = line_index;
+                    layout_box.justification_x = 0.;
+                    if layout_box.inline_box.kind == InlineBoxKind::InFlow {
+                        advance += layout_box.inline_box.width;
+                    }
+                    lines.positioned_inline_box_indices.push(item.index);
+                }
+            }
+        }
+    }
 
     // Reset state for the new line
     if committed_text_run {

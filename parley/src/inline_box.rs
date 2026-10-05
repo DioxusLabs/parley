@@ -41,6 +41,7 @@ pub(crate) struct LayoutInlineBox {
     pub(crate) x: f32,
     pub(crate) y: f32,
     pub(crate) line_index: usize,
+    pub(crate) justification_x: f32,
 }
 
 /// Whether a box is in-flow (takes up space in the layout) or out-of-flow (e.g. absolutely positioned)
