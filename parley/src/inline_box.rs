@@ -38,6 +38,9 @@ pub(crate) struct LayoutInlineBox {
     /// sizes may change between building and line breaking). Unused for out-of-flow and
     /// `vertical-align: top | bottom` boxes.
     pub(crate) baseline_offset: f32,
+    pub(crate) x: f32,
+    pub(crate) y: f32,
+    pub(crate) line_index: usize,
 }
 
 /// Whether a box is in-flow (takes up space in the layout) or out-of-flow (e.g. absolutely positioned)

@@ -849,6 +849,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         lines.lines.clear();
         lines.line_items.clear();
         lines.aligned_subtree_offsets.clear();
+        for inline_box in &mut layout.data.inline_boxes {
+            inline_box.line_index = usize::MAX;
+        }
         let mut this = Self {
             layout,
             lines,
@@ -1677,6 +1680,7 @@ impl<B: Brush> Drop for BreakLines<'_, B> {
 
         // Save the computed lines to the layout
         self.lines.swap(&mut self.layout.data);
+        self.layout.position_inline_boxes();
     }
 }
 

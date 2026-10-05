@@ -258,6 +258,8 @@ pub enum PositionedLayoutItem<'a, B: Brush> {
 /// The computed position of an inline box within a layout
 #[derive(Debug, Clone)]
 pub struct PositionedInlineBox {
+    /// Index of the line containing the box.
+    pub line_index: usize,
     pub x: f32,
     pub y: f32,
     pub width: f32,
@@ -435,6 +437,7 @@ impl<'a, B: Brush> Iterator for GlyphRunIter<'a, B> {
                         self.offset += inline_box.width;
                     }
                     return Some(PositionedLayoutItem::InlineBox(PositionedInlineBox {
+                        line_index: self.line.index as usize,
                         x,
                         y,
                         width: inline_box.width,

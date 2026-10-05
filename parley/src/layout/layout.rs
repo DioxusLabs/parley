@@ -6,8 +6,11 @@ use crate::InlineBox;
 use crate::layout::alignment::align;
 use crate::layout::data::LayoutData;
 use crate::layout::{
-    ContentWidths, SpanMetrics, Style, alignment::Alignment, alignment::AlignmentOptions,
-    line::Line, line_break::BreakLines,
+    ContentWidths, SpanMetrics, Style,
+    alignment::Alignment,
+    alignment::AlignmentOptions,
+    line::{Line, LineItem, PositionedInlineBox},
+    line_break::BreakLines,
 };
 use crate::style::Brush;
 
@@ -168,6 +171,32 @@ impl<B: Brush> Layout<B> {
         self.data.inline_boxes.iter().map(|b| &b.inline_box)
     }
 
+    /// Returns positioned inline boxes in visual order.
+    pub fn positioned_inline_boxes(&self) -> impl Iterator<Item = PositionedInlineBox> + '_ {
+        let items = if self.data.inline_boxes.is_empty() {
+            &[][..]
+        } else {
+            &self.data.line_items[..]
+        };
+        items.iter().filter_map(|item| {
+            if item.kind != super::data::LayoutItemKind::InlineBox {
+                return None;
+            }
+            let layout_box = &self.data.inline_boxes[item.index];
+            let inline_box = &layout_box.inline_box;
+            Some(PositionedInlineBox {
+                line_index: layout_box.line_index,
+                x: layout_box.x,
+                y: layout_box.y,
+                width: inline_box.width,
+                height: inline_box.height,
+                baseline: inline_box.baseline,
+                id: inline_box.id,
+                kind: inline_box.kind,
+            })
+        })
+    }
+
     /// Mutable iterator over the inline boxes in text index order.
     pub fn inline_boxes_mut(&mut self) -> impl ExactSizeIterator<Item = &mut InlineBox> + '_ {
         self.data.inline_boxes.iter_mut().map(|b| &mut b.inline_box)
@@ -225,6 +254,48 @@ impl<B: Brush> Layout<B> {
     /// struct then each line will be aligned individually within its line box.
     pub fn align(&mut self, alignment: Alignment, options: AlignmentOptions) {
         align(&mut self.data, alignment, options);
+        self.position_inline_boxes();
+    }
+
+    pub(crate) fn position_inline_boxes(&mut self) {
+        if self.data.inline_boxes.is_empty() {
+            return;
+        }
+        for line_index in 0..self.data.lines.len() {
+            let range = self.data.lines[line_index].item_range.clone();
+            if !self.data.line_items[range.clone()]
+                .iter()
+                .any(|item| item.kind == super::data::LayoutItemKind::InlineBox)
+            {
+                continue;
+            }
+            let mut advance = 0.;
+            for (item_index, data_index) in range.enumerate() {
+                let position = {
+                    let line = self.get(line_index).unwrap();
+                    match line.item(item_index).unwrap() {
+                        LineItem::Run(run) => {
+                            advance += run.advance();
+                            continue;
+                        }
+                        LineItem::InlineBox(inline_box) => {
+                            let box_index = self.data.line_items[data_index].index;
+                            let x =
+                                advance + line.metrics().inline_min_coord + line.metrics().offset;
+                            let y = line.inline_box_top(box_index);
+                            if inline_box.kind == crate::InlineBoxKind::InFlow {
+                                advance += inline_box.width;
+                            }
+                            (box_index, x, y)
+                        }
+                    }
+                };
+                let layout_box = &mut self.data.inline_boxes[position.0];
+                layout_box.x = position.1;
+                layout_box.y = position.2;
+                layout_box.line_index = line_index;
+            }
+        }
     }
 
     /// Returns the index and `Line` object for the line containing the
