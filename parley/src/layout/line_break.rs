@@ -1002,6 +1002,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
     /// Reverts the to an externally saved state.
     pub fn revert_to(&mut self, state: BreakerState) {
         self.state = state;
+        for item in self.lines.line_items.iter().skip(self.state.items) {
+            if item.kind == LayoutItemKind::InlineBox {
+                self.layout.data.inline_boxes[item.index].line_index = u32::MAX;
+            }
+        }
         self.lines.truncate(self.state.lines);
         self.lines.line_items.truncate(self.state.items);
         self.done = false;
