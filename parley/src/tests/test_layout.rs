@@ -47,8 +47,9 @@ fn assert_positioned_boxes(layout: &Layout<ColorBrush>) {
         .collect();
     let actual: Vec<_> = layout.positioned_inline_boxes().collect();
     assert_eq!(actual.len(), expected.len());
-    for (actual, (line_index, expected)) in actual.iter().zip(expected) {
-        assert_eq!(actual.id, expected.id);
+    assert!(actual.is_sorted_by_key(|inline_box| inline_box.id));
+    for (line_index, expected) in expected {
+        let actual = actual.iter().find(|b| b.id == expected.id).unwrap();
         assert_eq!(actual.kind, expected.kind);
         assert_eq!(actual.line_index, line_index);
         assert!(
@@ -167,6 +168,70 @@ fn positioned_boxes_follow_controls_and_preserved_whitespace() {
         assert_positioned_boxes(&layout);
         layout.align(Alignment::Justify, AlignmentOptions::default());
         assert_positioned_boxes(&layout);
+    }
+}
+
+#[test]
+fn positioned_boxes_follow_justification() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    for (text, letter_spacing, word_spacing) in [
+        (
+            "one two  three four five six seven eight nine ten eleven twelve ",
+            0.,
+            0.,
+        ),
+        (
+            "one two  three four five six seven eight nine ten eleven twelve ",
+            0.7,
+            1.3,
+        ),
+        (
+            "שלום עולם one two مرحبا بالعالم שלום עולם three שלום עולם ",
+            0.,
+            0.,
+        ),
+        (
+            "שלום עולם one two مرحبا بالعالم שלום עולם three שלום עולם ",
+            0.7,
+            1.3,
+        ),
+    ] {
+        let mut builder = lcx.ranged_builder(&mut fcx, text, 1., false);
+        builder.push_default(FontFamily::from(FONT_FAMILY_LIST));
+        builder.push_default(StyleProperty::LetterSpacing(letter_spacing));
+        builder.push_default(StyleProperty::WordSpacing(word_spacing));
+        let mut id = 0;
+        for (index, _) in text.match_indices(' ') {
+            // Boxes both before and after each space, the latter of which may end up after hanging
+            // whitespace at the end of a line.
+            for (index, kind) in [
+                (index, InlineBoxKind::InFlow),
+                (index + 1, InlineBoxKind::OutOfFlow),
+            ] {
+                builder.push_inline_box(InlineBox {
+                    id,
+                    index,
+                    kind,
+                    vertical_align: VerticalAlign::BASELINE,
+                    width: 5.,
+                    height: 10.,
+                    baseline: None,
+                });
+                id += 1;
+            }
+        }
+        let mut layout = builder.build(text);
+        for width in [60., 100., 150., 220.] {
+            layout.break_all_lines(Some(width));
+            layout.align(Alignment::Justify, AlignmentOptions::default());
+            assert!(
+                layout
+                    .lines()
+                    .any(|line| line.data.justification.amount_per_opportunity > 0.)
+            );
+            assert_positioned_boxes(&layout);
+        }
     }
 }
 

@@ -9,8 +9,7 @@ use crate::layout::{ContentWidths, LineMetrics, Style};
 use crate::resolve::ResolvedStyle;
 use crate::style::Brush;
 use crate::{
-    BaselineShift, IndentOptions, InlineBoxKind, LineHeight, OverflowWrap, TextWrapMode,
-    WhiteSpaceCollapse,
+    IndentOptions, InlineBoxKind, LineHeight, OverflowWrap, TextWrapMode, WhiteSpaceCollapse,
 };
 use core::ops::Range;
 
@@ -118,31 +117,6 @@ pub(crate) struct AlignedSubtreeOffset {
 }
 
 impl LineData {
-    pub(crate) fn inline_box_top<B: Brush>(
-        &self,
-        layout: &LayoutData<B>,
-        offsets: &[AlignedSubtreeOffset],
-        index: usize,
-    ) -> f32 {
-        let layout_box = &layout.inline_boxes[index];
-        let inline_box = &layout_box.inline_box;
-        match inline_box.vertical_align.shift {
-            BaselineShift::Top => self.metrics.block_min_coord,
-            BaselineShift::Bottom => self.metrics.block_max_coord - inline_box.height,
-            _ => {
-                let aligned_subtree_root = layout
-                    .style_metrics
-                    .get(usize::from(layout_box.parent_style_index))
-                    .map_or(0, |metrics| metrics.aligned_subtree_root);
-                let ascent = inline_box.baseline.unwrap_or(inline_box.height);
-                self.metrics.baseline
-                    - self.aligned_subtree_offset(offsets, aligned_subtree_root)
-                    - layout_box.baseline_offset
-                    - ascent
-            }
-        }
-    }
-
     /// Offset from the line's baseline to the baseline of the aligned subtree rooted at style
     /// `root` (positive upwards). `offsets` is [`LayoutData::aligned_subtree_offsets`].
     pub(crate) fn aligned_subtree_offset(
@@ -247,8 +221,6 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) lines: Vec<LineData>,
     /// Items within each line
     pub(crate) line_items: Vec<LineItemData>,
-    /// Inline box indices in visual line order, populated during line breaking.
-    pub(crate) positioned_inline_box_indices: Vec<usize>,
     /// Position of each aligned subtree rooted at a `vertical-align: top | bottom` style on each line.
     /// The root aligned subtree of each line doesn't have an entry as its offset is trivially zero.
     ///
@@ -290,7 +262,6 @@ impl<B: Brush> Default for LayoutData<B> {
             items: Vec::new(),
             lines: Vec::new(),
             line_items: Vec::new(),
-            positioned_inline_box_indices: Vec::new(),
             aligned_subtree_offsets: Vec::new(),
             alignment: None,
             layout_max_advance: 0.0,
@@ -320,7 +291,6 @@ impl<B: Brush> LayoutData<B> {
         self.items.clear();
         self.lines.clear();
         self.line_items.clear();
-        self.positioned_inline_box_indices.clear();
         self.aligned_subtree_offsets.clear();
         self.alignment = None;
     }
