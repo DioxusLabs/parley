@@ -1022,7 +1022,7 @@ dependencies = [
  "clipboard-rs",
  "parley",
  "peniko",
- "skrifa 0.44.0",
+ "skrifa 0.48.0",
  "softbuffer",
  "ui-events",
  "ui-events-winit",
@@ -1192,9 +1192,9 @@ dependencies = [
 
 [[package]]
 name = "font-types"
-version = "0.12.0"
+version = "0.12.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81bf886368962a7d8456f136073ed33ed1b0770c690d2063731bb6a776e99f33"
+checksum = "6c92d9081c7ab3bd83ef1eecdfad090f3d966e3ce74106779664114cfe1a6274"
 dependencies = [
  "bytemuck",
 ]
@@ -1211,7 +1211,7 @@ dependencies = [
  "objc2-core-text",
  "objc2-foundation 0.3.2",
  "parlance",
- "read-fonts 0.41.0",
+ "read-fonts 0.45.0",
  "roxmltree",
  "smallvec",
  "windows 0.62.2",
@@ -1420,15 +1420,16 @@ dependencies = [
 
 [[package]]
 name = "harfrust"
-version = "0.12.0"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c03d949a14aa089bbb282f7dd76a498a7f684428e4257202efc119ec010376f9"
+checksum = "86aa776d6d32b072119e1f1650f4db843ff4382a4aaa6a2c9c4e35703cd377cb"
 dependencies = [
  "bitflags 2.13.0",
  "bytemuck",
  "core_maths",
- "read-fonts 0.41.0",
+ "read-fonts 0.45.0",
  "smallvec",
+ "spin",
 ]
 
 [[package]]
@@ -2722,7 +2723,7 @@ dependencies = [
  "parlance",
  "parley_data",
  "parley_emoji",
- "skrifa 0.44.0",
+ "skrifa 0.48.0",
 ]
 
 [[package]]
@@ -3136,9 +3137,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "046a7d674daf459825b32f5062056d6882db0d2f5a479fbd76ccfc870ac18709"
 dependencies = [
  "bytemuck",
- "core_maths",
- "font-types 0.12.0",
+ "font-types 0.12.6",
  "once_cell",
+]
+
+[[package]]
+name = "read-fonts"
+version = "0.45.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a5b7bed3d16ab428d8fa533640ab805ff50e7ad8a4d00649de1259e70023282"
+dependencies = [
+ "bytemuck",
+ "core_maths",
+ "font-types 0.12.6",
+ "once_cell",
+ "yoke",
 ]
 
 [[package]]
@@ -3424,8 +3437,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "819ab7d62b1d3e72d9d9dea5650bac30424f9111364bb94928dbf5ecad1baa68"
 dependencies = [
  "bytemuck",
- "core_maths",
  "read-fonts 0.41.0",
+]
+
+[[package]]
+name = "skrifa"
+version = "0.48.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5213b4825bac3587046330052d61bfac7bd3bd0d203c758d7c2ef726fcea034"
+dependencies = [
+ "bytemuck",
+ "core_maths",
+ "read-fonts 0.45.0",
 ]
 
 [[package]]
@@ -3526,6 +3549,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "spin"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0134f9043ed38b087ac4f7d4af44c79e2c9e5094421fe3164f435ce585953b10"
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3575,7 +3604,7 @@ version = "0.1.0"
 dependencies = [
  "image",
  "parley",
- "skrifa 0.44.0",
+ "skrifa 0.48.0",
  "swash",
 ]
 
@@ -3778,7 +3807,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "parley",
- "skrifa 0.44.0",
+ "skrifa 0.48.0",
  "tiny-skia",
 ]
 
