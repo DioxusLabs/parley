@@ -28,7 +28,7 @@ use crate::{
 
 use core::ops::Range;
 use parley_engine::Atom;
-use parley_engine::shape::{Character, Whitespace};
+use parley_engine::shape::Whitespace;
 use smallvec::SmallVec;
 
 #[derive(Default)]
@@ -127,6 +127,9 @@ struct LineBoxMetrics {
     /// inline boxes is treated as having zero height (an "invisible" line box).
     has_content: bool,
     /// The layout item and style of the last text atom added, whose boxes are already on the line.
+    ///
+    /// This is reset to [`Self::NO_LAST_TEXT`] after adding an atom of a run with mixed-style
+    /// atoms, as subsequent atoms of the same first style may still add new boxes.
     last_text: (usize, u16),
 }
 
@@ -300,12 +303,15 @@ impl Default for LineBoxMetrics {
             line_relative_top_height: 0.,
             line_relative_bottom_height: 0.,
             has_content: false,
-            last_text: (usize::MAX, 0),
+            last_text: Self::NO_LAST_TEXT,
         }
     }
 }
 
 impl LineBoxMetrics {
+    /// Value of [`Self::last_text`] that matches no text atom.
+    const NO_LAST_TEXT: (usize, u16) = (usize::MAX, 0);
+
     /// Reset to an empty line.
     fn reset(&mut self) {
         *self = Self::default();
@@ -375,8 +381,10 @@ impl LineBoxMetrics {
     }
 
     /// Add the glyphs of a text atom of `style_index` in layout item `item_idx` and text run
-    /// `run_idx`. The atom's characters are `characters`, the first of which has style
-    /// `style_index`.
+    /// `run_idx`. The atom spans the characters `atom_chars` (indexing
+    /// [`ShapedText::characters`]), the first of which has style `style_index`.
+    ///
+    /// [`ShapedText::characters`]: parley_engine::ShapedText::characters
     ///
     /// This adds the span boxes of the atom's styles together with its ancestors. When the first
     /// style's line height is [`LineHeight::MetricsRelative`] (which corresponds to CSS
@@ -391,23 +399,23 @@ impl LineBoxMetrics {
         item_idx: usize,
         run_idx: usize,
         style_index: u16,
-        characters: &[Character],
+        atom_chars: Range<u32>,
         data: &LayoutData<B>,
         contributed: &mut Vec<u16>,
         subtrees: &mut SubtreeHistory,
     ) {
         self.has_content = true;
         // Consecutive atoms almost always come from the same run and style, whose boxes are then
-        // already on the line, so we can exit early. In case the run has atoms with mixed styles,
-        // new boxes may still be added.
-        if self.last_text == (item_idx, style_index) && !data.runs[run_idx].has_mixed_style_atoms {
+        // already on the line, so we can exit early. Runs with mixed-style atoms never take this
+        // path, see `Self::last_text`.
+        if self.last_text == (item_idx, style_index) {
             return;
         }
         self.add_text_boxes(
             item_idx,
             run_idx,
             style_index,
-            characters,
+            atom_chars,
             data,
             contributed,
             subtrees,
@@ -423,17 +431,19 @@ impl LineBoxMetrics {
         item_idx: usize,
         run_idx: usize,
         style_index: u16,
-        characters: &[Character],
+        atom_chars: Range<u32>,
         data: &LayoutData<B>,
         contributed: &mut Vec<u16>,
         subtrees: &mut SubtreeHistory,
     ) {
-        self.last_text = (item_idx, style_index);
         if contributed.last() != Some(&style_index) {
             self.add_style(style_index, &data.style_metrics, contributed, subtrees);
         }
         if data.runs[run_idx].has_mixed_style_atoms {
+            self.last_text = Self::NO_LAST_TEXT;
             // Add the spans of all the atom's other styles.
+            let characters =
+                &data.shaped_text.characters()[atom_chars.start as usize..atom_chars.end as usize];
             for character in characters.iter().skip(1) {
                 if character.style_index != style_index {
                     self.add_style(
@@ -444,6 +454,8 @@ impl LineBoxMetrics {
                     );
                 }
             }
+        } else {
+            self.last_text = (item_idx, style_index);
         }
         let style = usize::from(style_index);
         let shaped_run = &data.shaped_text.runs()[run_idx];
@@ -679,7 +691,7 @@ impl BreakerState {
             self.item_idx,
             self.run_idx,
             style_index,
-            atom.characters(),
+            atom.char_range(),
             data,
             &mut self.contributed,
             &mut self.subtrees,
@@ -1520,7 +1532,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                     index,
                     index,
                     style_index,
-                    &[],
+                    0..0,
                     &self.layout.data,
                     &mut self.state.contributed,
                     &mut self.state.subtrees,
