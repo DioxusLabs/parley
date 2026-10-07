@@ -38,6 +38,14 @@ pub(crate) struct LayoutInlineBox {
     /// sizes may change between building and line breaking). Unused for out-of-flow and
     /// `vertical-align: top | bottom` boxes.
     pub(crate) baseline_offset: f32,
+    /// Inline offset of the box from the start of its line's content, excluding alignment and
+    /// justification. Resolved when the box is placed on a line.
+    pub(crate) x: f32,
+    /// Number of word separators visually preceding the box on its line. This may count
+    /// separators in the line's hanging whitespace, which are not justification opportunities.
+    pub(crate) word_separators_before: u32,
+    /// Index of the line containing the box. `u32::MAX` if the box is not placed on a line.
+    pub(crate) line_index: u32,
 }
 
 /// Whether a box is in-flow (takes up space in the layout) or out-of-flow (e.g. absolutely positioned)

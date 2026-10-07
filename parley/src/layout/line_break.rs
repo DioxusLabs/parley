@@ -849,6 +849,9 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         lines.lines.clear();
         lines.line_items.clear();
         lines.aligned_subtree_offsets.clear();
+        for inline_box in &mut layout.data.inline_boxes {
+            inline_box.line_index = u32::MAX;
+        }
         let mut this = Self {
             layout,
             lines,
@@ -882,6 +885,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
     fn append_layout_inline_box(&mut self, index: usize, next_x: f32) {
         let quantize = self.layout.data.quantize;
         let layout_box = &mut self.layout.data.inline_boxes[index];
+        layout_box.x = self.state.line.x;
+        layout_box.word_separators_before = self.state.line.num_word_separators;
         let inline_box = &layout_box.inline_box;
         if inline_box.kind == InlineBoxKind::InFlow {
             let placement = inline_box_placement(
@@ -997,6 +1002,11 @@ impl<'a, B: Brush> BreakLines<'a, B> {
     /// Reverts the to an externally saved state.
     pub fn revert_to(&mut self, state: BreakerState) {
         self.state = state;
+        for item in self.lines.line_items.iter().skip(self.state.items) {
+            if item.kind == LayoutItemKind::InlineBox {
+                self.layout.data.inline_boxes[item.index].line_index = u32::MAX;
+            }
+        }
         self.lines.truncate(self.state.lines);
         self.lines.line_items.truncate(self.state.items);
         self.done = false;
@@ -1062,7 +1072,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
 
             match item.kind {
                 LayoutItemKind::InlineBox => {
-                    let inline_box = &self.layout.data.inline_boxes[item.index].inline_box;
+                    let layout_box = &mut self.layout.data.inline_boxes[item.index];
+                    let inline_box = &layout_box.inline_box;
 
                     // In-flow boxes are aligned relative to their containing style's span box
                     // (see `append_aligned_inline_box_to_line`). Out-of-flow boxes are not in-flow
@@ -1078,6 +1089,8 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         // If the box is a `CustomOutOfFlow` box then we yield control flow back to the caller.
                         // It is then the caller's responsibility to handle placement of the box.
                         InlineBoxKind::CustomOutOfFlow => {
+                            layout_box.x = self.state.line.x;
+                            layout_box.word_separators_before = self.state.line.num_word_separators;
                             return Some(YieldData::InlineBoxBreak(BoxBreakData {
                                 inline_box_id: inline_box.id,
                                 inline_box_index: item.index,
@@ -1682,7 +1695,7 @@ impl<B: Brush> Drop for BreakLines<'_, B> {
 
 #[expect(clippy::cast_possible_truncation, reason = "deferred")]
 fn commit_line<B: Brush>(
-    layout: &Layout<B>,
+    layout: &mut Layout<B>,
     lines: &mut LineLayout,
     state: &mut LineState,
     max_advance: f32,
@@ -1704,6 +1717,8 @@ fn commit_line<B: Brush>(
     let is_text_run = |item: &LayoutItem| item.kind == LayoutItemKind::TextRun;
     let first_run_pos = items_to_commit.iter().position(is_text_run).unwrap_or(0);
     let last_run_pos = items_to_commit.iter().rposition(is_text_run).unwrap_or(0);
+    let line_index = lines.lines.len() as u32;
+    let mut has_inline_boxes = false;
 
     // Iterate over the items to commit
     let mut last_item_kind = LayoutItemKind::TextRun;
@@ -1717,6 +1732,8 @@ fn commit_line<B: Brush>(
     for (i, item) in items_to_commit.iter().enumerate() {
         match item.kind {
             LayoutItemKind::InlineBox => {
+                layout.data.inline_boxes[item.index].line_index = line_index;
+                has_inline_boxes = true;
                 lines.line_items.push(LineItemData {
                     kind: LayoutItemKind::InlineBox,
                     index: item.index,
@@ -1833,6 +1850,43 @@ fn commit_line<B: Brush>(
         },
         aligned_subtree_offsets: 0..0,
     });
+
+    // The line breaker records the positions of inline boxes as it places them, which assumes that
+    // the line's items are in logical order. Recompute them if the line was reordered.
+    if has_inline_boxes && needs_reorder {
+        let mut x = 0.;
+        let mut word_separators = 0;
+        for item in &lines.line_items[start_item_idx..end_item_idx] {
+            match item.kind {
+                LayoutItemKind::TextRun => {
+                    let spacing = EffectiveSpacing::new(
+                        layout.data.runs[item.index].spacing,
+                        Justification::NONE,
+                    );
+                    let slice = layout
+                        .data
+                        .shaped_text
+                        .run_slice(item.index as u32)
+                        .narrow(item.shaped_cluster_range.clone());
+                    for atom in slice.atoms_start() {
+                        x += spacing.atom_advance(&atom);
+                        word_separators += u32::from(
+                            is_word_separator(atom.characters()[0].whitespace)
+                                && atom.shaped_clusters_range().end <= justification_end_cluster,
+                        );
+                    }
+                }
+                LayoutItemKind::InlineBox => {
+                    let layout_box = &mut layout.data.inline_boxes[item.index];
+                    layout_box.x = x;
+                    layout_box.word_separators_before = word_separators;
+                    if layout_box.inline_box.kind == InlineBoxKind::InFlow {
+                        x += layout_box.inline_box.width;
+                    }
+                }
+            }
+        }
+    }
 
     // Reset state for the new line
     if committed_text_run {
