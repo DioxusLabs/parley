@@ -551,7 +551,8 @@ pub(crate) fn analyze_text(
     let contiguous_substrings = LineBreakSegmentIter::new(text, segments, first_segment);
 
     let mut global_offset = 0;
-    let mut line_boundary_positions: Vec<usize> = Vec::new();
+    let line_boundary_positions = &mut analyzer.line_boundary_positions;
+    line_boundary_positions.clear();
 
     let data_sources = AnalysisDataSources::new();
 
