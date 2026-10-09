@@ -88,6 +88,8 @@ All public content can be read without logging in.
 
 Contributions are welcome by pull request. The [Rust code of conduct] applies.
 
+See [Blitz Web Platform Tests](doc/blitz-wpt.md) for the browser integration check and selecting a Blitz compatibility revision.
+
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache 2.0 license, shall be licensed as noted in the [License](#license) section, without any additional terms or conditions.
 
 ## License
