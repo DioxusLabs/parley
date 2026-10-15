@@ -256,20 +256,26 @@ fn canonical_locale(script: Script, locale: Option<&Language>) -> Option<(bool, 
         b"Hani" => match lang {
             "ja" => (false, "ja"),
             "ko" => (false, "ko"),
-            "zh" => {
-                match region {
-                    "HK" => (false, "zh-HK"),
-                    "TW" => (false, "zh-TW"),
-                    "MO" => (false, "zh-MO"),
-                    "SG" => (false, "zh-SG"),
-                    _ => {
-                        if locale.script() == Some("Hant") {
-                            (false, "zh-TW")
-                        } else {
-                            // Default to simplified Chinese
-                            (true, "zh-CN")
-                        }
-                    }
+            // Chinese languages. Those in the second group are conventionally
+            // written with traditional characters.
+            "zh" | "cmn" | "wuu" | "gan" | "hsn" | "cdo" | "cjy" | "cpx" | "czh" | "czo"
+            | "mnp" | "yue" | "hak" | "nan" | "lzh" => {
+                // An explicit script subtag takes precedence over the region,
+                // which in turn takes precedence over the language's default.
+                let is_traditional = match (locale.script(), region) {
+                    (Some("Hant"), _) => true,
+                    (Some("Hans"), _) => false,
+                    (_, "HK" | "TW" | "MO") => true,
+                    (_, "CN" | "SG") => false,
+                    _ => matches!(lang, "yue" | "hak" | "nan" | "lzh"),
+                };
+                match (is_traditional, region) {
+                    (true, "HK") => (false, "zh-HK"),
+                    (true, "MO") => (false, "zh-MO"),
+                    (true, _) => (false, "zh-TW"),
+                    (false, "SG") => (false, "zh-SG"),
+                    // Default to simplified Chinese
+                    (false, _) => (true, "zh-CN"),
                 }
             }
             _ => return None,
@@ -290,4 +296,66 @@ fn canonical_locale(script: Script, locale: Option<&Language>) -> Option<(bool, 
         is_default,
         Some(Language::parse(token).expect("valid canonical locale")),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FallbackKey, Language, Script};
+
+    fn han_locale(locale: &str) -> Option<Language> {
+        let locale = Language::parse(locale).unwrap();
+        FallbackKey::new(Script::from_bytes(*b"Hani"), Some(&locale)).locale()
+    }
+
+    #[track_caller]
+    fn assert_han_locale(locale: &str, expected: &str) {
+        assert_eq!(
+            han_locale(locale),
+            Some(Language::parse(expected).unwrap()),
+            "{locale}"
+        );
+    }
+
+    #[test]
+    fn han_region_selects_script() {
+        assert_han_locale("zh", "zh-CN");
+        assert_han_locale("zh-CN", "zh-CN");
+        assert_han_locale("zh-SG", "zh-SG");
+        assert_han_locale("zh-TW", "zh-TW");
+        assert_han_locale("zh-HK", "zh-HK");
+        assert_han_locale("zh-MO", "zh-MO");
+        assert_han_locale("ja", "ja");
+        assert_han_locale("ko", "ko");
+    }
+
+    #[test]
+    fn han_script_subtag_overrides_region() {
+        assert_han_locale("zh-Hans", "zh-CN");
+        assert_han_locale("zh-Hant", "zh-TW");
+        assert_han_locale("zh-Hans-HK", "zh-CN");
+        assert_han_locale("zh-Hans-TW", "zh-CN");
+        assert_han_locale("zh-Hans-SG", "zh-SG");
+        assert_han_locale("zh-Hant-CN", "zh-TW");
+        assert_han_locale("zh-Hant-SG", "zh-TW");
+        assert_han_locale("zh-Hant-HK", "zh-HK");
+    }
+
+    #[test]
+    fn han_other_chinese_languages() {
+        assert_han_locale("yue", "zh-TW");
+        assert_han_locale("yue-HK", "zh-HK");
+        assert_han_locale("yue-CN", "zh-CN");
+        assert_han_locale("yue-Hans", "zh-CN");
+        assert_han_locale("hak", "zh-TW");
+        assert_han_locale("nan", "zh-TW");
+        assert_han_locale("lzh", "zh-TW");
+        assert_han_locale("cmn", "zh-CN");
+        assert_han_locale("cmn-TW", "zh-TW");
+        assert_han_locale("wuu", "zh-CN");
+    }
+
+    #[test]
+    fn han_unrelated_language_is_untracked() {
+        assert_eq!(han_locale("en"), None);
+    }
 }
