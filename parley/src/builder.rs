@@ -77,6 +77,9 @@ impl<'b, B: Brush> RangedBuilder<'b, B> {
             inline_box,
             parent_style_index: 0,
             baseline_offset: 0.,
+            x: 0.,
+            word_separators_before: 0,
+            line_index: u32::MAX,
         });
     }
 
@@ -192,6 +195,9 @@ impl<'b, B: Brush> StyleRunBuilder<'b, B> {
             inline_box,
             parent_style_index: 0,
             baseline_offset: 0.,
+            x: 0.,
+            word_separators_before: 0,
+            line_index: u32::MAX,
         });
     }
 
@@ -323,6 +329,9 @@ impl<'b, B: Brush> TreeBuilder<'b, B> {
             inline_box,
             parent_style_index,
             baseline_offset: 0.,
+            x: 0.,
+            word_separators_before: 0,
+            line_index: u32::MAX,
         });
     }
 

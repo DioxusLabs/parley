@@ -6,8 +6,11 @@ use crate::InlineBox;
 use crate::layout::alignment::align;
 use crate::layout::data::LayoutData;
 use crate::layout::{
-    ContentWidths, SpanMetrics, Style, alignment::Alignment, alignment::AlignmentOptions,
-    line::Line, line_break::BreakLines,
+    ContentWidths, SpanMetrics, Style,
+    alignment::Alignment,
+    alignment::AlignmentOptions,
+    line::{Line, PositionedInlineBox},
+    line_break::BreakLines,
 };
 use crate::style::Brush;
 
@@ -166,6 +169,41 @@ impl<B: Brush> Layout<B> {
     /// Iterator over inline boxes in text index order.
     pub fn inline_boxes(&self) -> impl ExactSizeIterator<Item = &InlineBox> + '_ {
         self.data.inline_boxes.iter().map(|b| &b.inline_box)
+    }
+
+    /// Returns the positioned inline boxes in text index order.
+    ///
+    /// Boxes that have not been placed on a line (e.g. before line breaking) are skipped.
+    /// Positions include the last applied alignment.
+    pub fn positioned_inline_boxes(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = PositionedInlineBox> + Clone + '_ {
+        self.data
+            .inline_boxes
+            .iter()
+            .enumerate()
+            .filter_map(|(index, layout_box)| {
+                let line = self.get(layout_box.line_index as usize)?;
+                let inline_box = &layout_box.inline_box;
+                // Hanging whitespace is at the end of the line and is not justified.
+                let justification_opportunities = layout_box
+                    .word_separators_before
+                    .min(line.data.num_justification_opportunities);
+                Some(PositionedInlineBox {
+                    line_index: layout_box.line_index as usize,
+                    x: layout_box.x
+                        + justification_opportunities as f32
+                            * line.data.justification.amount_per_opportunity
+                        + line.data.metrics.inline_min_coord
+                        + line.data.metrics.offset,
+                    y: line.inline_box_top(index),
+                    width: inline_box.width,
+                    height: inline_box.height,
+                    baseline: inline_box.baseline,
+                    id: inline_box.id,
+                    kind: inline_box.kind,
+                })
+            })
     }
 
     /// Mutable iterator over the inline boxes in text index order.
