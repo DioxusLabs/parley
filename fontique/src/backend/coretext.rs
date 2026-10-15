@@ -11,12 +11,16 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::ptr::{null, null_mut};
 use hashbrown::{HashMap, HashSet};
+#[cfg(not(target_os = "macos"))]
+use objc2_core_foundation::CFType;
 use objc2_core_foundation::{
-    CFArray, CFDictionary, CFRange, CFRetained, CFString, CFType, CFURL, CFURLPathStyle,
+    CFArray, CFDictionary, CFRange, CFRetained, CFString, CFURL, CFURLPathStyle,
 };
-use objc2_core_text::{
-    CTFont, CTFontCollection, CTFontDescriptor, CTFontUIFontType, kCTFontURLAttribute,
-};
+#[cfg(target_os = "macos")]
+use objc2_core_text::CTFontManagerCopyAvailableFontURLs;
+use objc2_core_text::{CTFont, CTFontDescriptor, CTFontUIFontType};
+#[cfg(not(target_os = "macos"))]
+use objc2_core_text::{CTFontCollection, kCTFontURLAttribute};
 use objc2_foundation::{
     NSSearchPathDirectory, NSSearchPathDomainMask, NSSearchPathForDirectoriesInDomains,
 };
@@ -90,6 +94,57 @@ impl SystemFonts {
 /// Discover system fonts by combining CoreText enumeration with a directory scan of all
 /// Library/Fonts paths, then index them through the shared scan pipeline.
 fn scan_system_fonts() -> Option<scan::ScannedCollection> {
+    let mut paths = system_font_files()?;
+
+    // Apple hides certain fonts from the CoreText enumeration APIs (notably SFNS.ttf, the
+    // San Francisco system UI font). Scanning Library/Fonts directories catches what
+    // CoreText omits.
+    paths.extend(library_font_files());
+
+    if paths.is_empty() {
+        return None;
+    }
+
+    Some(scan::ScannedCollection::from_paths(paths.iter(), 0))
+}
+
+/// Enumerate system font files via `CTFontManagerCopyAvailableFontURLs`, which returns font
+/// file URLs directly without materializing font descriptors.
+#[cfg(target_os = "macos")]
+fn system_font_files() -> Option<HashSet<PathBuf>> {
+    // SAFETY: Calls into CoreText. The function takes no arguments and returns an owned array.
+    let urls = unsafe { CTFontManagerCopyAvailableFontURLs() };
+    // SAFETY: The API is documented to return an array of CFURLs.
+    let urls: CFRetained<CFArray<CFURL>> = unsafe { CFRetained::cast_unchecked(urls) };
+
+    // Collect unique font file paths to avoid redundant scanning (multiple faces in a
+    // collection share the same file URL).
+    let mut paths: HashSet<PathBuf> = HashSet::new();
+    for index in 0..urls.len() {
+        let Some(url) = urls.get(index) else {
+            continue;
+        };
+
+        // Convert the file URL into a POSIX path.
+        let Some(path_cf): Option<CFRetained<CFString>> =
+            url.file_system_path(CFURLPathStyle::CFURLPOSIXPathStyle)
+        else {
+            continue;
+        };
+
+        let path = PathBuf::from(path_cf.to_string());
+        if path.exists() {
+            paths.insert(path);
+        }
+    }
+
+    Some(paths)
+}
+
+/// Enumerate system font files by matching all available font descriptors and reading their
+/// URL attribute. `CTFontManagerCopyAvailableFontURLs` is unavailable outside of macOS.
+#[cfg(not(target_os = "macos"))]
+fn system_font_files() -> Option<HashSet<PathBuf>> {
     // SAFETY: Calls into CoreText. If anything fails we return None and use the fallback scan.
     let collection = unsafe { CTFontCollection::from_available_fonts(None) };
     let descriptors = unsafe { collection.matching_font_descriptors()? };
@@ -127,15 +182,7 @@ fn scan_system_fonts() -> Option<scan::ScannedCollection> {
         }
     }
 
-    // Apple hides certain fonts from CTFontCollection (notably SFNS.ttf, the San Francisco
-    // system UI font). Scanning Library/Fonts directories catches what CoreText omits.
-    paths.extend(library_font_files());
-
-    if paths.is_empty() {
-        return None;
-    }
-
-    Some(scan::ScannedCollection::from_paths(paths.iter(), 0))
+    Some(paths)
 }
 
 fn library_font_files() -> Vec<PathBuf> {

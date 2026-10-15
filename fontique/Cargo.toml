@@ -70,6 +70,7 @@ objc2-core-text = { version = "0.3.2", optional = true, default-features = false
     "CTFont",
     "CTFontDescriptor",
     "CTFontCollection",
+    "CTFontManager",
 ] }
 
 [target.'cfg(any(target_os = "linux", target_os="freebsd"))'.dependencies]
