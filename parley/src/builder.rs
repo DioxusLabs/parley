@@ -17,7 +17,8 @@ use parley_engine::{AnalysisDataSources, DictionaryProvider, InlineObject};
 
 use crate::InlineBoxKind;
 use crate::inline_box::{InlineBox, LayoutInlineBox};
-use crate::resolve::{ResolvedStyle, StyleRun};
+use crate::resolve::tree::TreeStyleBuilder;
+use crate::resolve::{ResolvedProperty, ResolvedStyle, StyleRun};
 use crate::util::{resolve_bounded_range, resolve_range};
 
 #[derive(Clone, Copy)]
@@ -187,6 +188,23 @@ impl<'b, B: Brush> StyleRunBuilder<'b, B> {
         self.push_resolved_style(parent_style_index, resolved)
     }
 
+    /// Resolves `style` against this builder's scale, without adding it to the style table.
+    pub(crate) fn resolve_style(&mut self, style: &TextStyle<'_, '_, B>) -> ResolvedStyle<B> {
+        self.lcx
+            .rcx
+            .resolve_entire_style_set(self.fcx, style, self.options.scale)
+    }
+
+    /// Resolves a single `property` against this builder's scale.
+    pub(crate) fn resolve_property(
+        &mut self,
+        property: &StyleProperty<'_, B>,
+    ) -> ResolvedProperty<B> {
+        self.lcx
+            .rcx
+            .resolve_property(self.fcx, property, self.options.scale)
+    }
+
     /// Adds an already resolved style with the given parent to the style table and returns
     /// its index.
     pub(crate) fn push_resolved_style(
@@ -209,7 +227,8 @@ impl<'b, B: Brush> StyleRunBuilder<'b, B> {
     ///
     /// Runs must be contiguous and non-overlapping, and must cover
     /// `0..text.len()` once all runs have been added. If the builder was
-    /// created without the text, the range's end must be bounded.
+    /// created without the text, the range's end must be bounded. A run
+    /// that continues the previous run with the same style is merged into it.
     pub fn push_style_run(&mut self, style_index: u16, range: impl RangeBounds<usize>) {
         let range = match self.len {
             Some(len) => resolve_range(range, len),
@@ -229,10 +248,15 @@ impl<'b, B: Brush> StyleRunBuilder<'b, B> {
             (style_index as usize) < self.lcx.style_table.len(),
             "StyleRunBuilder expects style indices that were previously added via push_style"
         );
-        self.lcx.style_runs.push(StyleRun {
-            style_index,
-            range: range.clone(),
-        });
+        match self.lcx.style_runs.last_mut() {
+            Some(run) if run.style_index == style_index && run.range.end == range.start => {
+                run.range.end = range.end;
+            }
+            _ => self.lcx.style_runs.push(StyleRun {
+                style_index,
+                range: range.clone(),
+            }),
+        }
         self.cursor = range.end;
     }
 
@@ -294,8 +318,12 @@ impl<'b, B: Brush> StyleRunBuilder<'b, B> {
         self.options.dictionary_provider = provider;
     }
 
-    pub fn build_into(self, layout: &mut Layout<B>, text: impl AsRef<str>) {
-        let text = text.as_ref();
+    pub fn build_into(mut self, layout: &mut Layout<B>, text: impl AsRef<str>) {
+        self.finish_into(layout, text.as_ref());
+    }
+
+    /// Checks that the runs cover `text` and builds the layout, leaving the builder spent.
+    pub(crate) fn finish_into(&mut self, layout: &mut Layout<B>, text: &str) {
         assert!(
             self.cursor == text.len(),
             "StyleRunBuilder requires runs that cover the full text"
@@ -329,18 +357,16 @@ impl<'b, B: Brush> StyleRunBuilder<'b, B> {
 /// Builder for constructing a text layout with a tree of attributes.
 #[must_use]
 pub struct TreeBuilder<'a, B: Brush> {
-    pub(crate) options: BuilderOptions<'a>,
-    pub(crate) lcx: &'a mut LayoutContext<B>,
-    pub(crate) fcx: &'a mut FontContext,
+    /// The style run builder that the tree's styles, runs and inline boxes are pushed to.
+    pub(crate) sink: StyleRunBuilder<'a, B>,
+    /// Taken from the [`LayoutContext`] while building, and returned to it when dropped.
+    pub(crate) tree: TreeStyleBuilder<B>,
 }
 
 impl<'b, B: Brush> TreeBuilder<'b, B> {
     pub fn push_style_span(&mut self, style: TextStyle<'_, '_, B>) {
-        let resolved = self
-            .lcx
-            .rcx
-            .resolve_entire_style_set(self.fcx, &style, self.options.scale);
-        self.lcx.tree_style_builder.push_style_span(resolved);
+        let resolved = self.sink.resolve_style(&style);
+        self.tree.push_style_span(resolved);
     }
 
     pub fn push_style_modification_span<'s, 'iter>(
@@ -350,21 +376,19 @@ impl<'b, B: Brush> TreeBuilder<'b, B> {
         's: 'iter,
         B: 'iter,
     {
-        self.lcx
-            .tree_style_builder
-            .push_style_modification_span(properties.into_iter().map(|p| {
-                self.lcx
-                    .rcx
-                    .resolve_property(self.fcx, p, self.options.scale)
-            }));
+        self.tree.push_style_modification_span(
+            properties
+                .into_iter()
+                .map(|p| self.sink.resolve_property(p)),
+        );
     }
 
     pub fn pop_style_span(&mut self) {
-        self.lcx.tree_style_builder.pop_style_span();
+        self.tree.pop_style_span();
     }
 
     pub fn push_text(&mut self, text: &str) {
-        self.lcx.tree_style_builder.push_text(text);
+        self.tree.push_text(text, &mut self.sink);
     }
 
     /// Returns the pushed text so far, after whitespace processing, but excluding any trailing
@@ -377,7 +401,7 @@ impl<'b, B: Brush> TreeBuilder<'b, B> {
     /// collapsible whitespace ends up being kept (as a single space) depends on where it is and on
     /// what follows it. See [`Self::has_pending_whitespace`].
     pub fn text(&self) -> &str {
-        self.lcx.tree_style_builder.text()
+        self.tree.text()
     }
 
     /// Returns whether [`Self::text`] is followed by collapsible whitespace.
@@ -385,7 +409,7 @@ impl<'b, B: Brush> TreeBuilder<'b, B> {
     /// That white space is not yet part of [`Self::text`]: depending on where it is and what
     /// follows, it is either removed or kept as a single space.
     pub fn has_pending_whitespace(&self) -> bool {
-        self.lcx.tree_style_builder.has_pending_whitespace()
+        self.tree.has_pending_whitespace()
     }
 
     /// Pushes an inline box at the current position in the text.
@@ -399,28 +423,27 @@ impl<'b, B: Brush> TreeBuilder<'b, B> {
     pub fn push_inline_box(&mut self, mut inline_box: InlineBox) {
         // TODO: arrange type better here to factor out the index
         inline_box.index = if inline_box.kind == InlineBoxKind::InFlow {
-            self.lcx.tree_style_builder.push_inline_object()
+            self.tree.push_inline_object(&mut self.sink)
         } else {
-            self.lcx.tree_style_builder.text().len()
+            self.tree.text().len()
         };
-        let parent_style_index = self.lcx.tree_style_builder.resolve_current_style_id();
-        self.lcx
-            .inline_boxes
-            .push(LayoutInlineBox::new(inline_box, parent_style_index));
+        let parent_style_index = self.tree.resolve_current_style_id(&mut self.sink);
+        self.sink
+            .push_child_inline_box(parent_style_index, inline_box);
     }
 
     /// Sets the paragraph's base direction.
     ///
     /// The default is [`BaseDirection::Auto`], which infers the direction from the text.
     pub fn set_base_direction(&mut self, base_direction: BaseDirection) {
-        self.options.base_direction = base_direction;
+        self.sink.set_base_direction(base_direction);
     }
 
     /// Set the callback which will be called as a first provider of line breaking decisions.
     ///
     /// See [`LineBreakOverrideFn`] for more details.
     pub fn set_line_break_override(&mut self, overrides: Option<&'b LineBreakOverrideFn>) {
-        self.options.line_break_override = overrides;
+        self.sink.set_line_break_override(overrides);
     }
 
     /// Set the provider for dictionary data used for word and line segmentation.
@@ -431,20 +454,13 @@ impl<'b, B: Brush> TreeBuilder<'b, B> {
     ///
     /// Building this layout may panic if the provider returns an error other than `IdentifierNotFound`.
     pub fn set_dictionary_provider(&mut self, provider: Option<&'b dyn DictionaryProvider>) {
-        self.options.dictionary_provider = provider;
+        self.sink.set_dictionary_provider(provider);
     }
 
     #[inline]
-    pub fn build_into(self, layout: &mut Layout<B>) -> String {
-        // Apply TreeStyleBuilder styles to LayoutContext.
-        let text = self
-            .lcx
-            .tree_style_builder
-            .finish(&mut self.lcx.style_table, &mut self.lcx.style_runs);
-
-        // Call generic layout builder method
-        build_into_layout(layout, &text, self.lcx, self.fcx, self.options);
-
+    pub fn build_into(mut self, layout: &mut Layout<B>) -> String {
+        let text = self.tree.finish();
+        self.sink.finish_into(layout, &text);
         text
     }
 
@@ -453,6 +469,12 @@ impl<'b, B: Brush> TreeBuilder<'b, B> {
         let mut layout = Layout::default();
         let text = self.build_into(&mut layout);
         (layout, text)
+    }
+}
+
+impl<B: Brush> Drop for TreeBuilder<'_, B> {
+    fn drop(&mut self) {
+        self.sink.lcx.tree_style_builder = core::mem::take(&mut self.tree);
     }
 }
 

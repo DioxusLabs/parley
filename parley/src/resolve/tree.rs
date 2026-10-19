@@ -4,9 +4,10 @@
 //! Hierarchical tree based style application.
 use alloc::{string::String, vec::Vec};
 
+use crate::builder::StyleRunBuilder;
 use crate::style::{TextWrapMode, WhiteSpaceCollapse};
 
-use super::{Brush, ResolvedProperty, ResolvedStyle, StyleRun};
+use super::{Brush, ResolvedProperty, ResolvedStyle};
 
 #[derive(Debug, Clone)]
 struct StyleTreeNode<B: Brush> {
@@ -33,12 +34,11 @@ fn is_segment_break(c: char) -> bool {
     matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}')
 }
 
-/// Builder for constructing a tree of styles
+/// Builder for constructing a tree of styles, which materialises the styles and style runs
+/// that text is attributed to into a [`StyleRunBuilder`].
 #[derive(Clone)]
 pub(crate) struct TreeStyleBuilder<B: Brush> {
     tree: Vec<StyleTreeNode<B>>,
-    style_table: Vec<ResolvedStyle<B>>,
-    style_runs: Vec<StyleRun>,
     text: String,
     current_span: usize,
     /// The span that a not-yet-committed collapsible whitespace sequence belongs to.
@@ -53,8 +53,6 @@ impl<B: Brush> Default for TreeStyleBuilder<B> {
     fn default() -> Self {
         Self {
             tree: Vec::new(),
-            style_table: Vec::new(),
-            style_runs: Vec::new(),
             text: String::new(),
             current_span: usize::MAX,
             pending_whitespace: None,
@@ -71,10 +69,12 @@ impl<B: Brush> TreeStyleBuilder<B> {
     /// Prepares the builder for accepting a tree of styles and text.
     ///
     /// The provided `root_style` is the default style applied to all text unless overridden.
-    pub(crate) fn begin(&mut self, root_style: ResolvedStyle<B>) {
+    pub(crate) fn begin(
+        &mut self,
+        root_style: ResolvedStyle<B>,
+        sink: &mut StyleRunBuilder<'_, B>,
+    ) {
         self.tree.clear();
-        self.style_table.clear();
-        self.style_runs.clear();
         self.text.clear();
         self.pending_whitespace = None;
 
@@ -82,7 +82,8 @@ impl<B: Brush> TreeStyleBuilder<B> {
         // every other style (and as the strut for otherwise empty lines).
         let mut root_style = root_style;
         root_style.parent = 0;
-        self.style_table.push(root_style.clone());
+        let style_id = sink.push_resolved_style(0, root_style.clone());
+        debug_assert_eq!(style_id, 0, "the root style must be the first style");
         self.tree.push(StyleTreeNode {
             parent: None,
             style: root_style,
@@ -96,16 +97,16 @@ impl<B: Brush> TreeStyleBuilder<B> {
     /// [`crate::InlineBoxKind::InFlow`] to the current span.
     ///
     /// Returns the new character's byte offset.
-    pub(crate) fn push_inline_object(&mut self) -> usize {
-        self.flush_pending_whitespace();
+    pub(crate) fn push_inline_object(&mut self, sink: &mut StyleRunBuilder<'_, B>) -> usize {
+        self.flush_pending_whitespace(sink);
         let index = self.text.len();
-        self.commit_text(self.current_span, "\u{FFFC}");
+        self.commit_text(self.current_span, "\u{FFFC}", sink);
         index
     }
 
     /// Applies white space processing to `text` in the current span and commits the result, leaving
     /// any trailing collapsible whitespace pending.
-    pub(crate) fn push_text(&mut self, text: &str) {
+    pub(crate) fn push_text(&mut self, text: &str, sink: &mut StyleRunBuilder<'_, B>) {
         if text.is_empty() {
             return;
         }
@@ -119,8 +120,8 @@ impl<B: Brush> TreeStyleBuilder<B> {
                     // must be removed if it immediately precedes a preserved segment break.
                     self.pending_whitespace = None;
                 }
-                self.flush_pending_whitespace();
-                self.commit_text(span, text);
+                self.flush_pending_whitespace(sink);
+                self.commit_text(span, text, sink);
             }
             mode @ (WhiteSpaceCollapse::Collapse | WhiteSpaceCollapse::PreserveBreaks) => {
                 let mut rest = text;
@@ -148,15 +149,15 @@ impl<B: Brush> TreeStyleBuilder<B> {
                         // preserved as forced breaks.
                         self.pending_whitespace = None;
                         let break_len = rest.chars().next().unwrap().len_utf8();
-                        self.commit_text(span, &rest[..break_len]);
+                        self.commit_text(span, &rest[..break_len], sink);
                         rest = &rest[break_len..];
                         continue;
                     }
                     let text_len = rest
                         .find(|c| mode.is_collapsible(c) || is_segment_break(c))
                         .unwrap_or(rest.len());
-                    self.flush_pending_whitespace();
-                    self.commit_text(span, &rest[..text_len]);
+                    self.flush_pending_whitespace(sink);
+                    self.commit_text(span, &rest[..text_len], sink);
                     rest = &rest[text_len..];
                 }
             }
@@ -165,7 +166,7 @@ impl<B: Brush> TreeStyleBuilder<B> {
 
     /// Resolves a pending collapsible whitespace sequence, committing a single space for it if it
     /// is followed by content that it can collapse into, and dropping it otherwise.
-    pub(crate) fn flush_pending_whitespace(&mut self) {
+    pub(crate) fn flush_pending_whitespace(&mut self, sink: &mut StyleRunBuilder<'_, B>) {
         let Some(pending) = self.pending_whitespace.take() else {
             return;
         };
@@ -179,77 +180,70 @@ impl<B: Brush> TreeStyleBuilder<B> {
         }
 
         let style_index = if pending.wrappable {
-            self.resolve_wrappable_style_id(pending.span)
+            self.resolve_wrappable_style_id(pending.span, sink)
         } else {
-            self.resolve_style_id(pending.span)
+            self.resolve_style_id(pending.span, sink)
         };
-        self.commit_styled_text(style_index, " ");
+        self.commit_styled_text(style_index, " ", sink);
     }
 
     /// The style table index of the span that text is currently being pushed into.
-    pub(crate) fn resolve_current_style_id(&mut self) -> u16 {
-        self.resolve_style_id(self.current_span)
+    pub(crate) fn resolve_current_style_id(&mut self, sink: &mut StyleRunBuilder<'_, B>) -> u16 {
+        self.resolve_style_id(self.current_span, sink)
     }
 
     /// Appends already white space processed `text` to the buffer, attributed to `span`.
-    fn commit_text(&mut self, span: usize, text: &str) {
-        let style_index = self.resolve_style_id(span);
-        self.commit_styled_text(style_index, text);
+    fn commit_text(&mut self, span: usize, text: &str, sink: &mut StyleRunBuilder<'_, B>) {
+        let style_index = self.resolve_style_id(span, sink);
+        self.commit_styled_text(style_index, text, sink);
     }
 
     /// Appends already white space processed `text` to the buffer with the given style.
-    fn commit_styled_text(&mut self, style_index: u16, text: &str) {
+    fn commit_styled_text(
+        &mut self,
+        style_index: u16,
+        text: &str,
+        sink: &mut StyleRunBuilder<'_, B>,
+    ) {
         let start = self.text.len();
         self.text.push_str(text);
-        match self.style_runs.last_mut() {
-            Some(run) if run.style_index == style_index && run.range.end == start => {
-                run.range.end = self.text.len();
-            }
-            _ => self.style_runs.push(StyleRun {
-                style_index,
-                range: start..self.text.len(),
-            }),
-        }
+        sink.push_style_run(style_index, start..self.text.len());
     }
 
     /// The index of `span`'s style in the style table, adding it (and any ancestors that have not
     /// yet been added) to the table if necessary. Ancestors are added first so that a style's
     /// parent always has a lower index than the style itself.
-    fn resolve_style_id(&mut self, span: usize) -> u16 {
+    fn resolve_style_id(&mut self, span: usize, sink: &mut StyleRunBuilder<'_, B>) -> u16 {
         if let Some(style_id) = self.tree[span].style_id {
             return style_id;
         }
         let parent = self.tree[span]
             .parent
             .expect("root style is materialised in `begin`");
-        let parent_id = self.resolve_style_id(parent);
-        let mut style = self.tree[span].style.clone();
-        style.parent = parent_id;
-        let style_id = self.push_style(style);
+        let parent_id = self.resolve_style_id(parent, sink);
+        self.tree[span].style.parent = parent_id;
+        let style_id = sink.push_resolved_style(parent_id, self.tree[span].style.clone());
         self.tree[span].style_id = Some(style_id);
         style_id
     }
 
-    fn push_style(&mut self, style: ResolvedStyle<B>) -> u16 {
-        let style_id = self.style_table.len();
-        assert!(style_id <= u16::MAX as usize, "too many styles");
-        self.style_table.push(style);
-        style_id as u16
-    }
-
     /// The index of `span`'s style with wrapping enabled, adding it to the table if necessary.
-    fn resolve_wrappable_style_id(&mut self, span: usize) -> u16 {
+    fn resolve_wrappable_style_id(
+        &mut self,
+        span: usize,
+        sink: &mut StyleRunBuilder<'_, B>,
+    ) -> u16 {
         if self.tree[span].style.text_wrap_mode == TextWrapMode::Wrap {
-            return self.resolve_style_id(span);
+            return self.resolve_style_id(span, sink);
         }
         if let Some(style_id) = self.tree[span].wrappable_style_id {
             return style_id;
         }
         // Materialise the span itself first so the wrappable variant shares its parent.
-        let span_id = self.resolve_style_id(span);
-        let mut style = self.style_table[usize::from(span_id)].clone();
+        self.resolve_style_id(span, sink);
+        let mut style = self.tree[span].style.clone();
         style.text_wrap_mode = TextWrapMode::Wrap;
-        let style_id = self.push_style(style);
+        let style_id = sink.push_resolved_style(style.parent, style);
         self.tree[span].wrappable_style_id = Some(style_id);
         style_id
     }
@@ -294,27 +288,13 @@ impl<B: Brush> TreeStyleBuilder<B> {
             .expect("Popped root style");
     }
 
-    /// Computes style table + style runs and returns the final text buffer.
-    pub(crate) fn finish(
-        &mut self,
-        style_table: &mut Vec<ResolvedStyle<B>>,
-        style_runs: &mut Vec<StyleRun>,
-    ) -> String {
+    /// Closes any open spans and returns the final text buffer.
+    ///
+    /// The style table and style runs have already been pushed to the [`StyleRunBuilder`], which
+    /// adds the empty run for the root style if there is no text.
+    pub(crate) fn finish(&mut self) -> String {
         while self.tree[self.current_span].parent.is_some() {
             self.pop_style_span();
-        }
-
-        style_table.clear();
-        style_runs.clear();
-        style_table.extend_from_slice(&self.style_table);
-        style_runs.extend_from_slice(&self.style_runs);
-
-        if style_runs.is_empty() {
-            // If there's no text, the layout still needs the root style, e.g., to size a cursor.
-            style_runs.push(StyleRun {
-                style_index: 0,
-                range: 0..0,
-            });
         }
 
         core::mem::take(&mut self.text)
@@ -324,8 +304,19 @@ impl<B: Brush> TreeStyleBuilder<B> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::vec::Vec;
+    use crate::{FontContext, LayoutContext};
     use core::ops::Range;
+    use fontique::{Collection, CollectionOptions};
+
+    fn font_context() -> FontContext {
+        FontContext {
+            collection: Collection::new(CollectionOptions {
+                shared: false,
+                system_fonts: false,
+            }),
+            source_cache: Default::default(),
+        }
+    }
 
     #[test]
     fn preserve_breaks_collapses_across_text_and_style_boundaries() {
@@ -339,16 +330,22 @@ mod tests {
             ("a\u{000b}\u{000c}\u{0085}b", "a\u{000b}\u{000c}\u{0085}b"),
         ] {
             for split in (0..=input.len()).filter(|&i| input.is_char_boundary(i)) {
+                let mut lcx = LayoutContext::<u32>::new();
+                let mut fcx = font_context();
+                let mut sink = lcx.style_run_builder_without_text(&mut fcx, 1., false);
                 let mut builder = TreeStyleBuilder::<u32>::default();
-                builder.begin(ResolvedStyle {
-                    white_space_collapse: WhiteSpaceCollapse::PreserveBreaks,
-                    ..ResolvedStyle::default()
-                });
-                builder.push_text(&input[..split]);
+                builder.begin(
+                    ResolvedStyle {
+                        white_space_collapse: WhiteSpaceCollapse::PreserveBreaks,
+                        ..ResolvedStyle::default()
+                    },
+                    &mut sink,
+                );
+                builder.push_text(&input[..split], &mut sink);
                 builder.push_style_modification_span([ResolvedProperty::FontSize(20.)].into_iter());
-                builder.push_text(&input[split..]);
+                builder.push_text(&input[split..], &mut sink);
                 builder.pop_style_span();
-                let text = builder.finish(&mut Vec::new(), &mut Vec::new());
+                let text = builder.finish();
                 assert_eq!(text, expected, "{input:?} split at {split}");
             }
         }
@@ -356,11 +353,17 @@ mod tests {
 
     #[test]
     fn preserve_breaks_keeps_pending_whitespace_provenance_across_modes() {
+        let mut lcx = LayoutContext::<u32>::new();
+        let mut fcx = font_context();
+        let mut sink = lcx.style_run_builder_without_text(&mut fcx, 1., false);
         let mut builder = TreeStyleBuilder::<u32>::default();
-        builder.begin(ResolvedStyle {
-            white_space_collapse: WhiteSpaceCollapse::Collapse,
-            ..ResolvedStyle::default()
-        });
+        builder.begin(
+            ResolvedStyle {
+                white_space_collapse: WhiteSpaceCollapse::Collapse,
+                ..ResolvedStyle::default()
+            },
+            &mut sink,
+        );
         builder.push_style_modification_span(
             [
                 ResolvedProperty::Brush(1),
@@ -368,7 +371,7 @@ mod tests {
             ]
             .into_iter(),
         );
-        builder.push_text("a ");
+        builder.push_text("a ", &mut sink);
         builder.pop_style_span();
         builder.push_style_modification_span(
             [ResolvedProperty::WhiteSpaceCollapse(
@@ -376,11 +379,10 @@ mod tests {
             )]
             .into_iter(),
         );
-        builder.push_text("\tb \t\n \tc");
-
-        let mut styles = Vec::new();
-        let mut runs = Vec::new();
-        let text = builder.finish(&mut styles, &mut runs);
+        builder.push_text("\tb \t\n \tc", &mut sink);
+        let text = builder.finish();
+        let styles = &sink.lcx.style_table;
+        let runs = &sink.lcx.style_runs;
         assert_eq!(text, "a b\nc");
         let space = runs.iter().find(|run| run.range.contains(&1)).unwrap();
         let style = &styles[space.style_index as usize];
@@ -391,35 +393,42 @@ mod tests {
 
     #[test]
     fn collapses_ascii_whitespace_without_trimming_non_ascii_whitespace() {
+        let mut lcx = LayoutContext::<u32>::new();
+        let mut fcx = font_context();
+        let mut sink = lcx.style_run_builder_without_text(&mut fcx, 1., false);
         let mut builder = TreeStyleBuilder::<u32>::default();
-        builder.begin(ResolvedStyle {
-            white_space_collapse: WhiteSpaceCollapse::Collapse,
-            ..ResolvedStyle::default()
-        });
-        builder.push_text(" \u{00a0}text\u{00a0} ");
-
-        let mut style_table = Vec::new();
-        let mut style_runs = Vec::new();
-        let text = builder.finish(&mut style_table, &mut style_runs);
+        builder.begin(
+            ResolvedStyle {
+                white_space_collapse: WhiteSpaceCollapse::Collapse,
+                ..ResolvedStyle::default()
+            },
+            &mut sink,
+        );
+        builder.push_text(" \u{00a0}text\u{00a0} ", &mut sink);
+        let text = builder.finish();
 
         assert_eq!(text, "\u{00a0}text\u{00a0}");
     }
 
     #[test]
     fn collapsible_whitespace_at_span_end_is_committed_with_the_span_style() {
+        let mut lcx = LayoutContext::<u32>::new();
+        let mut fcx = font_context();
+        let mut sink = lcx.style_run_builder_without_text(&mut fcx, 1., false);
         let mut builder = TreeStyleBuilder::<u32>::default();
-        builder.begin(ResolvedStyle {
-            white_space_collapse: WhiteSpaceCollapse::Collapse,
-            ..ResolvedStyle::default()
-        });
+        builder.begin(
+            ResolvedStyle {
+                white_space_collapse: WhiteSpaceCollapse::Collapse,
+                ..ResolvedStyle::default()
+            },
+            &mut sink,
+        );
         builder.push_style_modification_span([ResolvedProperty::FontSize(20.)].into_iter());
-        builder.push_text("A ");
+        builder.push_text("A ", &mut sink);
         builder.pop_style_span();
-        builder.push_text("B");
-
-        let mut style_table = Vec::new();
-        let mut style_runs = Vec::new();
-        let text = builder.finish(&mut style_table, &mut style_runs);
+        builder.push_text("B", &mut sink);
+        let text = builder.finish();
+        let style_runs = &sink.lcx.style_runs;
 
         assert_eq!(text, "A B");
         assert_eq!(style_runs.len(), 2);
@@ -431,67 +440,75 @@ mod tests {
 
     #[test]
     fn collapsible_whitespace_before_preserved_text_is_committed() {
+        let mut lcx = LayoutContext::<u32>::new();
+        let mut fcx = font_context();
+        let mut sink = lcx.style_run_builder_without_text(&mut fcx, 1., false);
         let mut builder = TreeStyleBuilder::<u32>::default();
-        builder.begin(ResolvedStyle {
-            white_space_collapse: WhiteSpaceCollapse::Collapse,
-            ..ResolvedStyle::default()
-        });
-        builder.push_text("A ");
+        builder.begin(
+            ResolvedStyle {
+                white_space_collapse: WhiteSpaceCollapse::Collapse,
+                ..ResolvedStyle::default()
+            },
+            &mut sink,
+        );
+        builder.push_text("A ", &mut sink);
         builder.push_style_modification_span(
             [ResolvedProperty::WhiteSpaceCollapse(
                 WhiteSpaceCollapse::Preserve,
             )]
             .into_iter(),
         );
-        builder.push_text("  B  ");
+        builder.push_text("  B  ", &mut sink);
         builder.pop_style_span();
-        builder.push_text("  C");
-
-        let mut style_table = Vec::new();
-        let mut style_runs = Vec::new();
-        let text = builder.finish(&mut style_table, &mut style_runs);
+        builder.push_text("  C", &mut sink);
+        let text = builder.finish();
 
         assert_eq!(text, "A   B   C");
     }
 
     #[test]
     fn collapsible_whitespace_around_a_preserved_segment_break_is_removed() {
+        let mut lcx = LayoutContext::<u32>::new();
+        let mut fcx = font_context();
+        let mut sink = lcx.style_run_builder_without_text(&mut fcx, 1., false);
         let mut builder = TreeStyleBuilder::<u32>::default();
-        builder.begin(ResolvedStyle {
-            white_space_collapse: WhiteSpaceCollapse::Collapse,
-            ..ResolvedStyle::default()
-        });
-        builder.push_text("A  ");
+        builder.begin(
+            ResolvedStyle {
+                white_space_collapse: WhiteSpaceCollapse::Collapse,
+                ..ResolvedStyle::default()
+            },
+            &mut sink,
+        );
+        builder.push_text("A  ", &mut sink);
         builder.push_style_modification_span(
             [ResolvedProperty::WhiteSpaceCollapse(
                 WhiteSpaceCollapse::Preserve,
             )]
             .into_iter(),
         );
-        builder.push_text("\n");
+        builder.push_text("\n", &mut sink);
         builder.pop_style_span();
-        builder.push_text("  B");
-
-        let mut style_table = Vec::new();
-        let mut style_runs = Vec::new();
-        let text = builder.finish(&mut style_table, &mut style_runs);
+        builder.push_text("  B", &mut sink);
+        let text = builder.finish();
 
         assert_eq!(text, "A\nB");
     }
 
     #[test]
     fn reuses_style_id_when_returning_to_parent_span() {
+        let mut lcx = LayoutContext::<u32>::new();
+        let mut fcx = font_context();
+        let mut sink = lcx.style_run_builder_without_text(&mut fcx, 1., false);
         let mut builder = TreeStyleBuilder::<u32>::default();
-        builder.begin(ResolvedStyle::default());
-        builder.push_text("A");
+        builder.begin(ResolvedStyle::default(), &mut sink);
+        builder.push_text("A", &mut sink);
         builder.push_style_modification_span([ResolvedProperty::FontSize(20.)].into_iter());
-        builder.push_text("B");
+        builder.push_text("B", &mut sink);
         builder.pop_style_span();
-        builder.push_text("C");
-
-        let mut style_table = Vec::new();
-        let mut style_runs = Vec::new();
-        let text = builder.finish(&mut style_table, &mut style_runs);
+        builder.push_text("C", &mut sink);
+        let text = builder.finish();
+        let style_table = &sink.lcx.style_table;
+        let style_runs = &sink.lcx.style_runs;
 
         assert_eq!(text, "ABC");
         assert_eq!(style_table.len(), 2);
@@ -506,21 +523,23 @@ mod tests {
 
     #[test]
     fn reuses_root_style_id_across_multiple_pop_return_cycles() {
+        let mut lcx = LayoutContext::<u32>::new();
+        let mut fcx = font_context();
+        let mut sink = lcx.style_run_builder_without_text(&mut fcx, 1., false);
         let mut builder = TreeStyleBuilder::<u32>::default();
-        builder.begin(ResolvedStyle::default());
-        builder.push_text("A");
+        builder.begin(ResolvedStyle::default(), &mut sink);
+        builder.push_text("A", &mut sink);
         builder.push_style_modification_span([ResolvedProperty::FontSize(20.)].into_iter());
-        builder.push_text("B");
+        builder.push_text("B", &mut sink);
         builder.pop_style_span();
-        builder.push_text("C");
+        builder.push_text("C", &mut sink);
         builder.push_style_modification_span([ResolvedProperty::LetterSpacing(1.)].into_iter());
-        builder.push_text("D");
+        builder.push_text("D", &mut sink);
         builder.pop_style_span();
-        builder.push_text("E");
-
-        let mut style_table = Vec::new();
-        let mut style_runs = Vec::new();
-        let text = builder.finish(&mut style_table, &mut style_runs);
+        builder.push_text("E", &mut sink);
+        let text = builder.finish();
+        let style_table = &sink.lcx.style_table;
+        let style_runs = &sink.lcx.style_runs;
 
         assert_eq!(text, "ABCDE");
         assert_eq!(style_table.len(), 3);
@@ -534,17 +553,19 @@ mod tests {
 
     #[test]
     fn materialises_ancestor_spans_without_text() {
+        let mut lcx = LayoutContext::<u32>::new();
+        let mut fcx = font_context();
+        let mut sink = lcx.style_run_builder_without_text(&mut fcx, 1., false);
         let mut builder = TreeStyleBuilder::<u32>::default();
-        builder.begin(ResolvedStyle::default());
+        builder.begin(ResolvedStyle::default(), &mut sink);
         builder.push_style_modification_span([ResolvedProperty::FontSize(40.)].into_iter());
         builder.push_style_modification_span([ResolvedProperty::FontSize(20.)].into_iter());
-        builder.push_text("B");
+        builder.push_text("B", &mut sink);
         builder.pop_style_span();
         builder.pop_style_span();
-
-        let mut style_table = Vec::new();
-        let mut style_runs = Vec::new();
-        let text = builder.finish(&mut style_table, &mut style_runs);
+        let text = builder.finish();
+        let style_table = &sink.lcx.style_table;
+        let style_runs = &sink.lcx.style_runs;
 
         assert_eq!(text, "B");
         assert_eq!(style_table.len(), 3);
@@ -559,36 +580,39 @@ mod tests {
 
     #[test]
     fn empty_text_uses_root_style() {
+        let mut lcx = LayoutContext::<u32>::new();
+        let mut fcx = font_context();
+        let mut sink = lcx.style_run_builder_without_text(&mut fcx, 1., false);
         let mut builder = TreeStyleBuilder::<u32>::default();
-        builder.begin(ResolvedStyle::default());
+        builder.begin(ResolvedStyle::default(), &mut sink);
+        let text = builder.finish();
+        let style_table = &sink.lcx.style_table;
+        let style_runs = &sink.lcx.style_runs;
 
-        let mut style_table = Vec::new();
-        let mut style_runs = Vec::new();
-        builder.finish(&mut style_table, &mut style_runs);
-
+        assert_eq!(text, "");
         assert_eq!(style_table.len(), 1);
-        assert_eq!(style_runs.len(), 1);
-        assert_eq!(style_runs[0].style_index, 0);
-        assert_eq!(style_runs[0].range, Range { start: 0, end: 0 });
+        assert!(style_runs.is_empty());
     }
 
     #[test]
     fn reuses_parent_and_root_style_ids_after_nested_pop() {
+        let mut lcx = LayoutContext::<u32>::new();
+        let mut fcx = font_context();
+        let mut sink = lcx.style_run_builder_without_text(&mut fcx, 1., false);
         let mut builder = TreeStyleBuilder::<u32>::default();
-        builder.begin(ResolvedStyle::default());
-        builder.push_text("R");
+        builder.begin(ResolvedStyle::default(), &mut sink);
+        builder.push_text("R", &mut sink);
         builder.push_style_modification_span([ResolvedProperty::FontSize(20.)].into_iter());
-        builder.push_text("A");
+        builder.push_text("A", &mut sink);
         builder.push_style_modification_span([ResolvedProperty::LetterSpacing(1.)].into_iter());
-        builder.push_text("B");
+        builder.push_text("B", &mut sink);
         builder.pop_style_span();
-        builder.push_text("C");
+        builder.push_text("C", &mut sink);
         builder.pop_style_span();
-        builder.push_text("D");
-
-        let mut style_table = Vec::new();
-        let mut style_runs = Vec::new();
-        let text = builder.finish(&mut style_table, &mut style_runs);
+        builder.push_text("D", &mut sink);
+        let text = builder.finish();
+        let style_table = &sink.lcx.style_table;
+        let style_runs = &sink.lcx.style_runs;
 
         assert_eq!(text, "RABCD");
         assert_eq!(style_table.len(), 3);
@@ -602,18 +626,24 @@ mod tests {
 
     #[test]
     fn reports_pending_whitespace() {
+        let mut lcx = LayoutContext::<u32>::new();
+        let mut fcx = font_context();
+        let mut sink = lcx.style_run_builder_without_text(&mut fcx, 1., false);
         let mut builder = TreeStyleBuilder::<u32>::default();
-        builder.begin(ResolvedStyle {
-            white_space_collapse: WhiteSpaceCollapse::Collapse,
-            ..ResolvedStyle::default()
-        });
+        builder.begin(
+            ResolvedStyle {
+                white_space_collapse: WhiteSpaceCollapse::Collapse,
+                ..ResolvedStyle::default()
+            },
+            &mut sink,
+        );
         assert_eq!(builder.text(), "");
         assert!(!builder.has_pending_whitespace());
-        builder.push_text("  a  ");
+        builder.push_text("  a  ", &mut sink);
         assert_eq!(builder.text(), "a");
         assert!(builder.has_pending_whitespace());
         builder.push_style_modification_span([ResolvedProperty::FontSize(20.)].into_iter());
-        builder.push_text(" b");
+        builder.push_text(" b", &mut sink);
         assert_eq!(builder.text(), "a b");
         assert!(!builder.has_pending_whitespace());
         builder.pop_style_span();

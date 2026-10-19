@@ -196,15 +196,20 @@ impl<B: Brush> LayoutContext<B> {
         self.begin();
 
         let resolved_root_style = self.resolve_style_set(fcx, scale, root_style);
-        self.tree_style_builder.begin(resolved_root_style);
 
         fcx.source_cache.prune(128, false);
 
-        TreeBuilder {
+        let mut tree = core::mem::take(&mut self.tree_style_builder);
+        let mut sink = StyleRunBuilder {
             options: BuilderOptions::new(scale, quantize),
+            len: None,
             lcx: self,
             fcx,
-        }
+            cursor: 0,
+        };
+        tree.begin(resolved_root_style, &mut sink);
+
+        TreeBuilder { sink, tree }
     }
 
     fn begin(&mut self) {
