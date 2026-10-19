@@ -148,17 +148,50 @@ impl<'b, B: Brush> StyleRunBuilder<'b, B> {
 
     /// Adds a fully-specified style to the shared style table and
     /// returns its index.
+    ///
+    /// The style is treated as a child of the root style (index 0); use
+    /// [`Self::push_child_style`] to nest it in another span.
     pub fn push_style<'family, 'settings>(
         &mut self,
+        style: TextStyle<'family, 'settings, B>,
+    ) -> u16 {
+        self.push_child_style(0, style)
+    }
+
+    /// Adds a fully-specified style nested in the span whose style has index
+    /// `parent_style_index`, and returns its index. The parent is what the
+    /// style's `vertical_align` is relative to.
+    ///
+    /// # Panics
+    ///
+    /// If `parent_style_index` is not `0` or the index of a previously added style.
+    pub fn push_child_style<'family, 'settings>(
+        &mut self,
+        parent_style_index: u16,
         style: TextStyle<'family, 'settings, B>,
     ) -> u16 {
         let resolved = self
             .lcx
             .rcx
             .resolve_entire_style_set(self.fcx, &style, self.options.scale);
+        self.push_resolved_style(parent_style_index, resolved)
+    }
+
+    /// Adds an already resolved style with the given parent to the style table and returns
+    /// its index.
+    pub(crate) fn push_resolved_style(
+        &mut self,
+        parent_style_index: u16,
+        mut style: ResolvedStyle<B>,
+    ) -> u16 {
         let style_index = self.lcx.style_table.len();
+        assert!(
+            parent_style_index == 0 || usize::from(parent_style_index) < style_index,
+            "StyleRunBuilder expects a parent style that was previously added"
+        );
         assert!(style_index <= u16::MAX as usize, "too many styles");
-        self.lcx.style_table.push(resolved);
+        style.parent = parent_style_index;
+        self.lcx.style_table.push(style);
         style_index as u16
     }
 
