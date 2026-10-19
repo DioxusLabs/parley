@@ -101,16 +101,20 @@ impl<B: Brush> LayoutContext<B> {
         self.begin();
 
         let resolved_root_style = self.resolve_style_set(fcx, scale, &TextStyle::default());
-        self.ranged_style_builder
-            .begin(resolved_root_style, text.len());
 
         fcx.source_cache.prune(128, false);
 
-        RangedBuilder {
+        let mut ranged = core::mem::take(&mut self.ranged_style_builder);
+        ranged.begin(resolved_root_style, text.len());
+        let sink = StyleRunBuilder {
             options: BuilderOptions::new(scale, quantize),
+            len: Some(text.len()),
             lcx: self,
             fcx,
-        }
+            cursor: 0,
+        };
+
+        RangedBuilder { sink, ranged }
     }
 
     /// Create a builder for constructing a layout from indexed style runs.
