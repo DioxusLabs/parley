@@ -229,7 +229,8 @@ impl<'b, B: Brush> StyleRunBuilder<'b, B> {
         self.cursor = range.end;
     }
 
-    /// Adds an inline box.
+    /// Adds an inline box, treated as a child of the root style (index 0); use
+    /// [`Self::push_child_inline_box`] to nest it in another span.
     ///
     /// In-flow boxes ([`InlineBoxKind::InFlow`]) must have a matching U+FFFC OBJECT REPLACEMENT
     /// CHARACTER at its [`index`](InlineBox::index) in the text.
@@ -241,9 +242,24 @@ impl<'b, B: Brush> StyleRunBuilder<'b, B> {
     /// Building the layout panics if an in-flow box's index isn't that of a U+FFFC character in the
     /// text, or if two in-flow boxes share a single U+FFFC character.
     pub fn push_inline_box(&mut self, inline_box: InlineBox) {
+        self.push_child_inline_box(0, inline_box);
+    }
+
+    /// Adds an inline box nested in the span whose style has index `parent_style_index`,
+    /// which is what the box's `vertical_align` is relative to. For an in-flow box the parent
+    /// is instead the style of the run containing its U+FFFC character.
+    ///
+    /// # Panics
+    ///
+    /// If `parent_style_index` is not `0` or the index of a previously added style.
+    pub fn push_child_inline_box(&mut self, parent_style_index: u16, inline_box: InlineBox) {
+        assert!(
+            parent_style_index == 0 || usize::from(parent_style_index) < self.lcx.style_table.len(),
+            "StyleRunBuilder expects a parent style that was previously added"
+        );
         self.lcx
             .inline_boxes
-            .push(LayoutInlineBox::new(inline_box, 0));
+            .push(LayoutInlineBox::new(inline_box, parent_style_index));
     }
 
     /// Sets the paragraph's base direction.
