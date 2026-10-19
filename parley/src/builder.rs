@@ -18,7 +18,7 @@ use parley_engine::{AnalysisDataSources, DictionaryProvider};
 use crate::InlineBoxKind;
 use crate::inline_box::{InlineBox, LayoutInlineBox};
 use crate::resolve::tree::TreeStyleBuilder;
-use crate::resolve::{ResolvedProperty, ResolvedStyle, StyleRun};
+use crate::resolve::{RangedStyleBuilder, ResolvedProperty, ResolvedStyle, StyleRun};
 use crate::util::{resolve_bounded_range, resolve_range};
 
 #[derive(Clone, Copy)]
@@ -47,18 +47,16 @@ impl BuilderOptions<'_> {
 /// This builder does not collapse whitespace. For whitespace collapsing, use the [`TreeBuilder`]
 #[must_use]
 pub struct RangedBuilder<'a, B: Brush> {
-    pub(crate) options: BuilderOptions<'a>,
-    pub(crate) lcx: &'a mut LayoutContext<B>,
-    pub(crate) fcx: &'a mut FontContext,
+    /// The style run builder that the resolved styles, runs and inline boxes are pushed to.
+    pub(crate) sink: StyleRunBuilder<'a, B>,
+    /// Taken from the [`LayoutContext`] while building, and returned to it when dropped.
+    pub(crate) ranged: RangedStyleBuilder<B>,
 }
 
 impl<'b, B: Brush> RangedBuilder<'b, B> {
     pub fn push_default<'a>(&mut self, property: impl Into<StyleProperty<'a, B>>) {
-        let resolved =
-            self.lcx
-                .rcx
-                .resolve_property(self.fcx, &property.into(), self.options.scale);
-        self.lcx.ranged_style_builder.push_default(resolved);
+        let resolved = self.sink.resolve_property(&property.into());
+        self.ranged.push_default(resolved);
     }
 
     pub fn push<'a>(
@@ -66,33 +64,26 @@ impl<'b, B: Brush> RangedBuilder<'b, B> {
         property: impl Into<StyleProperty<'a, B>>,
         range: impl RangeBounds<usize>,
     ) {
-        let resolved =
-            self.lcx
-                .rcx
-                .resolve_property(self.fcx, &property.into(), self.options.scale);
-        self.lcx.ranged_style_builder.push(resolved, range);
+        let resolved = self.sink.resolve_property(&property.into());
+        self.ranged.push(resolved, range);
     }
 
     pub fn push_inline_box(&mut self, inline_box: InlineBox) {
-        self.lcx.inline_boxes.push(LayoutInlineBox {
-            inline_box,
-            parent_style_index: 0,
-            baseline_offset: 0.,
-        });
+        self.sink.push_inline_box(inline_box);
     }
 
     /// Sets the paragraph's base direction.
     ///
     /// The default is [`BaseDirection::Auto`], which infers the direction from the text.
     pub fn set_base_direction(&mut self, base_direction: BaseDirection) {
-        self.options.base_direction = base_direction;
+        self.sink.set_base_direction(base_direction);
     }
 
     /// Set the callback which will be called as a first provider of line breaking decisions.
     ///
     /// See [`LineBreakOverrideFn`] for more details.
     pub fn set_line_break_override(&mut self, overrides: Option<&'b LineBreakOverrideFn>) {
-        self.options.line_break_override = overrides;
+        self.sink.set_line_break_override(overrides);
     }
 
     /// Set the provider for dictionary data used for word and line segmentation.
@@ -103,23 +94,24 @@ impl<'b, B: Brush> RangedBuilder<'b, B> {
     ///
     /// Building this layout may panic if the provider returns an error other than `IdentifierNotFound`.
     pub fn set_dictionary_provider(&mut self, provider: Option<&'b dyn DictionaryProvider>) {
-        self.options.dictionary_provider = provider;
+        self.sink.set_dictionary_provider(provider);
     }
 
-    pub fn build_into(self, layout: &mut Layout<B>, text: impl AsRef<str>) {
-        // Apply RangedStyleBuilder styles directly to style-table/style-run state.
-        self.lcx
-            .ranged_style_builder
-            .finish(&mut self.lcx.style_table, &mut self.lcx.style_runs);
-
-        // Call generic layout builder method
-        build_into_layout(layout, text.as_ref(), self.lcx, self.fcx, self.options);
+    pub fn build_into(mut self, layout: &mut Layout<B>, text: impl AsRef<str>) {
+        self.ranged.finish(&mut self.sink);
+        self.sink.finish_into(layout, text.as_ref());
     }
 
     pub fn build(self, text: impl AsRef<str>) -> Layout<B> {
         let mut layout = Layout::default();
         self.build_into(&mut layout, text);
         layout
+    }
+}
+
+impl<B: Brush> Drop for RangedBuilder<'_, B> {
+    fn drop(&mut self) {
+        self.sink.lcx.ranged_style_builder = core::mem::take(&mut self.ranged);
     }
 }
 
