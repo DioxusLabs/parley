@@ -314,7 +314,7 @@ mod tests {
                 shared: false,
                 system_fonts: false,
             }),
-            source_cache: Default::default(),
+            source_cache: fontique::SourceCache::default(),
         }
     }
 
