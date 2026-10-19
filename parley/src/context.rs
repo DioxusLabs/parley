@@ -132,7 +132,33 @@ impl<B: Brush> LayoutContext<B> {
 
         StyleRunBuilder {
             options: BuilderOptions::new(scale, quantize),
-            len: text.len(),
+            len: Some(text.len()),
+            lcx: self,
+            fcx,
+            cursor: 0,
+        }
+    }
+
+    /// Create a builder for constructing a layout from indexed style runs, without
+    /// knowing the text up front.
+    ///
+    /// Like [`Self::style_run_builder`], except that the text is only supplied to
+    /// [`StyleRunBuilder::build_into`] or [`StyleRunBuilder::build`], so that styles, runs
+    /// and inline boxes can be pushed while the text is still being produced. Style run
+    /// ranges therefore need an explicit end, and are checked to cover the text when it is built.
+    pub fn style_run_builder_without_text<'a>(
+        &'a mut self,
+        fcx: &'a mut FontContext,
+        scale: f32,
+        quantize: bool,
+    ) -> StyleRunBuilder<'a, B> {
+        self.begin();
+
+        fcx.source_cache.prune(128, false);
+
+        StyleRunBuilder {
+            options: BuilderOptions::new(scale, quantize),
+            len: None,
             lcx: self,
             fcx,
             cursor: 0,
