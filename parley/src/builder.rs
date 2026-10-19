@@ -18,7 +18,7 @@ use parley_engine::{AnalysisDataSources, DictionaryProvider, InlineObject};
 use crate::InlineBoxKind;
 use crate::inline_box::{InlineBox, LayoutInlineBox};
 use crate::resolve::{ResolvedStyle, StyleRun};
-use crate::util::resolve_range;
+use crate::util::{resolve_bounded_range, resolve_range};
 
 #[derive(Clone, Copy)]
 pub(crate) struct BuilderOptions<'a> {
@@ -138,7 +138,8 @@ impl<'b, B: Brush> RangedBuilder<'b, B> {
 #[must_use]
 pub struct StyleRunBuilder<'a, B: Brush> {
     pub(crate) options: BuilderOptions<'a>,
-    pub(crate) len: usize,
+    /// The length of the text, if it was supplied up front.
+    pub(crate) len: Option<usize>,
     pub(crate) lcx: &'a mut LayoutContext<B>,
     pub(crate) fcx: &'a mut FontContext,
     pub(crate) cursor: usize,
@@ -207,9 +208,15 @@ impl<'b, B: Brush> StyleRunBuilder<'b, B> {
     /// Adds a style run referencing an entry from the style table.
     ///
     /// Runs must be contiguous and non-overlapping, and must cover
-    /// `0..text.len()` once all runs have been added.
+    /// `0..text.len()` once all runs have been added. If the builder was
+    /// created without the text, the range's end must be bounded.
     pub fn push_style_run(&mut self, style_index: u16, range: impl RangeBounds<usize>) {
-        let range = resolve_range(range, self.len);
+        let range = match self.len {
+            Some(len) => resolve_range(range, len),
+            None => resolve_bounded_range(range).expect(
+                "StyleRunBuilder expects an explicit run end when the text is not known up front",
+            ),
+        };
         assert!(
             range.start == self.cursor,
             "StyleRunBuilder expects contiguous non-overlapping runs"
@@ -288,8 +295,9 @@ impl<'b, B: Brush> StyleRunBuilder<'b, B> {
     }
 
     pub fn build_into(self, layout: &mut Layout<B>, text: impl AsRef<str>) {
+        let text = text.as_ref();
         assert!(
-            self.cursor == self.len,
+            self.cursor == text.len(),
             "StyleRunBuilder requires runs that cover the full text"
         );
         if self.lcx.style_runs.is_empty() {
@@ -308,7 +316,7 @@ impl<'b, B: Brush> StyleRunBuilder<'b, B> {
                 range: 0..0,
             });
         }
-        build_into_layout(layout, text.as_ref(), self.lcx, self.fcx, self.options);
+        build_into_layout(layout, text, self.lcx, self.fcx, self.options);
     }
 
     pub fn build(self, text: impl AsRef<str>) -> Layout<B> {
