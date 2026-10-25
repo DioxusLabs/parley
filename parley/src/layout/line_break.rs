@@ -1649,6 +1649,9 @@ fn commit_line<B: Brush>(
     // Mark line as needing bidi re-ordering if it contains any runs with non-zero bidi level
     // (zero is the default level, so this is equivalent to marking lines that have multiple levels)
     let mut needs_reorder = false;
+    // Whether any item is at a level other than the paragraph's, so that trailing whitespace may
+    // need resetting to it (UAX #9 L1).
+    let mut needs_level_reset = false;
     for (i, item) in items_to_commit.iter().enumerate() {
         match item.kind {
             LayoutItemKind::OutOfFlowBox => {
@@ -1708,6 +1711,7 @@ fn commit_line<B: Brush>(
                 text_start = text_start.min(item_text_range.start);
                 text_end = text_end.max(item_text_range.end);
                 needs_reorder |= shaped_run.bidi_level != BidiLevel::new(0);
+                needs_level_reset |= shaped_run.bidi_level != layout.data.base_level;
 
                 lines.line_items.push(LineItemData {
                     kind: LayoutItemKind::TextRun,
@@ -1720,8 +1724,7 @@ fn commit_line<B: Brush>(
         }
     }
     // let end_run_idx = lines.line_items.last().map(|item| item.index).unwrap_or(0);
-    // Only lines that are reordered can have whitespace at a level other than the base level.
-    if needs_reorder {
+    if needs_level_reset {
         reset_trailing_whitespace_level(layout, &mut lines.line_items, start_item_idx);
     }
     let end_item_idx = lines.line_items.len();
