@@ -6,8 +6,9 @@
 use crate::util::TestEnv;
 use crate::{test_name, util::ColorBrush};
 use parley::{
-    Alignment, AlignmentOptions, ContentWidths, IndentOptions, InlineBox, InlineBoxKind, Layout,
-    LineBreak, StyleProperty, TextWrapMode, VerticalAlign, WhiteSpaceCollapse,
+    Alignment, AlignmentOptions, BaseDirection, ContentWidths, IndentOptions, InlineBox,
+    InlineBoxKind, Layout, LineBreak, StyleProperty, TextWrapMode, VerticalAlign,
+    WhiteSpaceCollapse,
 };
 
 /// Checks that calculated content widths agree with actual line breaking.
@@ -110,6 +111,26 @@ fn content_widths_partially_hanging_atom() {
             3,
             "one word per line at the min content width"
         );
+
+        // The space hangs at the line's end edge whether or not the text's direction is the
+        // paragraph's: UAX #9 L1 splits it off its atom.
+        for direction in [BaseDirection::Ltr, BaseDirection::Rtl] {
+            for spaced in [false, true] {
+                let mut builder = env.ranged_builder(text);
+                builder.set_base_direction(direction);
+                if spaced {
+                    builder.push_default(StyleProperty::LetterSpacing(2.));
+                    builder.push_default(StyleProperty::WordSpacing(3.));
+                }
+                let mut layout = builder.build(text);
+                assert_content_widths_match_layout(&mut layout);
+                assert_eq!(
+                    layout.len(),
+                    3,
+                    "one word per line at the min content width ({direction:?}, spaced: {spaced})"
+                );
+            }
+        }
     }
 }
 
