@@ -1813,7 +1813,9 @@ fn is_l1_trailing_whitespace(whitespace: Whitespace) -> bool {
 /// The line's trailing whitespace can span multiple items, so this walks the items backwards from
 /// the end of the line: items that are whitespace in full are reset as a whole, and the walk stops
 /// at the first item with other content. That item's trailing whitespace (if any) is split off
-/// into an item of its own, as an item has a single level.
+/// into an item of its own, as an item has a single level. The split is at a shaped cluster
+/// boundary, which can be inside an atom (a prepend character and the space after it are one
+/// grapheme): the two items then clip the atom.
 ///
 /// `line_items` must be in logical order.
 fn reset_trailing_whitespace_level<B: Brush>(
@@ -1835,7 +1837,7 @@ fn reset_trailing_whitespace_level<B: Brush>(
                     .data
                     .shaped_text
                     .run_slice(item.index as u32)
-                    .narrow(clusters.clone());
+                    .narrow_unaligned(clusters.clone());
                 let whitespace_start = trailing_whitespace_start(slice);
 
                 if whitespace_start == clusters.start {
@@ -1858,23 +1860,27 @@ fn reset_trailing_whitespace_level<B: Brush>(
 }
 
 /// The index of the shaped cluster at which the whitespace at the logical end of `slice` starts
-/// (see [`is_l1_trailing_whitespace`]).
+/// (see [`is_l1_trailing_whitespace`]). A cluster is whitespace if all of its characters are.
 ///
 /// This is the start of `slice` if it's whitespace in full, and the end of `slice` if it doesn't
 /// end in whitespace.
 fn trailing_whitespace_start(slice: ShapedSlice<'_>) -> u32 {
-    slice
-        .atoms_end()
+    let trailing = slice
+        .shaped_clusters()
+        .iter()
         .rev()
-        .take_while(|atom| {
-            atom.characters()
-                .iter()
-                .all(|character| is_l1_trailing_whitespace(character.whitespace))
+        .take_while(|cluster| {
+            // The first character is checked via the cached flags so the common case never
+            // touches `characters`.
+            is_l1_trailing_whitespace(cluster.whitespace())
+                && (cluster.char_len() == 1
+                    || slice
+                        .characters_in(cluster.chars_range())
+                        .iter()
+                        .all(|character| is_l1_trailing_whitespace(character.whitespace)))
         })
-        .last()
-        .map_or(slice.shaped_clusters_range().end, |atom| {
-            atom.shaped_clusters_range().start
-        })
+        .count();
+    slice.shaped_clusters_range().end - trailing as u32
 }
 
 /// Returns the advance of the whitespace hanging past the end of the line made up of `line_items`,
@@ -1932,7 +1938,7 @@ fn hanging_whitespace<B: Brush>(
                     .data
                     .shaped_text
                     .run_slice(line_item.index as u32)
-                    .narrow(line_item.shaped_cluster_range.clone());
+                    .narrow_unaligned(line_item.shaped_cluster_range.clone());
 
                 for atom in slice.atoms_end().rev() {
                     let (hanging, all_hang) = atom_hanging_advance(
@@ -1942,7 +1948,7 @@ fn hanging_whitespace<B: Brush>(
                         effective_spacing,
                         line_item.is_rtl(),
                     );
-                    let whitespace = atom.characters()[0].whitespace;
+                    let whitespace = atom.whitespace();
                     if in_conditional_suffix && whitespace != Whitespace::Newline {
                         // The atom hangs from its logical end, so use the last cluster's style to
                         // decide whether it hangs conditionally.

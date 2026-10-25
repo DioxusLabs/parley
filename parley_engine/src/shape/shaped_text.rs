@@ -209,6 +209,8 @@ impl ShapedText {
                 run.shaped_clusters_range.start,
                 run.shaped_clusters_range.end,
             ),
+            clipped: 0,
+            rtl: run.bidi_level.is_rtl(),
         }
     }
 

@@ -6,8 +6,9 @@ use crate::{
     util::{ColorBrush, TestEnv},
 };
 use parley::{
-    Alignment, AlignmentOptions, BaseDirection, BreakReason, InlineBox, InlineBoxKind, Layout,
-    OverflowWrap, StyleProperty, TextWrapMode, VerticalAlign, WhiteSpaceCollapse, WordBreak,
+    Alignment, AlignmentOptions, BaseDirection, BreakReason, Cluster, InlineBox, InlineBoxKind,
+    Layout, OverflowWrap, StyleProperty, TextWrapMode, VerticalAlign, WhiteSpaceCollapse,
+    WordBreak,
 };
 
 fn nearly_eq(actual: f32, expected: f32) {
@@ -464,6 +465,104 @@ fn trailing_whitespace_resets_to_paragraph_level() {
         } else {
             nearly_eq(ws.offset(), ink.offset() + ink.advance());
         }
+
+        env.with_name(test_case_name).check_layout_snapshot(&layout);
+    }
+}
+
+#[test]
+fn trailing_whitespace_resets_to_paragraph_level_inside_atom() {
+    // A prepend character and the space after it are one grapheme, and so one atom, of two shaped
+    // clusters. UAX #9 L1 applies to the space alone: it's split off the atom into an item at the
+    // paragraph's level, and hangs at the line's end edge.
+    let mut env = TestEnv::new(test_name!(), None);
+
+    for (direction, text, word, test_case_name) in [
+        (
+            BaseDirection::Ltr,
+            "\u{0710}\u{070F} \u{0712} \u{0713}",
+            "\u{0710}\u{070F}",
+            "ltr_paragraph_rtl_text",
+        ),
+        (
+            BaseDirection::Rtl,
+            "a\u{0D4E} b c",
+            "a\u{0D4E}",
+            "rtl_paragraph_ltr_text",
+        ),
+    ] {
+        let is_rtl = direction == BaseDirection::Rtl;
+        let space = advance(&mut env, " ");
+        let word_advance = advance(&mut env, word);
+        let mut builder = env.ranged_builder(text);
+        builder.set_base_direction(direction);
+        let mut layout = builder.build(text);
+        let widths = layout.calculate_content_widths();
+        nearly_eq(widths.min, word_advance);
+        layout.break_all_lines(Some(widths.min));
+        layout.align(Alignment::Start, AlignmentOptions::default());
+        nearly_eq(layout.width(), widths.min);
+
+        let first = layout.get(0).unwrap();
+        assert_eq!(
+            &text[first.text_range()],
+            format!("{word} "),
+            "{test_case_name}"
+        );
+        nearly_eq(first.metrics().hanging_advance, space);
+
+        let runs: Vec<_> = first
+            .items()
+            .filter_map(|item| match item {
+                parley::PositionedLayoutItem::GlyphRun(run) => Some(run),
+                parley::PositionedLayoutItem::InlineBox(_) => None,
+            })
+            .collect();
+        // The whitespace run is visually first (hanging past the line's start) in RTL, visually
+        // last in LTR; the word's runs (it may span scripts) take up the line.
+        assert!(runs.len() >= 2, "{test_case_name}");
+        let (ws, ink) = if is_rtl {
+            (&runs[0], &runs[1..])
+        } else {
+            (&runs[runs.len() - 1], &runs[..runs.len() - 1])
+        };
+        assert_eq!(&text[ws.run().text_range()], " ", "{test_case_name}");
+        assert_eq!(ws.run().is_rtl(), is_rtl, "{test_case_name}");
+        nearly_eq(ws.advance(), space);
+        let ink_start = ink
+            .iter()
+            .map(|run| run.offset())
+            .fold(f32::INFINITY, f32::min);
+        let ink_end = ink
+            .iter()
+            .map(|run| run.offset() + run.advance())
+            .fold(f32::NEG_INFINITY, f32::max);
+        let mut ink_ranges: Vec<_> = ink
+            .iter()
+            .map(|run| {
+                assert_eq!(run.run().is_rtl(), !is_rtl, "{test_case_name}");
+                run.run().text_range()
+            })
+            .collect();
+        ink_ranges.sort_by_key(|range| range.start);
+        let ink_text: String = ink_ranges.into_iter().map(|range| &text[range]).collect();
+        assert_eq!(ink_text, word, "{test_case_name}");
+        nearly_eq(ink_start, 0.);
+        nearly_eq(ink_end, word_advance);
+        if is_rtl {
+            nearly_eq(ws.offset() + ws.advance(), ink_start);
+        } else {
+            nearly_eq(ws.offset(), ink_end);
+        }
+
+        // The grapheme is split over two runs: the prepend character stays a cluster of the
+        // word's last run, and the space is the whitespace run's one cluster.
+        let ink_len: usize = ink.iter().map(|run| run.run().len()).sum();
+        assert_eq!(ink_len, word.chars().count(), "{test_case_name}");
+        assert_eq!(ws.run().len(), 1, "{test_case_name}");
+        let space_cluster = Cluster::from_byte_index(&layout, word.len()).unwrap();
+        nearly_eq(space_cluster.advance(), space);
+        assert_eq!(space_cluster.is_rtl(), is_rtl, "{test_case_name}");
 
         env.with_name(test_case_name).check_layout_snapshot(&layout);
     }

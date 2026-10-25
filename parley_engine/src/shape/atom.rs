@@ -26,9 +26,22 @@ pub struct ShapedSlice<'a> {
 
     /// The range of [`Self::shaped_clusters`] this slice covers.
     pub(crate) clusters: (u32, u32),
+
+    /// Which of the slice's bounds fall inside an atom: [`Atom::CLIPPED_START`] and/or
+    /// [`Atom::CLIPPED_END`]. See [`Self::narrow_unaligned`].
+    pub(crate) clipped: u8,
+
+    /// Whether the run this slice is of was shaped right-to-left.
+    pub(crate) rtl: bool,
 }
 
 impl<'a> ShapedSlice<'a> {
+    /// Whether the run this slice is of was shaped right-to-left.
+    #[inline(always)]
+    pub fn is_rtl(&self) -> bool {
+        self.rtl
+    }
+
     /// The character range of this slice.
     ///
     /// This indexes into [`Self::characters`].
@@ -268,17 +281,10 @@ impl<'a> ShapedSlice<'a> {
     ///
     /// The range indexes into [`Self::shaped_clusters`], must be a subrange of
     /// [`Self::shaped_clusters_range`], and both bounds must be an atom boundary (i.e.,
-    /// [`ShapedCluster::is_grapheme_start`] must be `true`).
+    /// [`ShapedCluster::is_grapheme_start`] must be `true`). See [`Self::narrow_unaligned`] for
+    /// bounds inside an atom.
     #[inline(always)]
     pub fn narrow(&self, clusters: Range<u32>) -> Self {
-        debug_assert!(
-            clusters.start <= clusters.end,
-            "narrowed cluster range is inverted"
-        );
-        debug_assert!(
-            self.clusters.0 <= clusters.start && clusters.end <= self.clusters.1,
-            "narrowed cluster range out of this slice's range"
-        );
         debug_assert!(
             clusters.is_empty()
                 || ((clusters.start == self.clusters.0
@@ -287,8 +293,41 @@ impl<'a> ShapedSlice<'a> {
                         || self.shaped_clusters[clusters.end as usize].is_grapheme_start())),
             "narrowed cluster range is not atom-aligned"
         );
+        self.narrow_unaligned(clusters)
+    }
+
+    /// Whether the cluster boundary at `cluster` (which may be one past the last cluster) falls
+    /// inside an atom.
+    #[inline(always)]
+    fn is_clipped_at(&self, cluster: u32) -> bool {
+        self.shaped_clusters
+            .get(cluster as usize)
+            .is_some_and(|cluster| !cluster.is_grapheme_start())
+    }
+
+    /// Narrow the shaped slice to the given range of clusters, whose bounds may fall inside an
+    /// atom.
+    ///
+    /// This is [`Self::narrow`] without the requirement that the bounds are atom boundaries. An
+    /// atom that crosses a bound is clipped to the slice (see [`Atom::is_clipped_start`] and
+    /// [`Atom::is_clipped_end`]), as with whitespace that a line break splits off the end of an
+    /// atom (UAX #9 rule L1).
+    #[inline(always)]
+    pub fn narrow_unaligned(&self, clusters: Range<u32>) -> Self {
+        debug_assert!(
+            clusters.start <= clusters.end,
+            "narrowed cluster range is inverted"
+        );
+        debug_assert!(
+            self.clusters.0 <= clusters.start && clusters.end <= self.clusters.1,
+            "narrowed cluster range out of this slice's range"
+        );
         Self {
             clusters: (clusters.start, clusters.end),
+            clipped: Atom::clipped_flags(
+                self.is_clipped_at(clusters.start),
+                self.is_clipped_at(clusters.end),
+            ),
             ..*self
         }
     }
@@ -447,7 +486,8 @@ impl<'a> Iterator for Atoms<'a> {
             return None;
         }
 
-        let mut advance = self.slice.shaped_clusters[start as usize].advance;
+        let start_cluster = &self.slice.shaped_clusters[start as usize];
+        let mut advance = start_cluster.advance;
         let mut idx = start + 1;
         while idx < bound && !self.slice.shaped_clusters[idx as usize].is_grapheme_start() {
             advance += self.slice.shaped_clusters[idx as usize].advance;
@@ -458,9 +498,7 @@ impl<'a> Iterator for Atoms<'a> {
             slice: self.slice,
             clusters: (start, idx),
             chars: (
-                self.slice.shaped_clusters[start as usize]
-                    .chars_range()
-                    .start,
+                start_cluster.chars_range().start,
                 self.slice.shaped_clusters[idx as usize - 1]
                     .chars_range()
                     .end,
@@ -477,6 +515,9 @@ impl<'a> Iterator for Atoms<'a> {
 ///
 /// An atom cannot be broken without reshaping. Check [`Self::is_safe_to_break_before`] to see if
 /// you can break the text before this atom without requiring reshaping.
+///
+/// A slice can start or end inside an atom (see [`ShapedSlice::narrow_unaligned`]); the atom is
+/// then clipped to the slice, which [`Self::is_clipped_start`] and [`Self::is_clipped_end`] report.
 #[derive(Copy, Clone, Debug)]
 pub struct Atom<'a> {
     slice: ShapedSlice<'a>,
@@ -490,6 +531,14 @@ pub struct Atom<'a> {
     advance: f32,
 }
 impl<'a> Atom<'a> {
+    pub(crate) const CLIPPED_START: u8 = 1 << 0;
+    pub(crate) const CLIPPED_END: u8 = 1 << 1;
+
+    #[inline(always)]
+    pub(crate) fn clipped_flags(start: bool, end: bool) -> u8 {
+        (u8::from(start) * Self::CLIPPED_START) | (u8::from(end) * Self::CLIPPED_END)
+    }
+
     /// The range of characters into the underlying [`ShapedSlice`] this atom spans.
     ///
     /// You can use [`ShapedSlice::text_byte_range`] to turn this into a byte range of the source
@@ -521,6 +570,7 @@ impl<'a> Atom<'a> {
     pub fn slice(&self) -> ShapedSlice<'a> {
         ShapedSlice {
             clusters: self.clusters,
+            clipped: Self::clipped_flags(self.is_clipped_start(), self.is_clipped_end()),
             ..self.slice
         }
     }
@@ -559,6 +609,56 @@ impl<'a> Atom<'a> {
     #[inline(always)]
     pub fn is_inline_object(&self) -> bool {
         self.slice.shaped_clusters[self.clusters.0 as usize].is_inline_object()
+    }
+
+    /// Whether this atom's logical start is clipped by its slice, i.e., the slice starts inside
+    /// the atom (see [`ShapedSlice::narrow_unaligned`]).
+    #[inline(always)]
+    pub fn is_clipped_start(&self) -> bool {
+        self.slice.clipped & Self::CLIPPED_START != 0 && self.clusters.0 == self.slice.clusters.0
+    }
+
+    /// Whether this atom's logical end is clipped by its slice, i.e., the slice ends inside the
+    /// atom (see [`ShapedSlice::narrow_unaligned`]).
+    #[inline(always)]
+    pub fn is_clipped_end(&self) -> bool {
+        self.slice.clipped & Self::CLIPPED_END != 0 && self.clusters.1 == self.slice.clusters.1
+    }
+
+    /// Whether the run this atom is of was shaped right-to-left.
+    #[inline(always)]
+    pub fn is_rtl(&self) -> bool {
+        self.slice.rtl
+    }
+
+    /// Whether this atom's slice is clipped at either end (see [`ShapedSlice::narrow_unaligned`]),
+    /// which is cheaper to test than whether this atom itself is.
+    #[inline(always)]
+    pub fn slice_is_clipped(&self) -> bool {
+        self.slice.clipped != 0
+    }
+
+    /// Whether this atom is clipped at either edge, i.e., it is only part of the atom in full.
+    #[inline(always)]
+    pub fn is_clipped(&self) -> bool {
+        self.slice.clipped != 0 && (self.is_clipped_start() || self.is_clipped_end())
+    }
+
+    /// The [`Whitespace`] class of this atom's first logical character.
+    ///
+    /// If the atom's start is clipped, this is the class of the first character of the atom in
+    /// full, so that it is the same however the atom is sliced.
+    #[inline]
+    pub fn whitespace(&self) -> Whitespace {
+        if self.is_clipped_start() {
+            let mut idx = self.clusters.0 as usize;
+            while !self.slice.shaped_clusters[idx].is_grapheme_start() {
+                idx -= 1;
+            }
+            self.slice.shaped_clusters[idx].whitespace()
+        } else {
+            self.slice.characters[self.chars.0 as usize].whitespace
+        }
     }
 
     /// The atom's total advance.
@@ -865,7 +965,7 @@ mod tests {
         Analysis, AnalysisOptions, Analyzer, FontInstance, FontInstanceRef, FontSelector,
         ShapeOptions, ShapedText, Shaper,
         itemize::{Item, Segment},
-        shape::CharCluster,
+        shape::{CharCluster, Whitespace},
     };
 
     const ROBOTO: &[u8] =
@@ -986,6 +1086,51 @@ mod tests {
             3..4
         );
         assert!(slice.atom_at_text_byte(9).is_none());
+    }
+
+    #[test]
+    fn clipped_atoms() {
+        // A prepend character and the space after it are one grapheme, and so one atom, of two
+        // shaped clusters.
+        let shaped = shape_with_font("\u{0D4E} ", ROBOTO);
+        let slice = shaped.run_slice(0);
+        let clusters = slice.shaped_clusters();
+        assert_eq!(clusters.len(), 2);
+        assert!(!clusters[1].is_grapheme_start());
+        let space_advance = clusters[1].advance;
+
+        let atom = slice.atoms_start().next().unwrap();
+        assert_eq!(atom.shaped_clusters_range(), 0..2);
+        assert!(!atom.is_clipped_start() && !atom.is_clipped_end());
+        assert_eq!(atom.whitespace(), Whitespace::None);
+        assert_eq!(slice.graphemes_start().count(), 1);
+
+        let head = slice.narrow_unaligned(0..1);
+        let atom = head.atoms_end().prev().unwrap();
+        assert_eq!(atom.shaped_clusters_range(), 0..1);
+        assert!(!atom.is_clipped_start() && atom.is_clipped_end());
+        assert_eq!(atom.whitespace(), Whitespace::None);
+        assert!(head.atoms_start().next().is_some());
+
+        let tail = slice.narrow_unaligned(1..2);
+        let atom = tail.atoms_start().next().unwrap();
+        assert_eq!(atom.shaped_clusters_range(), 1..2);
+        assert!(atom.is_clipped_start() && !atom.is_clipped_end());
+        assert_eq!(atom.characters()[0].whitespace, Whitespace::Space);
+        assert_eq!(atom.whitespace(), Whitespace::None);
+        assert_eq!(atom.advance(), space_advance);
+        assert_eq!(tail.char_range(), 1..2);
+        assert_eq!(tail.text_byte_range(tail.char_range()), 3..4);
+
+        // Each part holds the rest of the grapheme as a grapheme of its own.
+        let graphemes: vec::Vec<_> = tail.graphemes_start().collect();
+        assert_eq!(graphemes.len(), 1);
+        assert_eq!(graphemes[0].char_range(), 1..2);
+        assert_eq!(graphemes[0].advance(), space_advance);
+        assert!(graphemes[0].is_atom_start() && graphemes[0].is_atom_end());
+        let mut graphemes = tail.graphemes_end();
+        assert_eq!(graphemes.prev().unwrap().char_range(), 1..2);
+        assert!(graphemes.prev().is_none());
     }
 
     #[test]

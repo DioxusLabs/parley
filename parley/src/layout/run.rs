@@ -72,7 +72,7 @@ impl<'a, B: Brush> Run<'a, B> {
     pub(crate) fn line_slice(&self) -> ShapedSlice<'a> {
         let slice = self.full_slice();
         match self.line_data {
-            Some(line_data) => slice.narrow(line_data.shaped_cluster_range.clone()),
+            Some(line_data) => slice.narrow_unaligned(line_data.shaped_cluster_range.clone()),
             None => slice,
         }
     }
@@ -175,7 +175,7 @@ impl<'a, B: Brush> Run<'a, B> {
     /// length.
     pub fn cluster_range(&self) -> Range<usize> {
         let start = match self.line_data {
-            Some(line_data) => count_graphemes(self.full_slice().narrow(
+            Some(line_data) => count_graphemes(self.full_slice().narrow_unaligned(
                 self.shaped.shaped_clusters_range.start..line_data.shaped_cluster_range.start,
             )),
             None => 0,
@@ -255,11 +255,11 @@ impl<'a, B: Brush> Run<'a, B> {
     ///
     /// This includes additional spacing from [`EffectiveSpacing`].
     ///
-    /// `shaped_clusters` indexes into the shaped run this [`Run`] belongs to, and must be
-    /// atom-aligned.
+    /// `shaped_clusters` indexes into the shaped run this [`Run`] belongs to, and must be aligned
+    /// to the atoms of this [`Run`]'s line slice (which clip to the line's items).
     pub(crate) fn glyphs_in(self, shaped_clusters: Range<u32>) -> Glyphs<'a> {
         Glyphs::new(
-            self.full_slice().narrow(shaped_clusters),
+            self.full_slice().narrow_unaligned(shaped_clusters),
             self.is_rtl(),
             self.line_spacing(),
         )
@@ -448,10 +448,17 @@ impl<'a, B: Brush> Iterator for Clusters<'a, B> {
 
 /// The number of graphemes in `slice`.
 ///
+/// A slice that starts inside a grapheme (see [`ShapedSlice::narrow_unaligned`]) holds the rest
+/// of that grapheme, which counts as one.
+///
 /// This is `O(n)` in the slice's characters.
 fn count_graphemes(slice: ShapedSlice<'_>) -> usize {
-    slice
-        .characters()
+    let characters = slice.characters();
+    usize::from(
+        characters
+            .first()
+            .is_some_and(|character| !character.grapheme_start),
+    ) + characters
         .iter()
         .filter(|character| character.grapheme_start)
         .count()

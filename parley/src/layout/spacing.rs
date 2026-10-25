@@ -170,9 +170,25 @@ impl EffectiveSpacing {
     }
 
     /// The gaps around `atom`.
+    ///
+    /// The gaps sit visually after the atom as shaped, i.e., at its logical end if the run is
+    /// left-to-right and at its logical start otherwise. If `atom` is clipped (see
+    /// [`Atom::is_clipped_start`] and [`Atom::is_clipped_end`]), the part holding that edge has
+    /// the gaps, and the other part has none.
     #[inline(always)]
     pub(crate) fn gaps(self, atom: &Atom<'_>) -> Gaps {
-        let whitespace = atom.characters()[0].whitespace;
+        if atom.slice_is_clipped() {
+            let holds_gaps = if atom.is_rtl() {
+                !atom.is_clipped_start()
+            } else {
+                !atom.is_clipped_end()
+            };
+            if !holds_gaps {
+                return Gaps::ZERO;
+            }
+        }
+
+        let whitespace = atom.whitespace();
         let mut gaps = self.spacing.gaps(whitespace);
 
         if is_word_separator(whitespace)
