@@ -83,7 +83,7 @@ impl<'a, B: Brush> Run<'a, B> {
     }
 
     /// Returns the font for the run.
-    pub fn font(&self) -> &FontData {
+    pub fn font(&self) -> &'a FontData {
         &self
             .layout
             .data
@@ -100,7 +100,7 @@ impl<'a, B: Brush> Run<'a, B> {
     }
 
     /// Returns the font attributes for the run.
-    pub fn font_attrs(&self) -> &fontique::Attributes {
+    pub fn font_attrs(&self) -> &'a fontique::Attributes {
         &self.data.font_attrs
     }
 
@@ -111,7 +111,7 @@ impl<'a, B: Brush> Run<'a, B> {
 
     /// Returns the normalized variation coordinates for the font associated
     /// with the run.
-    pub fn normalized_coords(&self) -> &[NormalizedCoord] {
+    pub fn normalized_coords(&self) -> &'a [NormalizedCoord] {
         self.layout
             .data
             .shaped_text
@@ -121,7 +121,7 @@ impl<'a, B: Brush> Run<'a, B> {
     }
 
     /// Returns metrics for the run.
-    pub fn font_metrics(&self) -> &FontMetrics {
+    pub fn font_metrics(&self) -> &'a FontMetrics {
         &self.shaped.font_metrics
     }
 
@@ -439,7 +439,9 @@ impl<'a, B: Brush> Iterator for Clusters<'a, B> {
     }
 }
 
-/// The number of graphemes in `slice`.
+/// The number of graphemes in `slice`, also counting a grapheme the slice starts inside of.
+///
+/// This effectively counts the number of [`Cluster`]s the `slice` would produce.
 ///
 /// This is `O(n)` in the slice's characters.
 fn count_graphemes(slice: ShapedSlice<'_>) -> usize {
@@ -448,4 +450,5 @@ fn count_graphemes(slice: ShapedSlice<'_>) -> usize {
         .iter()
         .filter(|character| character.grapheme_start)
         .count()
+        + usize::from(slice.grapheme_continues_before())
 }
