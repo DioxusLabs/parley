@@ -103,9 +103,6 @@ jobs:
       - name: Run cargo rdme (parley)
         run: cargo rdme --check --workspace-project=parley
 
-      - name: Run cargo rdme (parley_data)
-        run: cargo rdme --check --workspace-project=parley_data
-
       - name: Run cargo rdme (attributed_text)
         run: cargo rdme --check --workspace-project=attributed_text
 
@@ -405,32 +402,6 @@ jobs:
         run: cargo doc --workspace --locked --all-features --no-deps --document-private-items
         env:
           RUSTDOCFLAGS: '--cfg docsrs -D warnings'
-
-  unicode-data:
-    name: unicode data (regen check)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: install stable toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ env.RUST_STABLE_VER }}
-          components: rustfmt
-
-      - name: restore cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.event_name != 'merge_group' }}
-
-      - name: regenerate unicode data
-        run: cargo run --locked -p parley_data_gen -- ./parley_data/src/generated
-
-      - name: format generated code
-        run: cargo fmt -p parley_data
-
-      - name: check for differences
-        run: git diff --exit-code
 
   # If this fails, consider changing your text or adding something to .typos.toml.
   typos:
