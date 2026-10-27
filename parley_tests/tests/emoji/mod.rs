@@ -3,8 +3,8 @@
 
 use core::char;
 
-use parley_data::Properties;
 use parley_emoji::{EmojiDFA, EmojiPresentationStyle, EmojiSegmentationCategory};
+use parley_engine::{Analysis, AnalysisDataSources, AnalysisOptions, Analyzer};
 
 struct TestEntity<'a> {
     sequence: &'a [u32],
@@ -22,26 +22,37 @@ fn assert_emoji(entity: TestEntity<'_>) {
     let mut emoji_dfa = EmojiDFA::new();
     let mut leading_is_emoji_presentation = false;
 
+    let text: String = entity
+        .sequence
+        .iter()
+        .map(|&cp| char::from_u32(cp).unwrap())
+        .collect();
+    let mut analysis = Analysis::new();
+    Analyzer::new().analyze(
+        &text,
+        &AnalysisOptions::default(),
+        &mut analysis,
+        &AnalysisDataSources::default(),
+    );
+
     let result = entity
         .sequence
         .iter()
         .copied()
+        .zip(analysis.char_info())
         .enumerate()
-        .map(|(i, cp)| {
-            let ch = char::from_u32(cp).unwrap();
-            let properties = Properties::get(ch);
-
+        .map(|(i, (cp, info))| {
             if i == 0 {
-                leading_is_emoji_presentation = properties.is_emoji_presentation();
+                leading_is_emoji_presentation = info.is_emoji_presentation();
             }
 
             let category = EmojiSegmentationCategory::from_codepoint(
                 cp,
-                properties.is_emoji(),
-                properties.is_emoji_presentation(),
-                properties.is_emoji_modifier(),
-                properties.is_emoji_modifier_base(),
-                properties.is_regional_indicator(),
+                info.is_emoji(),
+                info.is_emoji_presentation(),
+                info.is_emoji_modifier(),
+                info.is_emoji_modifier_base(),
+                info.is_region_indicator(),
             );
 
             emoji_dfa.step_record(category);

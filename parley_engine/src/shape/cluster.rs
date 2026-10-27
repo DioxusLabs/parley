@@ -7,8 +7,7 @@
 use core::cmp::Ordering;
 
 use alloc::vec::Vec;
-use icu_normalizer::properties::{CanonicalComposition, CanonicalDecomposition, Decomposed};
-use parley_data::Properties;
+use harfrust::unicode::{Decomposed, compose, decompose};
 use parley_emoji::{EmojiDFA, EmojiPresentationStyle, EmojiSegmentationCategory};
 
 use crate::CharInfo;
@@ -268,8 +267,7 @@ impl CharCluster {
 
     #[inline(always)]
     fn contributes_to_shaping(ch: char) -> bool {
-        let props = Properties::get(ch);
-        crate::analysis::contributes_to_shaping(props.general_category(), props.script())
+        crate::analysis::contributes_to_shaping(ch)
     }
 
     fn decomposed(&mut self) -> Option<&[Char]> {
@@ -283,13 +281,14 @@ impl CharCluster {
                     return None;
                 }
 
-                let decomposer = const { CanonicalDecomposition::new() };
-                let decomp = decomposer.decompose(self.chars[0].ch);
-                match decomp {
-                    Decomposed::Default | Decomposed::Singleton(_) => {
+                match decompose(self.chars[0].ch as u32) {
+                    None | Some(Decomposed::Singleton(_)) => {
                         return None;
                     }
-                    Decomposed::Expansion(a, b) => {
+                    Some(Decomposed::Pair(a, b)) => {
+                        let (Some(a), Some(b)) = (char::from_u32(a), char::from_u32(b)) else {
+                            return None;
+                        };
                         let mut copy = self.chars[0];
                         copy.ch = a;
                         copy.contributes_to_shaping = Self::contributes_to_shaping(a);
@@ -322,8 +321,8 @@ impl CharCluster {
                     return None;
                 }
 
-                let composer = const { CanonicalComposition::new() };
-                let ch = composer.compose(self.chars[0].ch, self.chars[1].ch)?;
+                let ch =
+                    char::from_u32(compose(self.chars[0].ch as u32, self.chars[1].ch as u32)?)?;
 
                 let mut copy = self.chars[0];
                 copy.ch = ch;

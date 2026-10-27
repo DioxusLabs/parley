@@ -7,8 +7,14 @@ use crate::{
 };
 use alloc::{vec, vec::Vec};
 use fontique::FontWeight;
-use icu_properties::props::Script;
-use icu_segmenter::{LineSegmenter, options::LineBreakOptions};
+use parlance::Script;
+
+const LATIN: Script = Script::from_bytes(*b"Latn");
+const COMMON: Script = Script::COMMON;
+const INHERITED: Script = Script::INHERITED;
+const ARABIC: Script = Script::from_bytes(*b"Arab");
+const HAN: Script = Script::from_bytes(*b"Hani");
+const HEBREW: Script = Script::from_bytes(*b"Hebr");
 
 /// Whether we have complex script dictionaries compiled-in, which ICU4X then uses for segmentation.
 const HAS_DICTIONARIES: bool = cfg!(feature = "complex-scripts");
@@ -120,6 +126,15 @@ impl TestContext {
         self
     }
 
+    fn word_boundary_list(&self) -> Vec<bool> {
+        self.layout_context
+            .analysis
+            .char_info()
+            .iter()
+            .map(|info| info.is_word_boundary())
+            .collect()
+    }
+
     fn soft_wrap_opportunity_list(&self) -> Vec<bool> {
         self.layout_context
             .analysis
@@ -212,7 +227,7 @@ fn test_latin_mixed_keep_all_last() {
     .expect_soft_wrap_opportunity_list(vec![false, false])
     .expect_word_boundary_list(vec![true, false])
     .expect_bidi_embed_level_list(&[])
-    .expect_script_list(vec![Script::Latin, Script::Latin])
+    .expect_script_list(vec![LATIN, LATIN])
     .expect_is_control_list(vec![false, false])
     .expect_contributes_to_shaping_list(vec![true, true])
     .expect_force_normalize_list(vec![false, false]);
@@ -229,15 +244,7 @@ fn test_mandatory_break_in_text() {
         ])
         .expect_bidi_embed_level_list(&[])
         .expect_script_list(vec![
-            Script::Latin,
-            Script::Latin,
-            Script::Latin,
-            Script::Common,
-            Script::Latin,
-            Script::Latin,
-            Script::Latin,
-            Script::Common,
-            Script::Latin,
+            LATIN, LATIN, LATIN, COMMON, LATIN, LATIN, LATIN, COMMON, LATIN,
         ])
         .expect_is_control_list(vec![
             false, false, false, false, false, false, false, true, false,
@@ -272,31 +279,31 @@ fn test_paragraph_separator_is_hard_break() {
 /// regular wrap opportunity. See <https://github.com/linebender/parley/issues/768>.
 #[test]
 fn test_mandatory_break_after_complex_script_run() {
-    // Check that the ICU4X bug still reproduces: a break opportunity is reported at byte 6, between
-    // the second Thai character and the `\n`. Once this assertion fails, ICU4X has been fixed and
-    // this test as well as `builders_newline_inside_complex_script_run_is_hard_break` can be
-    // dropped.
-    let icu_breaks: Vec<usize> = LineSegmenter::new_dictionary(LineBreakOptions::default())
-        .segment_str("กก\nกก")
-        .collect();
-    assert_eq!(icu_breaks, vec![0, 6, 7, 13]);
-
-    // Orthogonal to this test, but without a dictionary, UAX #29 WB999 gives a word boundary at
-    // every grapheme.
-    let inner = !HAS_DICTIONARIES;
-
-    // Thai
-    verify_analysis("กก\nกก", |_| {})
-        .expect_soft_wrap_opportunity_list(vec![false, false, false, false, false])
-        .expect_word_boundary_list(vec![true, inner, true, true, inner]);
-    // Khmer
-    verify_analysis("ក្ម\nក្ម", |_| {})
-        .expect_soft_wrap_opportunity_list(vec![false, false, false, false, false, false, false])
-        .expect_word_boundary_list(vec![true, false, false, true, true, false, false]);
-    // Lao
-    verify_analysis("ກກ\nກກ", |_| {})
-        .expect_soft_wrap_opportunity_list(vec![false, false, false, false, false])
-        .expect_word_boundary_list(vec![true, inner, true, true, inner]);
+    // A mandatory break inside a run of a dictionary-segmented script must not be reported as a
+    // soft wrap opportunity on either side (UAX #14 LB6), and is always a word boundary.
+    // See <https://github.com/linebender/parley/issues/768>.
+    //
+    // Note where a dictionary breaks the run itself differs between segmenters: `cleft`'s Thai
+    // and Lao dictionaries list the single letters used here as words, ICU4X's did not.
+    for text in ["กก\nกก", "ក្ម\nក្ម", "ກກ\nກກ"] {
+        let cx = verify_analysis(text, |_| {});
+        let newline = text.find('\n').unwrap();
+        let newline_char = text[..newline].chars().count();
+        let soft_wraps = cx.soft_wrap_opportunity_list();
+        assert!(
+            !soft_wraps[newline_char],
+            "{text:?}: opportunity before the newline"
+        );
+        assert!(
+            !soft_wraps[newline_char + 1],
+            "{text:?}: opportunity after the newline"
+        );
+        let words = cx.word_boundary_list();
+        assert!(
+            words[0] && words[newline_char] && words[newline_char + 1],
+            "{text:?}"
+        );
+    }
 }
 
 #[test]
@@ -340,7 +347,7 @@ fn test_blank() {
         .expect_soft_wrap_opportunity_list(vec![false])
         .expect_word_boundary_list(vec![true])
         .expect_bidi_embed_level_list(&[])
-        .expect_script_list(vec![Script::Common])
+        .expect_script_list(vec![COMMON])
         .expect_is_control_list(vec![false])
         .expect_contributes_to_shaping_list(vec![true])
         .expect_force_normalize_list(vec![false]);
@@ -399,7 +406,7 @@ fn test_latin_trailing_space_mixed() {
     .expect_soft_wrap_opportunity_list(vec![false, false, false])
     .expect_word_boundary_list(vec![true, false, true])
     .expect_bidi_embed_level_list(&[])
-    .expect_script_list(vec![Script::Latin, Script::Latin, Script::Common]);
+    .expect_script_list(vec![LATIN, LATIN, COMMON]);
 }
 
 #[test]
@@ -411,7 +418,7 @@ fn test_latin_leading_space_mixed() {
     .expect_soft_wrap_opportunity_list(vec![false, true, false])
     .expect_word_boundary_list(vec![true, true, false])
     .expect_bidi_embed_level_list(&[])
-    .expect_script_list(vec![Script::Common, Script::Latin, Script::Latin]);
+    .expect_script_list(vec![COMMON, LATIN, LATIN]);
 }
 
 #[test]
@@ -440,7 +447,7 @@ fn test_all_whitespace() {
         .expect_soft_wrap_opportunity_list(vec![false, false, false])
         .expect_word_boundary_list(vec![true, false, false])
         .expect_bidi_embed_level_list(&[])
-        .expect_script_list(vec![Script::Common, Script::Common, Script::Common]);
+        .expect_script_list(vec![COMMON, COMMON, COMMON]);
 }
 
 #[test]
@@ -448,14 +455,7 @@ fn test_multi_char_grapheme() {
     verify_analysis("A e\u{301} B", |_| {})
         .expect_soft_wrap_opportunity_list(vec![false, false, true, false, false, true])
         .expect_word_boundary_list(vec![true, true, true, false, true, true])
-        .expect_script_list(vec![
-            Script::Latin,
-            Script::Common,
-            Script::Latin,
-            Script::Inherited,
-            Script::Common,
-            Script::Latin,
-        ])
+        .expect_script_list(vec![LATIN, COMMON, LATIN, INHERITED, COMMON, LATIN])
         .expect_is_control_list(vec![false, false, false, false, false, false])
         .expect_contributes_to_shaping_list(vec![true, true, true, true, true, true])
         .expect_force_normalize_list(vec![false, false, false, true, false, false])
@@ -500,14 +500,7 @@ fn test_mixed_break_frequent_alternation() {
     .expect_soft_wrap_opportunity_list(vec![false, false, true, false, false, true, false, false])
     .expect_word_boundary_list(vec![true, false, false, false, true, true, false, false])
     .expect_script_list(vec![
-        Script::Latin,
-        Script::Latin,
-        Script::Latin,
-        Script::Latin,
-        Script::Common,
-        Script::Common,
-        Script::Common,
-        Script::Common,
+        LATIN, LATIN, LATIN, LATIN, COMMON, COMMON, COMMON, COMMON,
     ]);
 }
 
@@ -522,15 +515,7 @@ fn test_mixed_style() {
     ])
     .expect_word_boundary_list(vec![true, true, false, true, true, false, true, true, true])
     .expect_script_list(vec![
-        Script::Latin,
-        Script::Common,
-        Script::Common,
-        Script::Latin,
-        Script::Common,
-        Script::Common,
-        Script::Latin,
-        Script::Common,
-        Script::Latin,
+        LATIN, COMMON, COMMON, LATIN, COMMON, COMMON, LATIN, COMMON, LATIN,
     ]);
 }
 
@@ -545,17 +530,7 @@ fn test_mixed_ltr_rtl() {
         ])
         .expect_bidi_embed_level_list(&[0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1])
         .expect_script_list(vec![
-            Script::Latin,
-            Script::Latin,
-            Script::Latin,
-            Script::Latin,
-            Script::Latin,
-            Script::Common,
-            Script::Arabic,
-            Script::Arabic,
-            Script::Arabic,
-            Script::Arabic,
-            Script::Arabic,
+            LATIN, LATIN, LATIN, LATIN, LATIN, COMMON, ARABIC, ARABIC, ARABIC, ARABIC, ARABIC,
         ]);
 }
 
@@ -579,14 +554,7 @@ fn test_multi_byte_chars_alternating_break_all() {
     })
     .expect_soft_wrap_opportunity_list(vec![false, false, true, false, true, false])
     .expect_word_boundary_list(vec![true, true, true, true, true, false])
-    .expect_script_list(vec![
-        Script::Common,
-        Script::Han,
-        Script::Common,
-        Script::Han,
-        Script::Latin,
-        Script::Latin,
-    ]);
+    .expect_script_list(vec![COMMON, HAN, COMMON, HAN, LATIN, LATIN]);
 }
 
 #[test]
@@ -603,15 +571,7 @@ fn test_multi_byte_chars_varying_utf8_lengths_whitespace_separated() {
     ])
     .expect_word_boundary_list(vec![true, true, true, true, true, true, true, true, true])
     .expect_script_list(vec![
-        Script::Latin,
-        Script::Common,
-        Script::Common,
-        Script::Common,
-        Script::Common,
-        Script::Common,
-        Script::Han,
-        Script::Common,
-        Script::Latin,
+        LATIN, COMMON, COMMON, COMMON, COMMON, COMMON, HAN, COMMON, LATIN,
     ]);
 }
 
@@ -626,13 +586,7 @@ fn test_multi_byte_chars_varying_utf8_lengths() {
     })
     .expect_soft_wrap_opportunity_list(vec![false, false, false, true, true])
     .expect_word_boundary_list(vec![true, true, true, true, true])
-    .expect_script_list(vec![
-        Script::Latin,
-        Script::Common,
-        Script::Common,
-        Script::Han,
-        Script::Latin,
-    ]);
+    .expect_script_list(vec![LATIN, COMMON, COMMON, HAN, LATIN]);
 }
 
 #[test]
@@ -651,32 +605,9 @@ fn test_mixed_ltr_rtl_nested_embedding() {
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 1, 1, 1, 1, 0, 0, 0,
         ])
         .expect_script_list(vec![
-            Script::Latin,
-            Script::Latin,
-            Script::Common,
-            Script::Latin,
-            Script::Latin,
-            Script::Latin,
-            Script::Latin,
-            Script::Latin,
-            Script::Latin,
-            Script::Common,
-            Script::Common,
-            Script::Hebrew,
-            Script::Hebrew,
-            Script::Hebrew,
-            Script::Common,
-            Script::Common,
-            Script::Common,
-            Script::Common,
-            Script::Common,
-            Script::Common,
-            Script::Hebrew,
-            Script::Hebrew,
-            Script::Hebrew,
-            Script::Common,
-            Script::Common,
-            Script::Common,
+            LATIN, LATIN, COMMON, LATIN, LATIN, LATIN, LATIN, LATIN, LATIN, COMMON, COMMON, HEBREW,
+            HEBREW, HEBREW, COMMON, COMMON, COMMON, COMMON, COMMON, COMMON, HEBREW, HEBREW, HEBREW,
+            COMMON, COMMON, COMMON,
         ]);
 }
 
@@ -689,14 +620,7 @@ fn test_mixed_break_simple() {
     .expect_soft_wrap_opportunity_list(vec![false, false, false, false, false, true, false, false])
     .expect_word_boundary_list(vec![true, false, false, false, true, true, false, false])
     .expect_script_list(vec![
-        Script::Latin,
-        Script::Latin,
-        Script::Latin,
-        Script::Latin,
-        Script::Common,
-        Script::Common,
-        Script::Common,
-        Script::Common,
+        LATIN, LATIN, LATIN, LATIN, COMMON, COMMON, COMMON, COMMON,
     ]);
 }
 
@@ -712,14 +636,7 @@ fn test_multi_char_grapheme_mixed_break_all() {
     .expect_soft_wrap_opportunity_list(vec![false, false, true, false, false, true])
     .expect_word_boundary_list(vec![true, true, true, false, true, true])
     .expect_bidi_embed_level_list(&[])
-    .expect_script_list(vec![
-        Script::Latin,
-        Script::Common,
-        Script::Latin,
-        Script::Inherited,
-        Script::Common,
-        Script::Latin,
-    ])
+    .expect_script_list(vec![LATIN, COMMON, LATIN, INHERITED, COMMON, LATIN])
     .expect_is_control_list(vec![false, false, false, false, false, false])
     .expect_contributes_to_shaping_list(vec![true, true, true, true, true, true])
     .expect_force_normalize_list(vec![false, false, false, true, false, false]);
@@ -737,14 +654,7 @@ fn test_multi_byte_chars_alternating_keep_all() {
     })
     .expect_soft_wrap_opportunity_list(vec![false, false, true, false, false, false])
     .expect_word_boundary_list(vec![true, true, true, true, true, false])
-    .expect_script_list(vec![
-        Script::Common,
-        Script::Han,
-        Script::Common,
-        Script::Han,
-        Script::Latin,
-        Script::Latin,
-    ]);
+    .expect_script_list(vec![COMMON, HAN, COMMON, HAN, LATIN, LATIN]);
 }
 
 #[test]
@@ -765,40 +675,10 @@ fn test_mixed_ltr_rtl_multiple_segments() {
             1, 1, 1, 1, 1,
         ])
         .expect_script_list(vec![
-            Script::Latin,
-            Script::Latin,
-            Script::Latin,
-            Script::Latin,
-            Script::Latin,
-            Script::Common,
-            Script::Arabic,
-            Script::Arabic,
-            Script::Arabic,
-            Script::Arabic,
-            Script::Arabic,
-            Script::Common,
-            Script::Latin,
-            Script::Latin,
-            Script::Latin,
-            Script::Latin,
-            Script::Latin,
-            Script::Common,
-            Script::Arabic,
-            Script::Arabic,
-            Script::Arabic,
-            Script::Arabic,
-            Script::Common,
-            Script::Latin,
-            Script::Latin,
-            Script::Latin,
-            Script::Latin,
-            Script::Common,
-            Script::Arabic,
-            Script::Arabic,
-            Script::Arabic,
-            Script::Arabic,
-            Script::Arabic,
-            Script::Arabic,
+            LATIN, LATIN, LATIN, LATIN, LATIN, COMMON, ARABIC, ARABIC, ARABIC, ARABIC, ARABIC,
+            COMMON, LATIN, LATIN, LATIN, LATIN, LATIN, COMMON, ARABIC, ARABIC, ARABIC, ARABIC,
+            COMMON, LATIN, LATIN, LATIN, LATIN, COMMON, ARABIC, ARABIC, ARABIC, ARABIC, ARABIC,
+            ARABIC,
         ]);
 }
 
@@ -814,14 +694,7 @@ fn test_multi_char_grapheme_mixed_break_and_keep_all() {
     .expect_soft_wrap_opportunity_list(vec![false, false, true, false, false, true])
     .expect_word_boundary_list(vec![true, true, true, false, true, true])
     .expect_bidi_embed_level_list(&[])
-    .expect_script_list(vec![
-        Script::Latin,
-        Script::Common,
-        Script::Latin,
-        Script::Inherited,
-        Script::Common,
-        Script::Latin,
-    ])
+    .expect_script_list(vec![LATIN, COMMON, LATIN, INHERITED, COMMON, LATIN])
     .expect_is_control_list(vec![false, false, false, false, false, false])
     .expect_contributes_to_shaping_list(vec![true, true, true, true, true, true])
     .expect_force_normalize_list(vec![false, false, false, true, false, false]);
@@ -839,14 +712,7 @@ fn test_multi_char_grapheme_mixed_keep_all() {
     .expect_soft_wrap_opportunity_list(vec![false, false, true, false, false, true])
     .expect_word_boundary_list(vec![true, true, true, false, true, true])
     .expect_bidi_embed_level_list(&[])
-    .expect_script_list(vec![
-        Script::Latin,
-        Script::Common,
-        Script::Latin,
-        Script::Inherited,
-        Script::Common,
-        Script::Latin,
-    ])
+    .expect_script_list(vec![LATIN, COMMON, LATIN, INHERITED, COMMON, LATIN])
     .expect_is_control_list(vec![false, false, false, false, false, false])
     .expect_contributes_to_shaping_list(vec![true, true, true, true, true, true])
     .expect_force_normalize_list(vec![false, false, false, true, false, false]);
@@ -867,30 +733,9 @@ fn test_multi_paragraph_bidi() {
             0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1,
         ])
         .expect_script_list(vec![
-            Script::Latin,
-            Script::Latin,
-            Script::Latin,
-            Script::Latin,
-            Script::Latin,
-            Script::Common,
-            Script::Arabic,
-            Script::Arabic,
-            Script::Arabic,
-            Script::Arabic,
-            Script::Arabic,
-            Script::Common,
-            Script::Common,
-            Script::Latin,
-            Script::Latin,
-            Script::Latin,
-            Script::Latin,
-            Script::Common,
-            Script::Arabic,
-            Script::Arabic,
-            Script::Arabic,
-            Script::Arabic,
-            Script::Arabic,
-            Script::Arabic,
+            LATIN, LATIN, LATIN, LATIN, LATIN, COMMON, ARABIC, ARABIC, ARABIC, ARABIC, ARABIC,
+            COMMON, COMMON, LATIN, LATIN, LATIN, LATIN, COMMON, ARABIC, ARABIC, ARABIC, ARABIC,
+            ARABIC, ARABIC,
         ])
         .expect_is_control_list(vec![
             false, false, false, false, false, false, false, false, false, false, false, false,
@@ -920,17 +765,8 @@ fn test_rtl_paragraph_with_non_authoritative_logical_first_char_two_paragraphs()
         ])
         .expect_bidi_embed_level_list(&[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
         .expect_script_list(vec![
-            Script::Arabic,
-            Script::Arabic,
-            Script::Arabic,
-            Script::Inherited,
-            Script::Common,
-            Script::Common,
-            Script::Arabic,
-            Script::Arabic,
-            Script::Arabic,
-            Script::Inherited,
-            Script::Common,
+            ARABIC, ARABIC, ARABIC, INHERITED, COMMON, COMMON, ARABIC, ARABIC, ARABIC, INHERITED,
+            COMMON,
         ])
         .expect_is_control_list(vec![
             false, false, false, false, false, true, false, false, false, false, false,
@@ -960,7 +796,7 @@ fn test_single_char_multi_byte() {
     .expect_soft_wrap_opportunity_list(vec![false])
     .expect_word_boundary_list(vec![true])
     .expect_bidi_embed_level_list(&[])
-    .expect_script_list(vec![Script::Common]);
+    .expect_script_list(vec![COMMON]);
 }
 
 #[test]
@@ -969,13 +805,7 @@ fn test_rtl_paragraph_with_non_authoritative_logical_first_character() {
         .expect_soft_wrap_opportunity_list(vec![false, false, false, false, false])
         .expect_word_boundary_list(vec![true, false, false, false, true])
         .expect_bidi_embed_level_list(&[1, 1, 1, 1, 1])
-        .expect_script_list(vec![
-            Script::Arabic,
-            Script::Arabic,
-            Script::Arabic,
-            Script::Inherited,
-            Script::Common,
-        ])
+        .expect_script_list(vec![ARABIC, ARABIC, ARABIC, INHERITED, COMMON])
         .expect_is_control_list(vec![false, false, false, false, false])
         .expect_contributes_to_shaping_list(vec![true, true, true, true, true])
         .expect_force_normalize_list(vec![false, false, false, true, false]);
@@ -987,7 +817,7 @@ fn test_two_newlines() {
         .expect_soft_wrap_opportunity_list(vec![false, false])
         .expect_word_boundary_list(vec![true, true])
         .expect_bidi_embed_level_list(&[])
-        .expect_script_list(vec![Script::Common, Script::Common]);
+        .expect_script_list(vec![COMMON, COMMON]);
 }
 
 #[test]
@@ -996,7 +826,7 @@ fn test_newline() {
         .expect_soft_wrap_opportunity_list(vec![false])
         .expect_word_boundary_list(vec![true])
         .expect_bidi_embed_level_list(&[])
-        .expect_script_list(vec![Script::Common]);
+        .expect_script_list(vec![COMMON]);
 }
 
 #[test]
@@ -1007,7 +837,7 @@ fn test_two_chars_keep_all() {
     .expect_soft_wrap_opportunity_list(vec![false, false])
     .expect_word_boundary_list(vec![true, false])
     .expect_bidi_embed_level_list(&[])
-    .expect_script_list(vec![Script::Latin, Script::Latin]);
+    .expect_script_list(vec![LATIN, LATIN]);
 }
 
 #[test]
@@ -1018,15 +848,7 @@ fn test_whitespace_contiguous_interspersed_in_latin() {
         ])
         .expect_word_boundary_list(vec![true, true, false, true, true, false, true, true, true])
         .expect_script_list(vec![
-            Script::Latin,
-            Script::Common,
-            Script::Common,
-            Script::Latin,
-            Script::Common,
-            Script::Common,
-            Script::Latin,
-            Script::Common,
-            Script::Latin,
+            LATIN, COMMON, COMMON, LATIN, COMMON, COMMON, LATIN, COMMON, LATIN,
         ]);
 }
 
@@ -1041,15 +863,7 @@ fn test_whitespace_contiguous_interspersed_in_latin_mixed() {
     ])
     .expect_word_boundary_list(vec![true, true, false, true, true, false, true, true, true])
     .expect_script_list(vec![
-        Script::Latin,
-        Script::Common,
-        Script::Common,
-        Script::Latin,
-        Script::Common,
-        Script::Common,
-        Script::Latin,
-        Script::Common,
-        Script::Latin,
+        LATIN, COMMON, COMMON, LATIN, COMMON, COMMON, LATIN, COMMON, LATIN,
     ]);
 }
 

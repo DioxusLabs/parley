@@ -4,7 +4,7 @@
 //! Unicode bidirectional algorithm.
 
 use alloc::vec::Vec;
-use icu_properties::props::{BidiClass, BidiMirroringGlyph, BidiPairedBracketType};
+use cleft::BidiClass;
 use parlance::{BaseDirection, BidiLevel};
 
 /// Resolver for the Unicode bidirectional algorithm.
@@ -14,7 +14,8 @@ pub(crate) struct BidiResolver {
     pub(crate) levels: Vec<BidiLevel>,
     initial_types: Vec<BidiClass>,
     types: Vec<BidiClass>,
-    brackets: Vec<(usize, char, BidiMirroringGlyph)>,
+    /// Paired brackets: index, closing bracket of the pair, and whether this is the opener.
+    brackets: Vec<(usize, char, bool)>,
     bracket_pairs: Vec<(usize, usize)>,
     runs: Vec<Run>,
     indices: Vec<usize>,
@@ -51,17 +52,17 @@ impl BidiResolver {
     /// precomputed types.
     pub(crate) fn resolve(
         &mut self,
-        chars: impl Iterator<Item = (char, (BidiClass, BidiMirroringGlyph))>,
+        chars: impl Iterator<Item = (BidiClass, Option<(char, bool)>)>,
         base_direction: BaseDirection,
     ) {
         self.clear();
         let mut needs_bidi = false;
         let mut len = 0;
-        for (i, (ch, (t, bracket))) in chars.enumerate() {
+        for (i, (t, bracket)) in chars.enumerate() {
             self.initial_types.push(t);
 
-            if bracket.paired_bracket_type != BidiPairedBracketType::None {
-                self.brackets.push((i, ch, bracket));
+            if let Some((closing, is_open)) = bracket {
+                self.brackets.push((i, closing, is_open));
             }
 
             needs_bidi = needs_bidi || mask(t) & BIDI_MASK != 0;
@@ -110,15 +111,15 @@ impl BidiResolver {
         }
         for i in 0..len {
             let t = self.initial_types[i];
-            if t == BidiClass::SegmentSeparator || t == BidiClass::ParagraphSeparator {
+            if t == BidiClass::SEGMENT_SEPARATOR || t == BidiClass::PARAGRAPH_SEPARATOR {
                 self.levels[i] = self.base_level;
                 for j in (0..i).rev() {
                     let t = self.initial_types[j];
                     if is_removed_by_x9(t) {
                         continue;
-                    } else if t == BidiClass::WhiteSpace
+                    } else if t == BidiClass::WHITE_SPACE
                         || is_isolate_initiator(t)
-                        || t == BidiClass::PopDirectionalIsolate
+                        || t == BidiClass::POP_DIRECTIONAL_ISOLATE
                     {
                         self.levels[j] = self.base_level;
                     } else {
@@ -138,9 +139,9 @@ impl BidiResolver {
             let t = self.initial_types[i];
             if is_removed_by_x9(t) {
                 continue;
-            } else if t == BidiClass::WhiteSpace
+            } else if t == BidiClass::WHITE_SPACE
                 || is_isolate_initiator(t)
-                || t == BidiClass::PopDirectionalIsolate
+                || t == BidiClass::POP_DIRECTIONAL_ISOLATE
             {
                 //self.levels[i] = self.base_level;
             } else {
@@ -154,14 +155,14 @@ impl BidiResolver {
         for ty in types {
             let ty = *ty;
             match ty {
-                BidiClass::RightToLeftIsolate
-                | BidiClass::LeftToRightIsolate
-                | BidiClass::FirstStrongIsolate => isolates += 1,
-                BidiClass::PopDirectionalIsolate if isolates > 0 => isolates -= 1,
-                BidiClass::LeftToRight | BidiClass::RightToLeft | BidiClass::ArabicLetter
+                BidiClass::RIGHT_TO_LEFT_ISOLATE
+                | BidiClass::LEFT_TO_RIGHT_ISOLATE
+                | BidiClass::FIRST_STRONG_ISOLATE => isolates += 1,
+                BidiClass::POP_DIRECTIONAL_ISOLATE if isolates > 0 => isolates -= 1,
+                BidiClass::LEFT_TO_RIGHT | BidiClass::RIGHT_TO_LEFT | BidiClass::ARABIC_LETTER
                     if isolates == 0 =>
                 {
-                    return if ty == BidiClass::LeftToRight {
+                    return if ty == BidiClass::LEFT_TO_RIGHT {
                         BidiLevel::new(0)
                     } else {
                         BidiLevel::new(1)
@@ -178,20 +179,20 @@ impl BidiResolver {
         for ty in types {
             let ty = *ty;
             match ty {
-                BidiClass::RightToLeftIsolate
-                | BidiClass::LeftToRightIsolate
-                | BidiClass::FirstStrongIsolate => isolates += 1,
-                BidiClass::PopDirectionalIsolate => {
+                BidiClass::RIGHT_TO_LEFT_ISOLATE
+                | BidiClass::LEFT_TO_RIGHT_ISOLATE
+                | BidiClass::FIRST_STRONG_ISOLATE => isolates += 1,
+                BidiClass::POP_DIRECTIONAL_ISOLATE => {
                     if isolates > 0 {
                         isolates -= 1;
                     } else {
                         return 0;
                     }
                 }
-                BidiClass::LeftToRight | BidiClass::RightToLeft | BidiClass::ArabicLetter
+                BidiClass::LEFT_TO_RIGHT | BidiClass::RIGHT_TO_LEFT | BidiClass::ARABIC_LETTER
                     if isolates == 0 =>
                 {
-                    return if ty == BidiClass::LeftToRight { 0 } else { 1 };
+                    return if ty == BidiClass::LEFT_TO_RIGHT { 0 } else { 1 };
                 }
                 _ => {}
             }
@@ -208,13 +209,13 @@ impl BidiResolver {
         let mut overflow_isolates = 0;
         let mut overflow_embedding = 0;
         let mut valid_isolates = 0;
-        stack.push(base, BidiClass::OtherNeutral, false);
+        stack.push(base, BidiClass::OTHER_NEUTRAL, false);
         for i in 0..len {
             let t = self.types[i];
             let tmask = mask(t);
             if tmask & EXPLICIT_MASK != 0 {
                 let is_isolate = tmask & ISOLATE_MASK != 0;
-                let is_rtl = if t == BidiClass::FirstStrongIsolate && i + 1 < len {
+                let is_rtl = if t == BidiClass::FIRST_STRONG_ISOLATE && i + 1 < len {
                     Self::default_level_until_pdi(&self.types[i + 1..]) == 1
                 } else {
                     tmask & RTL_MASK != 0
@@ -222,7 +223,7 @@ impl BidiResolver {
                 if is_isolate {
                     self.levels[i] = stack.embedding_level();
                     let os = stack.override_status();
-                    if os != BidiClass::OtherNeutral {
+                    if os != BidiClass::OTHER_NEUTRAL {
                         self.types[i] = os;
                     }
                 }
@@ -238,12 +239,12 @@ impl BidiResolver {
                     }
                     stack.push(
                         new_level,
-                        if t == BidiClass::LeftToRightOverride {
-                            BidiClass::LeftToRight
-                        } else if t == BidiClass::RightToLeftOverride {
-                            BidiClass::RightToLeft
+                        if t == BidiClass::LEFT_TO_RIGHT_OVERRIDE {
+                            BidiClass::LEFT_TO_RIGHT
+                        } else if t == BidiClass::RIGHT_TO_LEFT_OVERRIDE {
+                            BidiClass::RIGHT_TO_LEFT
                         } else {
-                            BidiClass::OtherNeutral
+                            BidiClass::OTHER_NEUTRAL
                         },
                         is_isolate,
                     );
@@ -252,7 +253,7 @@ impl BidiResolver {
                 } else if overflow_isolates == 0 {
                     overflow_embedding += 1;
                 }
-            } else if t == BidiClass::PopDirectionalIsolate {
+            } else if t == BidiClass::POP_DIRECTIONAL_ISOLATE {
                 if overflow_isolates > 0 {
                     overflow_isolates -= 1;
                 } else if valid_isolates == 0 {
@@ -266,10 +267,10 @@ impl BidiResolver {
                     valid_isolates -= 1;
                 }
                 self.levels[i] = stack.embedding_level();
-                if stack.override_status() != BidiClass::OtherNeutral {
+                if stack.override_status() != BidiClass::OTHER_NEUTRAL {
                     self.types[i] = stack.override_status();
                 }
-            } else if t == BidiClass::PopDirectionalFormat {
+            } else if t == BidiClass::POP_DIRECTIONAL_FORMAT {
                 self.levels[i] = stack.embedding_level();
                 if overflow_isolates > 0 {
                     // empty
@@ -278,15 +279,15 @@ impl BidiResolver {
                 } else if !stack.isolate_status() && stack.depth >= 2 {
                     stack.pop();
                 }
-            } else if t == BidiClass::ParagraphSeparator {
+            } else if t == BidiClass::PARAGRAPH_SEPARATOR {
                 stack.depth = 1;
                 overflow_isolates = 0;
                 overflow_embedding = 0;
                 valid_isolates = 0;
                 self.levels[i] = base;
-            } else if t != BidiClass::BoundaryNeutral {
+            } else if t != BidiClass::BOUNDARY_NEUTRAL {
                 self.levels[i] = stack.embedding_level();
-                if stack.override_status() != BidiClass::OtherNeutral {
+                if stack.override_status() != BidiClass::OTHER_NEUTRAL {
                     self.types[i] = stack.override_status();
                 }
             }
@@ -339,7 +340,7 @@ impl BidiResolver {
             if run.start == run.end {
                 continue;
             }
-            if self.types[run.start] == BidiClass::PopDirectionalIsolate {
+            if self.types[run.start] == BidiClass::POP_DIRECTIONAL_ISOLATE {
                 run.starts_with_pdi = true;
             }
             let mut prev_level = self.base_level;
@@ -383,55 +384,57 @@ impl BidiResolver {
         if len == 0 {
             return;
         }
-        const W1_MASK: u32 = mask(BidiClass::LeftToRightIsolate)
-            | mask(BidiClass::RightToLeftIsolate)
-            | mask(BidiClass::FirstStrongIsolate)
-            | mask(BidiClass::PopDirectionalIsolate);
-        const W2_MASK: u32 = mask(BidiClass::LeftToRight)
-            | mask(BidiClass::RightToLeft)
-            | mask(BidiClass::ArabicLetter);
-        const W4_MASK: u32 = mask(BidiClass::EuropeanSeparator) | mask(BidiClass::CommonSeparator);
+        const W1_MASK: u32 = mask(BidiClass::LEFT_TO_RIGHT_ISOLATE)
+            | mask(BidiClass::RIGHT_TO_LEFT_ISOLATE)
+            | mask(BidiClass::FIRST_STRONG_ISOLATE)
+            | mask(BidiClass::POP_DIRECTIONAL_ISOLATE);
+        const W2_MASK: u32 = mask(BidiClass::LEFT_TO_RIGHT)
+            | mask(BidiClass::RIGHT_TO_LEFT)
+            | mask(BidiClass::ARABIC_LETTER);
+        const W4_MASK: u32 =
+            mask(BidiClass::EUROPEAN_SEPARATOR) | mask(BidiClass::COMMON_SEPARATOR);
         let mut prev = sos;
         let mut prev_strong = prev;
         let types = &mut self.types[self.initial_types.len()..];
         for i in 0..len {
             let mut t = types[i];
             let tmask = mask(t);
-            if t == BidiClass::NonspacingMark {
+            if t == BidiClass::NONSPACING_MARK {
                 // W1
                 types[i] = prev;
             } else {
                 if tmask & W1_MASK != 0 {
-                    prev = BidiClass::OtherNeutral;
+                    prev = BidiClass::OTHER_NEUTRAL;
                     continue;
                 }
-                if t == BidiClass::EuropeanNumber {
+                if t == BidiClass::EUROPEAN_NUMBER {
                     // W2
-                    if prev_strong == BidiClass::ArabicLetter {
-                        t = BidiClass::ArabicNumber;
+                    if prev_strong == BidiClass::ARABIC_LETTER {
+                        t = BidiClass::ARABIC_NUMBER;
                         types[i] = t;
                     }
                 } else if tmask & W2_MASK != 0 {
                     prev_strong = t;
                     // W3
-                    if t == BidiClass::ArabicLetter {
-                        t = BidiClass::RightToLeft;
+                    if t == BidiClass::ARABIC_LETTER {
+                        t = BidiClass::RIGHT_TO_LEFT;
                         types[i] = t;
                     }
                 } else if tmask & W4_MASK != 0 && i < (len - 1) {
                     // W4
                     let mut next = types[i + 1];
-                    if next == BidiClass::EuropeanNumber && prev_strong == BidiClass::ArabicLetter {
-                        next = BidiClass::ArabicNumber;
-                    }
-                    if prev == BidiClass::EuropeanNumber && next == BidiClass::EuropeanNumber {
-                        t = BidiClass::EuropeanNumber;
-                        types[i] = t;
-                    } else if t == BidiClass::CommonSeparator
-                        && prev == BidiClass::ArabicNumber
-                        && next == BidiClass::ArabicNumber
+                    if next == BidiClass::EUROPEAN_NUMBER && prev_strong == BidiClass::ARABIC_LETTER
                     {
-                        t = BidiClass::ArabicNumber;
+                        next = BidiClass::ARABIC_NUMBER;
+                    }
+                    if prev == BidiClass::EUROPEAN_NUMBER && next == BidiClass::EUROPEAN_NUMBER {
+                        t = BidiClass::EUROPEAN_NUMBER;
+                        types[i] = t;
+                    } else if t == BidiClass::COMMON_SEPARATOR
+                        && prev == BidiClass::ARABIC_NUMBER
+                        && next == BidiClass::ARABIC_NUMBER
+                    {
+                        t = BidiClass::ARABIC_NUMBER;
                         types[i] = t;
                     }
                 }
@@ -441,15 +444,15 @@ impl BidiResolver {
         // W5
         let mut i = 0;
         while i < len {
-            if types[i] == BidiClass::EuropeanTerminator {
-                let limit = find_limit(types, i, BidiClass::EuropeanTerminator);
+            if types[i] == BidiClass::EUROPEAN_TERMINATOR {
+                let limit = find_limit(types, i, BidiClass::EUROPEAN_TERMINATOR);
                 let mut t = if i == 0 { sos } else { types[i - 1] };
-                if t != BidiClass::EuropeanNumber {
+                if t != BidiClass::EUROPEAN_NUMBER {
                     t = if limit == len { eos } else { types[limit] };
                 }
-                if t == BidiClass::EuropeanNumber {
+                if t == BidiClass::EUROPEAN_NUMBER {
                     for j in i..limit {
-                        types[j] = BidiClass::EuropeanNumber;
+                        types[j] = BidiClass::EUROPEAN_NUMBER;
                     }
                 }
                 i = limit;
@@ -457,21 +460,21 @@ impl BidiResolver {
             i += 1;
         }
         // W6, W7
-        const W6_MASK: u32 = mask(BidiClass::EuropeanSeparator)
-            | mask(BidiClass::EuropeanTerminator)
-            | mask(BidiClass::CommonSeparator);
+        const W6_MASK: u32 = mask(BidiClass::EUROPEAN_SEPARATOR)
+            | mask(BidiClass::EUROPEAN_TERMINATOR)
+            | mask(BidiClass::COMMON_SEPARATOR);
         prev_strong = sos;
         for i in 0..len {
             let t = types[i];
             if mask(t) & W6_MASK != 0 {
                 // W6
-                types[i] = BidiClass::OtherNeutral;
-            } else if t == BidiClass::EuropeanNumber {
+                types[i] = BidiClass::OTHER_NEUTRAL;
+            } else if t == BidiClass::EUROPEAN_NUMBER {
                 // W7
-                if prev_strong == BidiClass::LeftToRight {
-                    types[i] = BidiClass::LeftToRight;
+                if prev_strong == BidiClass::LEFT_TO_RIGHT {
+                    types[i] = BidiClass::LEFT_TO_RIGHT;
                 }
-            } else if t == BidiClass::LeftToRight || t == BidiClass::RightToLeft {
+            } else if t == BidiClass::LEFT_TO_RIGHT || t == BidiClass::RIGHT_TO_LEFT {
                 prev_strong = t;
             }
         }
@@ -480,48 +483,42 @@ impl BidiResolver {
             let base_brackets = self.bracket_pairs.len();
             let mut bracket_stack = BracketStack::new();
             for i in 0..len {
-                if types[i] != BidiClass::OtherNeutral {
+                if types[i] != BidiClass::OTHER_NEUTRAL {
                     continue;
                 }
                 let index = self.indices[i];
                 if let Ok(index) = self.brackets.binary_search_by(|x| x.0.cmp(&index)) {
-                    let (_, ch, bracket) = self.brackets[index];
-                    match bracket.paired_bracket_type {
-                        BidiPairedBracketType::Open => {
-                            if bracket_stack.depth == MAX_BRACKET_STACK {
-                                break;
-                            }
-                            bracket_stack.push(i, bracket.mirroring_glyph.unwrap());
+                    let (_, closing, is_open) = self.brackets[index];
+                    if is_open {
+                        if bracket_stack.depth == MAX_BRACKET_STACK {
+                            break;
                         }
-                        BidiPairedBracketType::Close => {
-                            if let Some(open) = bracket_stack.find_and_pop(ch) {
-                                self.bracket_pairs.push((open, i));
-                            }
-                        }
-                        _ => {}
+                        bracket_stack.push(i, closing);
+                    } else if let Some(open) = bracket_stack.find_and_pop(closing) {
+                        self.bracket_pairs.push((open, i));
                     }
                 }
             }
             if self.bracket_pairs.len() > base_brackets {
                 let embed_dir = if level & 1 != 0 {
-                    BidiClass::RightToLeft
+                    BidiClass::RIGHT_TO_LEFT
                 } else {
-                    BidiClass::LeftToRight
+                    BidiClass::LEFT_TO_RIGHT
                 };
                 let bracket_pairs = &mut self.bracket_pairs[base_brackets..];
                 bracket_pairs.sort_unstable_by_key(|a| a.0);
                 for pair in bracket_pairs {
-                    let mut pair_dir = BidiClass::OtherNeutral;
+                    let mut pair_dir = BidiClass::OTHER_NEUTRAL;
                     for i in pair.0 + 1..pair.1 {
                         let dir = match types[i] {
-                            BidiClass::EuropeanNumber
-                            | BidiClass::ArabicNumber
-                            | BidiClass::ArabicLetter
-                            | BidiClass::RightToLeft => BidiClass::RightToLeft,
-                            BidiClass::LeftToRight => BidiClass::LeftToRight,
-                            _ => BidiClass::OtherNeutral,
+                            BidiClass::EUROPEAN_NUMBER
+                            | BidiClass::ARABIC_NUMBER
+                            | BidiClass::ARABIC_LETTER
+                            | BidiClass::RIGHT_TO_LEFT => BidiClass::RIGHT_TO_LEFT,
+                            BidiClass::LEFT_TO_RIGHT => BidiClass::LEFT_TO_RIGHT,
+                            _ => BidiClass::OTHER_NEUTRAL,
                         };
-                        if dir == BidiClass::OtherNeutral {
+                        if dir == BidiClass::OTHER_NEUTRAL {
                             continue;
                         }
                         pair_dir = dir;
@@ -529,7 +526,7 @@ impl BidiResolver {
                             break;
                         }
                     }
-                    if pair_dir == BidiClass::OtherNeutral {
+                    if pair_dir == BidiClass::OTHER_NEUTRAL {
                         pair.0 = self.indices[pair.0];
                         pair.1 = self.indices[pair.1];
                         continue;
@@ -538,19 +535,19 @@ impl BidiResolver {
                         pair_dir = sos;
                         for i in (0..pair.0).rev() {
                             let dir = match types[i] {
-                                BidiClass::EuropeanNumber
-                                | BidiClass::ArabicNumber
-                                | BidiClass::ArabicLetter
-                                | BidiClass::RightToLeft => BidiClass::RightToLeft,
-                                BidiClass::LeftToRight => BidiClass::LeftToRight,
-                                _ => BidiClass::OtherNeutral,
+                                BidiClass::EUROPEAN_NUMBER
+                                | BidiClass::ARABIC_NUMBER
+                                | BidiClass::ARABIC_LETTER
+                                | BidiClass::RIGHT_TO_LEFT => BidiClass::RIGHT_TO_LEFT,
+                                BidiClass::LEFT_TO_RIGHT => BidiClass::LEFT_TO_RIGHT,
+                                _ => BidiClass::OTHER_NEUTRAL,
                             };
-                            if dir != BidiClass::OtherNeutral {
+                            if dir != BidiClass::OTHER_NEUTRAL {
                                 pair_dir = dir;
                                 break;
                             }
                         }
-                        if pair_dir == embed_dir || pair_dir == BidiClass::OtherNeutral {
+                        if pair_dir == embed_dir || pair_dir == BidiClass::OTHER_NEUTRAL {
                             pair_dir = embed_dir;
                         }
                     }
@@ -558,7 +555,7 @@ impl BidiResolver {
                     types[pair.1] = pair_dir;
                     for i in pair.0 + 1..pair.1 {
                         let index = self.indices[i];
-                        if self.initial_types[index] == BidiClass::NonspacingMark {
+                        if self.initial_types[index] == BidiClass::NONSPACING_MARK {
                             types[i] = pair_dir;
                         } else {
                             break;
@@ -566,7 +563,7 @@ impl BidiResolver {
                     }
                     for i in pair.1 + 1..len {
                         let index = self.indices[i];
-                        if self.initial_types[index] == BidiClass::NonspacingMark {
+                        if self.initial_types[index] == BidiClass::NONSPACING_MARK {
                             types[i] = pair_dir;
                         } else {
                             break;
@@ -578,14 +575,14 @@ impl BidiResolver {
             }
         }
         // N1, N2
-        const N_MASK: u32 = mask(BidiClass::ParagraphSeparator)
-            | mask(BidiClass::SegmentSeparator)
-            | mask(BidiClass::WhiteSpace)
-            | mask(BidiClass::OtherNeutral)
-            | mask(BidiClass::RightToLeftIsolate)
-            | mask(BidiClass::LeftToRightIsolate)
-            | mask(BidiClass::FirstStrongIsolate)
-            | mask(BidiClass::PopDirectionalIsolate);
+        const N_MASK: u32 = mask(BidiClass::PARAGRAPH_SEPARATOR)
+            | mask(BidiClass::SEGMENT_SEPARATOR)
+            | mask(BidiClass::WHITE_SPACE)
+            | mask(BidiClass::OTHER_NEUTRAL)
+            | mask(BidiClass::RIGHT_TO_LEFT_ISOLATE)
+            | mask(BidiClass::LEFT_TO_RIGHT_ISOLATE)
+            | mask(BidiClass::FIRST_STRONG_ISOLATE)
+            | mask(BidiClass::POP_DIRECTIONAL_ISOLATE);
         let mut i = 0;
         while i < len {
             let t = types[i];
@@ -598,17 +595,19 @@ impl BidiResolver {
                     leading = sos;
                 } else {
                     leading = types[offset - 1];
-                    if leading == BidiClass::ArabicNumber || leading == BidiClass::EuropeanNumber {
-                        leading = BidiClass::RightToLeft;
+                    if leading == BidiClass::ARABIC_NUMBER || leading == BidiClass::EUROPEAN_NUMBER
+                    {
+                        leading = BidiClass::RIGHT_TO_LEFT;
                     }
                 }
                 if limit == len {
                     trailing = eos;
                 } else {
                     trailing = types[limit];
-                    if trailing == BidiClass::ArabicNumber || trailing == BidiClass::EuropeanNumber
+                    if trailing == BidiClass::ARABIC_NUMBER
+                        || trailing == BidiClass::EUROPEAN_NUMBER
                     {
-                        trailing = BidiClass::RightToLeft;
+                        trailing = BidiClass::RIGHT_TO_LEFT;
                     }
                 }
                 let resolved = if leading == trailing {
@@ -617,9 +616,9 @@ impl BidiResolver {
                 } else {
                     // N2
                     if level & 1 != 0 {
-                        BidiClass::RightToLeft
+                        BidiClass::RIGHT_TO_LEFT
                     } else {
-                        BidiClass::LeftToRight
+                        BidiClass::LEFT_TO_RIGHT
                     }
                 };
                 for j in offset..limit {
@@ -635,9 +634,9 @@ impl BidiResolver {
             for i in 0..len {
                 let index = self.indices[i];
                 let t = types[i];
-                if t == BidiClass::RightToLeft {
+                if t == BidiClass::RIGHT_TO_LEFT {
                     self.levels[index] = BidiLevel::new(level + 1);
-                } else if t != BidiClass::LeftToRight {
+                } else if t != BidiClass::LEFT_TO_RIGHT {
                     self.levels[index] = BidiLevel::new(level + 2);
                 } else {
                     self.levels[index] = BidiLevel::new(level);
@@ -648,7 +647,7 @@ impl BidiResolver {
             for i in 0..len {
                 let index = self.indices[i];
                 let t = types[i];
-                if t != BidiClass::RightToLeft {
+                if t != BidiClass::RIGHT_TO_LEFT {
                     self.levels[index] = BidiLevel::new(level + 1);
                 } else {
                     self.levels[index] = BidiLevel::new(level);
@@ -661,9 +660,9 @@ impl BidiResolver {
 /// Returns a default bidi type for a level.
 pub(crate) fn type_from_level(level: BidiLevel) -> BidiClass {
     if level.is_ltr() {
-        BidiClass::LeftToRight
+        BidiClass::LEFT_TO_RIGHT
     } else {
-        BidiClass::RightToLeft
+        BidiClass::RIGHT_TO_LEFT
     }
 }
 
@@ -713,25 +712,25 @@ pub(crate) fn needs_bidi_resolution(bidi_class: BidiClass) -> bool {
     mask(bidi_class) & BIDI_MASK != 0
 }
 
-const OVERRIDE_MASK: u32 = mask(BidiClass::RightToLeftEmbedding)
-    | mask(BidiClass::LeftToRightEmbedding)
-    | mask(BidiClass::RightToLeftOverride)
-    | mask(BidiClass::LeftToRightOverride);
-const ISOLATE_MASK: u32 = mask(BidiClass::RightToLeftIsolate)
-    | mask(BidiClass::LeftToRightIsolate)
-    | mask(BidiClass::FirstStrongIsolate);
+const OVERRIDE_MASK: u32 = mask(BidiClass::RIGHT_TO_LEFT_EMBEDDING)
+    | mask(BidiClass::LEFT_TO_RIGHT_EMBEDDING)
+    | mask(BidiClass::RIGHT_TO_LEFT_OVERRIDE)
+    | mask(BidiClass::LEFT_TO_RIGHT_OVERRIDE);
+const ISOLATE_MASK: u32 = mask(BidiClass::RIGHT_TO_LEFT_ISOLATE)
+    | mask(BidiClass::LEFT_TO_RIGHT_ISOLATE)
+    | mask(BidiClass::FIRST_STRONG_ISOLATE);
 const EXPLICIT_MASK: u32 = OVERRIDE_MASK | ISOLATE_MASK;
-const RTL_MASK: u32 = mask(BidiClass::RightToLeftEmbedding)
-    | mask(BidiClass::RightToLeftOverride)
-    | mask(BidiClass::RightToLeftIsolate);
+const RTL_MASK: u32 = mask(BidiClass::RIGHT_TO_LEFT_EMBEDDING)
+    | mask(BidiClass::RIGHT_TO_LEFT_OVERRIDE)
+    | mask(BidiClass::RIGHT_TO_LEFT_ISOLATE);
 const REMOVED_BY_X9_MASK: u32 =
-    OVERRIDE_MASK | mask(BidiClass::PopDirectionalFormat) | mask(BidiClass::BoundaryNeutral);
+    OVERRIDE_MASK | mask(BidiClass::POP_DIRECTIONAL_FORMAT) | mask(BidiClass::BOUNDARY_NEUTRAL);
 const BIDI_MASK: u32 = EXPLICIT_MASK
-    | mask(BidiClass::RightToLeft)
-    | mask(BidiClass::ArabicLetter)
-    | mask(BidiClass::ArabicNumber);
+    | mask(BidiClass::RIGHT_TO_LEFT)
+    | mask(BidiClass::ARABIC_LETTER)
+    | mask(BidiClass::ARABIC_NUMBER);
 const _RESET_MASK: u32 =
-    ISOLATE_MASK | mask(BidiClass::PopDirectionalIsolate) | mask(BidiClass::WhiteSpace);
+    ISOLATE_MASK | mask(BidiClass::POP_DIRECTIONAL_ISOLATE) | mask(BidiClass::WHITE_SPACE);
 
 fn is_isolate_initiator(ty: BidiClass) -> bool {
     mask(ty) & ISOLATE_MASK != 0
@@ -786,8 +785,8 @@ impl Run {
             level,
             ends_with_isolate: false,
             starts_with_pdi: false,
-            sos: BidiClass::OtherNeutral,
-            eos: BidiClass::OtherNeutral,
+            sos: BidiClass::OTHER_NEUTRAL,
+            eos: BidiClass::OTHER_NEUTRAL,
             start,
             end,
             in_sequence: false,
@@ -810,7 +809,7 @@ impl Stack {
         Self {
             depth: 0,
             embedding_level: [BidiLevel::new(0); MAX_STACK + 1],
-            override_status: [BidiClass::OtherNeutral; MAX_STACK + 1],
+            override_status: [BidiClass::OTHER_NEUTRAL; MAX_STACK + 1],
             isolate_status: [false; MAX_STACK + 1],
         }
     }
@@ -883,29 +882,29 @@ impl BracketStack {
 /// Turns a bidi class into a single bit, for cheap set membership testing.
 const fn mask(t: BidiClass) -> u32 {
     let bit = match t {
-        BidiClass::LeftToRight => 0,
-        BidiClass::RightToLeft => 1,
-        BidiClass::EuropeanNumber => 2,
-        BidiClass::EuropeanSeparator => 3,
-        BidiClass::EuropeanTerminator => 4,
-        BidiClass::ArabicNumber => 5,
-        BidiClass::CommonSeparator => 6,
-        BidiClass::ParagraphSeparator => 7,
-        BidiClass::SegmentSeparator => 8,
-        BidiClass::WhiteSpace => 9,
-        BidiClass::OtherNeutral => 10,
-        BidiClass::LeftToRightEmbedding => 11,
-        BidiClass::LeftToRightOverride => 12,
-        BidiClass::ArabicLetter => 13,
-        BidiClass::RightToLeftEmbedding => 14,
-        BidiClass::RightToLeftOverride => 15,
-        BidiClass::PopDirectionalFormat => 16,
-        BidiClass::NonspacingMark => 17,
-        BidiClass::BoundaryNeutral => 18,
-        BidiClass::FirstStrongIsolate => 19,
-        BidiClass::LeftToRightIsolate => 20,
-        BidiClass::RightToLeftIsolate => 21,
-        BidiClass::PopDirectionalIsolate => 22,
+        BidiClass::LEFT_TO_RIGHT => 0,
+        BidiClass::RIGHT_TO_LEFT => 1,
+        BidiClass::EUROPEAN_NUMBER => 2,
+        BidiClass::EUROPEAN_SEPARATOR => 3,
+        BidiClass::EUROPEAN_TERMINATOR => 4,
+        BidiClass::ARABIC_NUMBER => 5,
+        BidiClass::COMMON_SEPARATOR => 6,
+        BidiClass::PARAGRAPH_SEPARATOR => 7,
+        BidiClass::SEGMENT_SEPARATOR => 8,
+        BidiClass::WHITE_SPACE => 9,
+        BidiClass::OTHER_NEUTRAL => 10,
+        BidiClass::LEFT_TO_RIGHT_EMBEDDING => 11,
+        BidiClass::LEFT_TO_RIGHT_OVERRIDE => 12,
+        BidiClass::ARABIC_LETTER => 13,
+        BidiClass::RIGHT_TO_LEFT_EMBEDDING => 14,
+        BidiClass::RIGHT_TO_LEFT_OVERRIDE => 15,
+        BidiClass::POP_DIRECTIONAL_FORMAT => 16,
+        BidiClass::NONSPACING_MARK => 17,
+        BidiClass::BOUNDARY_NEUTRAL => 18,
+        BidiClass::FIRST_STRONG_ISOLATE => 19,
+        BidiClass::LEFT_TO_RIGHT_ISOLATE => 20,
+        BidiClass::RIGHT_TO_LEFT_ISOLATE => 21,
+        BidiClass::POP_DIRECTIONAL_ISOLATE => 22,
         _ => {
             debug_assert!(false, "unhandled Bidi_Class");
             return 0;
