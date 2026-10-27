@@ -5,7 +5,6 @@
 
 use core::{ops::Range, str::CharIndices};
 
-use icu_properties::props::Script as IcuScript;
 use parlance::{BidiLevel, Script};
 
 use crate::{Analysis, CharInfo, ShapeOptions};
@@ -100,7 +99,7 @@ pub(crate) struct Itemizer<'a> {
     /// The running character offset of the last-processed item.
     current_char_offset: usize,
     /// The running script of the last-processed item.
-    current_script: IcuScript,
+    current_script: Script,
 }
 
 impl Analysis {
@@ -119,7 +118,7 @@ impl Analysis {
             .iter()
             .map(|x| x.script)
             .find(|&script| real_script(script))
-            .unwrap_or(IcuScript::Latin);
+            .unwrap_or(Script::from_bytes(*b"Latn"));
 
         Itemizer {
             char_indices: text.char_indices(),
@@ -226,26 +225,14 @@ impl Itemizer<'_> {
                 byte_range: start_byte_offset..self.char_indices.offset(),
                 char_range: start_char_offset..self.current_char_offset,
             },
-            script: icu_script_to_parlance_script(self.current_script),
+            script: self.current_script,
             bidi_level: item_bidi_level,
         })
     }
 }
 
-fn real_script(script: IcuScript) -> bool {
-    script != IcuScript::Common && script != IcuScript::Unknown && script != IcuScript::Inherited
-}
-
-/// Convert an ICU script into a [`Script`].
-#[inline]
-fn icu_script_to_parlance_script(script: IcuScript) -> Script {
-    static SHORT_NAMES: icu_properties::PropertyNamesShortBorrowed<'static, IcuScript> =
-        icu_properties::PropertyNamesShort::new();
-
-    SHORT_NAMES
-        .get(script)
-        .and_then(|name| Script::parse(name).ok())
-        .unwrap_or(Script::UNKNOWN)
+fn real_script(script: Script) -> bool {
+    script != Script::COMMON && script != Script::UNKNOWN && script != Script::INHERITED
 }
 
 #[cfg(test)]

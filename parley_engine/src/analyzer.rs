@@ -13,11 +13,23 @@ use crate::{bidi::BidiResolver, break_overrides::LineBreakOverrideFn};
 use crate::analysis::{Analysis, analyze_text};
 
 /// Reusable scratch for [`Analyzer::analyze`].
-#[derive(Default)]
 pub struct Analyzer {
     pub(crate) bidi: BidiResolver,
     /// Byte offsets of the line boundaries of the text being analyzed.
     pub(crate) line_boundary_positions: Vec<usize>,
+    /// The word dictionaries compiled in by the `complex-scripts` feature (none without it),
+    /// used when [`AnalysisDataSources`](crate::AnalysisDataSources) provides none.
+    pub(crate) dictionaries: cleft::Dictionaries,
+}
+
+impl Default for Analyzer {
+    fn default() -> Self {
+        Self {
+            bidi: BidiResolver::default(),
+            line_boundary_positions: Vec::new(),
+            dictionaries: crate::analysis::compiled_dictionaries(),
+        }
+    }
 }
 
 impl core::fmt::Debug for Analyzer {

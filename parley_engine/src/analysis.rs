@@ -8,21 +8,12 @@
 
 use alloc::vec::Vec;
 use core::ops::Range;
-use icu_provider::DataProvider;
-use icu_segmenter::provider::{SegmenterDictionaryAutoV1, SegmenterDictionaryExtendedV1};
 
-use icu_locale_core::{LanguageIdentifier, langid};
-use icu_properties::props::{BidiMirroringGlyph, GeneralCategory, GraphemeClusterBreak, Script};
-use icu_properties::{CodePointMapData, CodePointMapDataBorrowed};
-use icu_segmenter::options::{
-    LineBreakOptions, LineBreakStrictness, LineBreakWordOption, WordBreakInvariantOptions,
+use cleft::{
+    BidiClass, CoreProps, Dictionaries, GraphemeClusterBreak, GraphemeState, LineBreaks,
+    LineOptions, LineStrictness, LineWordOption, RareProps, Utf8Scalars, WordBreaks, WordOptions,
 };
-use icu_segmenter::{
-    GraphemeClusterSegmenter, GraphemeClusterSegmenterBorrowed, LineSegmenter,
-    LineSegmenterBorrowed, WordSegmenter,
-};
-use parlance::{BaseDirection, BidiLevel, LineBreak, WordBreak};
-use parley_data::Properties;
+use parlance::{BaseDirection, BidiLevel, LineBreak, Script, WordBreak};
 
 use crate::bidi;
 use crate::break_overrides::LineBreakContext;
@@ -80,193 +71,216 @@ impl Analysis {
     }
 }
 
-// TODO: Properly document this crate's features, and point to this doc in the doc of [`complex-scripts`].
-// See https://github.com/linebender/parley/issues/773
-/// An external source of complex script dictionaries for line and word breaking in Parley.
-///
-/// Some scripts require complex context dependent analysis to find word and line breaks, as their writing
-/// doesn't have inherent word breaks (compare with English, which uses spaces as word break and
-/// soft wrap opportunities).
-/// The scripts we support this analysis for are currently Chinese, Japanese, Khmer, Lao, Myanmar, and Thai (however,
-/// this might change in patch releases).
-/// We use [`icu_segmenter`] to determine those boundaries in these scripts; its analysis requires access to
-/// somewhat large dictionaries for each supported language.
-///
-/// Parley supports providing these dictionaries in two ways:
-/// - Through this trait (see [using the trait](#using-the-trait)).
-/// - By enabling the `complex-scripts` cargo feature, which will compile these dictionaries into the binary instead.
-///   Most users should prefer enabling that feature, as it will be more stable across Parley releases.
-///
-/// This trait allows providing these dictionaries externally (i.e. not in the binary).
-/// One use case for this is where your application binary will be downloaded many times by each
-/// user (perhaps due to updates), but the dictionaries can be cached.
-/// You may also wish to avoid downloading any dictionaries your user's text does not use.
-///
-/// When an implementation of this trait is used, the compiled in (`complex-scripts`) dictionaries will never
-/// be used, even if they cover a script not provided by the trait implementation.
-///
-/// # Using the trait
-///
-/// If you're using Parley, this can be used through layout builder's `set_dictionary_provider` method.
-///
-/// This trait is implemented for each type which has the [`icu_provider::DataProvider`] implementations needed
-/// for word and line segmentation. We do not export this trait ourselves; you must instead depend on `icu_provider` directly.
-/// You must also depend directly on `icu_segmenter`; Parley depends on a specific minor version of `icu_segmenter`, which your
-/// dependency specification must be compatible with Parley's:
-///
-/// ```toml
-/// icu_segmenter = "~2.3.0"
-/// icu_provider = "2.3.0"
-/// ```
-///
-/// Additionally, you should avoid the use of [`DeserializingBufferProvider`](https://docs.rs/icu_provider/latest/icu_provider/buf/struct.DeserializingBufferProvider.html),
-/// as this would deserialise the dictionaries at the time of each layout. Our `external_dictionaries` example shows how
-/// to create a caching typed provider instead.
-/// If your underlying [`DataProvider`] implementations return an error except `IdentifierNotFound`, Parley Engine
-/// will currently panic during text analysis.
-///
-/// Please note that if the dictionary for one of the scripts mentioned above is not provided,
-/// word boundaries computed by Parley (as used for text selection) will not be valid. In that scenario, they
-/// will be even worse than if neither the dictionary nor `complex-scripts` are not enabled. This is due to a bug in `icu_segmenter`.
-///
-/// # Note on LSTMs
-///
-/// `icu_segmenter` also supports using [LSTM models](https://docs.rs/icu_segmenter/2.3.0/icu_segmenter/struct.LineSegmenter.html#method.new_lstm)
-/// for determining these boundaries. Parley doesn't currently support using these, but might in a future release.
-/// If we do, your use of this trait may need to change; this would be in a breaking release of Parley. This is another
-/// reason we recommend using `complex-scripts` instead, if your use case allows it.
-pub trait DictionaryProvider:
-    DataProvider<SegmenterDictionaryAutoV1> + DataProvider<SegmenterDictionaryExtendedV1>
-{
-}
-
-impl<P: ?Sized> DictionaryProvider for P where
-    P: DataProvider<SegmenterDictionaryAutoV1> + DataProvider<SegmenterDictionaryExtendedV1>
-{
-}
-
 /// Provides runtime data needed for text analysis.
 ///
-/// Currently, this only includes an optional [`DictionaryProvider`]
+/// Currently, this only includes optional word [`Dictionaries`] for the scripts whose line and
+/// word breaks need one (Thai, Lao, Khmer, Myanmar, Chinese and Japanese). When none are given,
+/// the dictionaries compiled in by the `complex-scripts` feature are used, if any.
 #[derive(Default)]
 pub struct AnalysisDataSources<'a> {
-    provider: Option<&'a dyn DictionaryProvider>,
+    dictionaries: Option<&'a Dictionaries>,
 }
 
 impl core::fmt::Debug for AnalysisDataSources<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("AnalysisDataSources")
-            .field("external_dictionaries", &self.provider.is_some())
+            .field("external_dictionaries", &self.dictionaries.is_some())
             .finish()
     }
 }
 
 impl<'a> AnalysisDataSources<'a> {
-    /// Create a new `AnalysisDataSources` which will use `provider` for line and word segmentation.
-    /// If not provided, the data compiled into the binary will be used instead (if present).
-    ///
-    /// See [`DictionaryProvider`] for full details.
-    pub const fn new(provider: Option<&'a dyn DictionaryProvider>) -> Self {
-        Self { provider }
-    }
-
-    /// Whether ICU4X has a word-segmentation dictionary for this script.
-    ///
-    /// If it does not, we need to apply UAX #29 Rule WB999 manually, because ICU4X does not.
-    ///
-    /// This is approximate, because ICU4X actually decides based on a table of code point ranges: e.g.,
-    /// some Han characters do not get a dictionary check. That's only a problem if there's a run of
-    /// repeated such characters, which is probably not too likely to be a problem in practice.
-    ///
-    /// If ICU4X does implement WB999 in the future, we can stop doing it manually (and this method can
-    /// be removed).
-    #[inline(always)]
-    fn has_word_dictionary(&self, script: Script) -> bool {
-        // We assume that if external dictionaries are provided, they cover this set of scripts.
-        (self.provider.is_some() || cfg!(feature = "complex-scripts"))
-            && matches!(
-                script,
-                Script::Han
-                    | Script::Hiragana
-                    | Script::Thai
-                    | Script::Lao
-                    | Script::Khmer
-                    | Script::Myanmar
-            )
-    }
-
-    #[inline(always)]
-    pub(crate) fn properties(&self, c: char) -> Properties {
-        Properties::get(c)
-    }
-
-    #[inline(always)]
-    fn grapheme_segmenter(&self) -> GraphemeClusterSegmenterBorrowed<'_> {
-        const { GraphemeClusterSegmenter::new() }
-    }
-
-    #[inline]
-    fn word_segmenter(&self) -> WordSegmenter {
-        if let Some(provider) = self.provider {
-            let mut segmenter =
-                WordSegmenter::new_for_non_complex_scripts(WordBreakInvariantOptions::default())
-                    .static_to_owned();
-            segmenter.load_dictionary_unstable(provider).unwrap();
-            return segmenter;
-        }
-        #[cfg(feature = "complex-scripts")]
-        {
-            WordSegmenter::new_dictionary(WordBreakInvariantOptions::default()).static_to_owned()
-        }
-        #[cfg(not(feature = "complex-scripts"))]
-        {
-            const { WordSegmenter::new_for_non_complex_scripts(WordBreakInvariantOptions::default()) }
-                .static_to_owned()
-        }
-    }
-
-    #[inline]
-    fn line_segmenter(&self, key: SegmenterKey) -> LineSegmenter {
-        let options = Self::line_break_options(key);
-        match self.provider {
-            Some(provider) => {
-                let mut segmenter =
-                    LineSegmenter::new_for_non_complex_scripts(options).static_to_owned();
-                segmenter.load_dictionary_unstable(provider).unwrap();
-                segmenter
-            }
-            // `static_to_owned` only wraps the static references, so this does not allocate.
-            None => line_segmenter_impl(options).static_to_owned(),
-        }
-    }
-
-    fn line_break_options(key: SegmenterKey) -> LineBreakOptions<'static> {
-        // We use Japanese arbitrarily; see `SegmenterKey::ja_zh`.
-        static JA: LanguageIdentifier = langid!("ja");
-
-        let mut opt = LineBreakOptions::default();
-        opt.word_option = Some(key.word_option);
-        opt.strictness = Some(key.strictness);
-        opt.content_locale = key.ja_zh.then_some(&JA);
-        opt
-    }
-
-    #[inline(always)]
-    fn brackets(&self) -> CodePointMapDataBorrowed<'_, BidiMirroringGlyph> {
-        const { CodePointMapData::new() }
+    /// Create a new `AnalysisDataSources` which will use `dictionaries` for line and word
+    /// segmentation. If not provided, the data compiled into the binary will be used instead (if
+    /// present).
+    pub const fn new(dictionaries: Option<&'a Dictionaries>) -> Self {
+        Self { dictionaries }
     }
 }
 
-#[cfg(feature = "complex-scripts")]
-#[inline(always)]
-fn line_segmenter_impl(opt: LineBreakOptions<'_>) -> LineSegmenterBorrowed<'static> {
-    LineSegmenter::new_dictionary(opt)
+/// The dictionaries compiled in by the `complex-scripts` feature.
+pub(crate) fn compiled_dictionaries() -> Dictionaries {
+    #[cfg(feature = "complex-scripts")]
+    {
+        Dictionaries::with_compiled()
+    }
+    #[cfg(not(feature = "complex-scripts"))]
+    {
+        Dictionaries::new()
+    }
 }
 
-#[cfg(not(feature = "complex-scripts"))]
-#[inline(always)]
-fn line_segmenter_impl(opt: LineBreakOptions<'_>) -> LineSegmenterBorrowed<'static> {
-    LineSegmenter::new_for_non_complex_scripts(opt)
+/// The Unicode properties of one character that analysis reads: `cleft`'s two packed words plus
+/// the few fixed sets `cleft` does not expose.
+#[derive(Copy, Clone)]
+pub(crate) struct Properties {
+    ch: char,
+    core: CoreProps,
+    rare: RareProps,
+}
+
+impl Properties {
+    #[inline(always)]
+    pub(crate) fn get(ch: char) -> Self {
+        Self {
+            ch,
+            core: cleft::core_props(ch),
+            rare: cleft::rare_props(ch),
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) fn script(self) -> Script {
+        Script::from_bytes(self.core.script().tag())
+    }
+
+    #[inline(always)]
+    pub(crate) fn grapheme_cluster_break(self) -> GraphemeClusterBreak {
+        self.rare.grapheme_cluster_break()
+    }
+
+    #[inline(always)]
+    pub(crate) fn bidi_class(self) -> BidiClass {
+        self.core.bidi_class()
+    }
+
+    /// Whether the character has either of the `Emoji` or `Extended_Pictographic` properties.
+    #[inline(always)]
+    pub(crate) fn is_emoji_or_pictograph(self) -> bool {
+        self.core.is_emoji() || self.core.is_extended_pictographic()
+    }
+
+    #[inline(always)]
+    pub(crate) fn is_variation_selector(self) -> bool {
+        is_variation_selector(self.ch)
+    }
+
+    #[inline(always)]
+    pub(crate) fn is_regional_indicator(self) -> bool {
+        self.core.is_regional_indicator()
+    }
+
+    /// UAX #14's mandatory breaks: `Line_Break` BK, CR, LF and NL.
+    #[inline(always)]
+    pub(crate) fn is_mandatory_linebreak(self) -> bool {
+        self.core.is_paragraph_separator()
+    }
+
+    /// Whether the character is `Line_Break` SA (Thai, Lao, Khmer, Myanmar and the like), whose
+    /// word boundaries need a dictionary.
+    #[inline(always)]
+    pub(crate) fn is_complex_context(self) -> bool {
+        self.core.is_complex_context()
+    }
+
+    #[inline(always)]
+    pub(crate) fn is_emoji(self) -> bool {
+        self.core.is_emoji()
+    }
+
+    #[inline(always)]
+    pub(crate) fn is_emoji_presentation(self) -> bool {
+        self.core.is_emoji_presentation()
+    }
+
+    /// `Emoji_Modifier`: the five skin tone modifiers.
+    #[inline(always)]
+    pub(crate) fn is_emoji_modifier(self) -> bool {
+        matches!(self.ch, '\u{1F3FB}'..='\u{1F3FF}')
+    }
+
+    #[inline(always)]
+    pub(crate) fn is_emoji_modifier_base(self) -> bool {
+        is_emoji_modifier_base(self.ch)
+    }
+
+    #[inline(always)]
+    pub(crate) fn is_default_ignorable(self) -> bool {
+        self.rare.is_default_ignorable()
+    }
+
+    /// `General_Category` `Cc`.
+    #[inline(always)]
+    pub(crate) fn is_control(self) -> bool {
+        matches!(self.ch, '\0'..='\u{1F}' | '\u{7F}'..='\u{9F}')
+    }
+
+    /// Whether the character contributes glyphs to shaping. See [`contributes_to_shaping`].
+    #[inline(always)]
+    pub(crate) fn contributes_to_shaping(self) -> bool {
+        if self.is_control() || matches!(self.ch, '\u{2028}' | '\u{2029}') {
+            return false;
+        }
+        !(self.rare.is_default_ignorable()
+            && !is_visible_default_ignorable(self.ch)
+            && self.core.script() != cleft::ScriptId::INHERITED)
+    }
+}
+
+/// `Variation_Selector`: the Mongolian free variation selectors, VS1 to VS16 and VS17 to VS256.
+#[inline]
+fn is_variation_selector(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{180B}'..='\u{180D}' | '\u{180F}' | '\u{FE00}'..='\u{FE0F}' | '\u{E0100}'..='\u{E01EF}'
+    )
+}
+
+/// Default-ignorable code points that fonts nonetheless draw as spacing glyphs (`HarfBuzz` keeps
+/// them visible): the Hangul fillers and the Duployan shorthand format controls.
+#[inline]
+fn is_visible_default_ignorable(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{115F}' | '\u{1160}' | '\u{3164}' | '\u{FFA0}' | '\u{1BCA0}'..='\u{1BCA3}'
+    )
+}
+
+/// `Emoji_Modifier_Base` as of Unicode 17 (`emoji-data.txt`).
+fn is_emoji_modifier_base(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{261D}'
+            | '\u{26F9}'
+            | '\u{270A}'..='\u{270D}'
+            | '\u{1F385}'
+            | '\u{1F3C2}'..='\u{1F3C4}'
+            | '\u{1F3C7}'
+            | '\u{1F3CA}'..='\u{1F3CC}'
+            | '\u{1F442}'..='\u{1F443}'
+            | '\u{1F446}'..='\u{1F450}'
+            | '\u{1F466}'..='\u{1F478}'
+            | '\u{1F47C}'
+            | '\u{1F481}'..='\u{1F483}'
+            | '\u{1F485}'..='\u{1F487}'
+            | '\u{1F48F}'
+            | '\u{1F491}'
+            | '\u{1F4AA}'
+            | '\u{1F574}'..='\u{1F575}'
+            | '\u{1F57A}'
+            | '\u{1F590}'
+            | '\u{1F595}'..='\u{1F596}'
+            | '\u{1F645}'..='\u{1F647}'
+            | '\u{1F64B}'..='\u{1F64F}'
+            | '\u{1F6A3}'
+            | '\u{1F6B4}'..='\u{1F6B6}'
+            | '\u{1F6C0}'
+            | '\u{1F6CC}'
+            | '\u{1F90C}'
+            | '\u{1F90F}'
+            | '\u{1F918}'..='\u{1F91F}'
+            | '\u{1F926}'
+            | '\u{1F930}'..='\u{1F939}'
+            | '\u{1F93C}'..='\u{1F93E}'
+            | '\u{1F977}'
+            | '\u{1F9B5}'..='\u{1F9B6}'
+            | '\u{1F9B8}'..='\u{1F9B9}'
+            | '\u{1F9BB}'
+            | '\u{1F9CD}'..='\u{1F9CF}'
+            | '\u{1F9D1}'..='\u{1F9DD}'
+            | '\u{1FAC3}'..='\u{1FAC5}'
+            | '\u{1FAF0}'..='\u{1FAF8}'
+    )
 }
 
 /// The line segmenter configuration for a [`LineBreakConfig`].
@@ -274,8 +288,8 @@ fn line_segmenter_impl(opt: LineBreakOptions<'_>) -> LineSegmenterBorrowed<'stat
 /// Configurations which result in the same segmentation map to the same key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct SegmenterKey {
-    word_option: LineBreakWordOption,
-    strictness: LineBreakStrictness,
+    word_option: LineWordOption,
+    strictness: LineStrictness,
     /// See [`LineBreakConfig::language`]; the only languages which impact segmentation are
     /// Chinese and Japanese. These impact it in the same way, and only under
     /// [`LineBreak::Normal`] and [`LineBreak::Loose`], so we only track whether one of them
@@ -285,26 +299,26 @@ struct SegmenterKey {
 
 impl SegmenterKey {
     const DEFAULT: Self = Self {
-        word_option: LineBreakWordOption::Normal,
-        strictness: LineBreakStrictness::Strict,
+        word_option: LineWordOption::Normal,
+        strictness: LineStrictness::Strict,
         ja_zh: false,
     };
 
     fn new(config: &LineBreakConfig) -> Self {
         let strictness = match config.line_break {
-            LineBreak::Strict => LineBreakStrictness::Strict,
-            LineBreak::Normal => LineBreakStrictness::Normal,
-            LineBreak::Loose => LineBreakStrictness::Loose,
+            LineBreak::Strict => LineStrictness::Strict,
+            LineBreak::Normal => LineStrictness::Normal,
+            LineBreak::Loose => LineStrictness::Loose,
             // We add opportunities per grapheme ourselves.
             LineBreak::Anywhere => return Self::DEFAULT,
         };
         let word_option = match config.word_break {
-            WordBreak::Normal => LineBreakWordOption::Normal,
-            WordBreak::BreakAll => LineBreakWordOption::BreakAll,
-            WordBreak::KeepAll => LineBreakWordOption::KeepAll,
+            WordBreak::Normal => LineWordOption::Normal,
+            WordBreak::BreakAll => LineWordOption::BreakAll,
+            WordBreak::KeepAll => LineWordOption::KeepAll,
         };
         let ja_zh = match strictness {
-            LineBreakStrictness::Normal | LineBreakStrictness::Loose => config
+            LineStrictness::Normal | LineStrictness::Loose => config
                 .language
                 .is_some_and(|language| matches!(language.language(), "ja" | "zh")),
             _ => false,
@@ -313,6 +327,19 @@ impl SegmenterKey {
             word_option,
             strictness,
             ja_zh,
+        }
+    }
+
+    fn line_options(self) -> LineOptions {
+        LineOptions {
+            strictness: self.strictness,
+            word: self.word_option,
+            ja_zh: self.ja_zh,
+            cj_quotes: false,
+            // CSS Text 3 allows `loose` to break before U+2010 and U+2013 after an ideograph in any
+            // language (as ICU4X does); without this `cleft` follows ICU4C and only does so for
+            // Chinese and Japanese.
+            loose_hyphens: true,
         }
     }
 }
@@ -587,84 +614,6 @@ pub(crate) fn analyze_text(
         }
     }
 
-    struct LineBreakSegmentIter<'a, I: Iterator> {
-        text: &'a str,
-        segments: I,
-        char_indices: core::str::CharIndices<'a>,
-        current_char: (usize, char),
-        building_range_start: usize,
-        previous_key: SegmenterKey,
-        done: bool,
-    }
-
-    impl<'a, I> LineBreakSegmentIter<'a, I>
-    where
-        I: Iterator<Item = (Range<usize>, SegmenterKey)>,
-    {
-        fn new(text: &'a str, segments: I, first_segment: (Range<usize>, SegmenterKey)) -> Self {
-            let mut char_indices = text.char_indices();
-            let current_char_len = char_indices.next().unwrap();
-
-            Self {
-                text,
-                segments,
-                char_indices,
-                current_char: current_char_len,
-                building_range_start: first_segment.0.start,
-                previous_key: first_segment.1,
-                done: false,
-            }
-        }
-    }
-
-    impl<'a, I> Iterator for LineBreakSegmentIter<'a, I>
-    where
-        I: Iterator<Item = (Range<usize>, SegmenterKey)>,
-    {
-        type Item = (&'a str, SegmenterKey, bool);
-
-        fn next(&mut self) -> Option<Self::Item> {
-            if self.done {
-                return None;
-            }
-
-            for (range, key) in self.segments.by_ref() {
-                assert!(range.start < range.end, "Segments must not be empty");
-
-                let style_start_index = range.start;
-                let mut prev_char_index = self.current_char;
-
-                // Find the character at the style boundary.
-                while self.current_char.0 < style_start_index {
-                    prev_char_index = self.current_char;
-                    self.current_char = self.char_indices.next().unwrap();
-                }
-
-                let current_key = key;
-                if self.previous_key == current_key {
-                    continue;
-                }
-
-                // Produce one substring for each different segmenter key run
-                let prev_size = prev_char_index.1.len_utf8();
-                let size = self.current_char.1.len_utf8();
-
-                let substring = &self.text[self.building_range_start..style_start_index + size];
-                let result_style = self.previous_key;
-
-                self.building_range_start = style_start_index - prev_size;
-                self.previous_key = current_key;
-
-                return Some((substring, result_style, false));
-            }
-
-            // Final segment
-            self.done = true;
-            let last_substring = &self.text[self.building_range_start..self.text.len()];
-            Some((last_substring, self.previous_key, true))
-        }
-    }
-
     if text.is_empty() {
         analyzer
             .bidi
@@ -673,82 +622,40 @@ pub(crate) fn analyze_text(
         return;
     }
 
+    let dictionaries = data_sources.dictionaries.unwrap_or(&analyzer.dictionaries);
+
     // Line boundaries (word break naming refers to the line boundary determination config).
     //
-    // This breaks text into sequences with similar line boundary config (part of style
-    // information). If this config is consistent for all text, we use a fast path through this.
-    let mut segments = DenseLineBreaks::new(options.line_break, text.len());
-    // `text` is non-empty (checked above), so there is always at least one segment.
-    let first_segment = segments.next().unwrap();
-    let contiguous_substrings = LineBreakSegmentIter::new(text, segments, first_segment);
-
-    let mut global_offset = 0;
+    // The text is split into runs of equal line boundary config (part of style information). Each
+    // run is scanned under its own options; a run after the first starts its scan at the last
+    // opportunity before it (reading the text before that for context), and keeps only the
+    // opportunities from its start on, so the new options decide the pair at the seam.
     let line_boundary_positions = &mut analyzer.line_boundary_positions;
     line_boundary_positions.clear();
-
-    for (substring_index, (substring, segmenter_key, last)) in contiguous_substrings.enumerate() {
-        let line_segmenter = data_sources.line_segmenter(segmenter_key);
-        let segmenter = line_segmenter.as_borrowed();
-        // Fast path for text with a single segmenter configuration.
-        if substring_index == 0 && last {
-            let mut lb_iter = segmenter.segment_str(substring);
-
-            let _first = lb_iter.next();
-            let second = lb_iter.next();
-            if second.is_none() {
-                continue;
-            }
-            let third = lb_iter.next();
-            if third.is_none() {
-                continue;
-            }
-
-            let iter = [second.unwrap(), third.unwrap()].into_iter().chain(lb_iter);
-
-            line_boundary_positions.extend(iter);
-            // Remove the unnecessary boundary at the end added by ICU4X.
-            line_boundary_positions.pop();
-            break;
+    for (range, key) in DenseLineBreaks::new(options.line_break, text.len()) {
+        let opts = key.line_options();
+        if range.start == 0 {
+            line_boundary_positions.extend(
+                LineBreaks::new(Utf8Scalars::new(&text[..range.end]), opts)
+                    .with_dictionaries(dictionaries),
+            );
+            continue;
         }
-
-        let line_boundaries_iter = segmenter.segment_str(substring);
-        let mut substring_chars = substring.chars();
-        if substring_index != 0 {
-            global_offset -= substring_chars.next().unwrap().len_utf8();
-        }
-        // There will always be at least two characters if we are not taking the fast path for
-        // a single word break style substring.
-        let last_len = substring_chars.next_back().unwrap().len_utf8();
-
-        // Mark line boundaries (overriding word boundaries where present).
-        for (index, pos) in line_boundaries_iter.enumerate() {
-            // icu adds leading and trailing line boundaries, which we don't use.
-            if index == 0 || pos == substring.len() {
-                continue;
-            }
-
-            // For all but the last substring, we ignore line boundaries caused by the last
-            // character, as this character is carried back from the next substring, and will be
-            // accounted for there.
-            if !last && pos == substring.len() - last_len {
-                continue;
-            }
-            line_boundary_positions.push(pos + global_offset);
-        }
-
-        if !last {
-            global_offset += substring.len() - last_len;
-        }
+        let resume = line_boundary_positions.last().copied().unwrap_or(0);
+        let breaks = LineBreaks::with_preceding(
+            Utf8Scalars::with_start(&text[..range.end], resume),
+            opts,
+            text[..resume].chars().rev(),
+        )
+        .with_dictionaries(dictionaries);
+        line_boundary_positions.extend(breaks.filter(|&b| b >= range.start));
     }
 
     // Collect boundary byte positions compactly
-    let word_segmenter = data_sources.word_segmenter();
-    let word_segmenter = word_segmenter.as_borrowed();
-    let mut wb_iter = word_segmenter.segment_str(text).peekable();
-    let mut gb_iter = data_sources
-        .grapheme_segmenter()
-        .segment_str(text)
+    let mut wb_iter = WordBreaks::new(Utf8Scalars::new(text), WordOptions::new())
+        .with_dictionaries(dictionaries)
         .peekable();
+    let mut grapheme_state = GraphemeState::new();
 
     // Merge boundaries - line takes precedence over word
     let mut lb_iter = line_boundary_positions.iter().peekable();
@@ -775,14 +682,6 @@ pub(crate) fn analyze_text(
                 break;
             }
         }
-        // advance any stale grapheme boundary positions
-        while let Some(&g) = gb_iter.peek() {
-            if g < byte_pos {
-                _ = gb_iter.next();
-            } else {
-                break;
-            }
-        }
         // advance any stale line boundary positions
         while let Some(&l) = lb_iter.peek() {
             if *l < byte_pos {
@@ -792,33 +691,28 @@ pub(crate) fn analyze_text(
             }
         }
 
-        let mut is_word = false;
+        // The start of the text is a word boundary (WB1); `WordBreaks` yields only the inner ones.
+        let mut is_word = byte_pos == 0;
         if let Some(&w) = wb_iter.peek()
             && w == byte_pos
         {
             is_word = true;
             _ = wb_iter.next();
         }
-        let mut is_grapheme_start = false;
-        if let Some(&g) = gb_iter.peek()
-            && g == byte_pos
-        {
-            is_grapheme_start = true;
-            _ = gb_iter.next();
-        }
-        let properties = data_sources.properties(ch);
+        let properties = Properties::get(ch);
+        let is_grapheme_start = grapheme_state.advance(properties.rare.grapheme_props());
 
-        // For characters requiring a dictionary for deciding word boundaries, apply
-        // UAX #29 Rule WB999 in case there's no dictionary (because ICU4X does not).
+        // A run of a Line_Break SA script with no dictionary is one word to `cleft`; apply
+        // UAX #29 Rule WB999 instead, a boundary at every grapheme cluster.
         if !is_word
             && is_grapheme_start
-            && properties.needs_dictionary_word_break()
-            && !data_sources.has_word_dictionary(properties.script())
+            && properties.is_complex_context()
+            && !dictionaries.segments(ch)
         {
             is_word = true;
         }
 
-        let is_icu_line = if let Some(&l) = lb_iter.peek()
+        let is_line = if let Some(&l) = lb_iter.peek()
             && *l == byte_pos
         {
             _ = lb_iter.next();
@@ -863,7 +757,7 @@ pub(crate) fn analyze_text(
                 // `line-break: anywhere`: an opportunity around every grapheme.
                 prev_char.is_some() && is_grapheme_start
             } else {
-                is_icu_line || after_break_space
+                is_line || after_break_space
             };
             // Consumers can override soft wrap opportunities, except around a mandatory
             // break.
@@ -900,7 +794,6 @@ pub(crate) fn analyze_text(
         let script = properties.script();
         let grapheme_cluster_break = properties.grapheme_cluster_break();
         let bidi_class = properties.bidi_class();
-        let general_category = properties.general_category();
         let is_emoji_or_pictograph = properties.is_emoji_or_pictograph();
         let is_variation_selector = properties.is_variation_selector();
         let is_region_indicator = properties.is_regional_indicator();
@@ -924,9 +817,9 @@ pub(crate) fn analyze_text(
             script,
             is_variation_selector,
             is_region_indicator,
-            general_category == GeneralCategory::Control,
+            properties.is_control(),
             is_emoji_or_pictograph,
-            contributes_to_shaping(general_category, script),
+            properties.contributes_to_shaping(),
             force_normalize,
             is_grapheme_start,
             is_word,
@@ -940,16 +833,17 @@ pub(crate) fn analyze_text(
     }
 
     if !options.inline_objects.is_empty() {
-        mark_inline_objects(text, options, data_sources, &mut analysis.info);
+        mark_inline_objects(text, options, &mut analysis.info);
     }
 
     if needs_bidi_resolution || options.base_direction == BaseDirection::Rtl {
         analyzer.bidi.resolve(
             text.chars().map(|ch| {
-                let bidi_class = data_sources.properties(ch).bidi_class();
-                // TODO: maybe extend Properties to u64 to fit BidiMirroringGlyph
-                let bracket = data_sources.brackets().get(ch);
-                (ch, (bidi_class, bracket))
+                let core = cleft::core_props(ch);
+                let bracket = core
+                    .closing_bracket()
+                    .map(|closing| (closing, core.opens_bracket()));
+                (core.bidi_class(), bracket)
             }),
             options.base_direction,
         );
@@ -966,14 +860,9 @@ pub(crate) fn analyze_text(
 /// For the same reason this is marked `#[inline(never)]`: inflating the caller's body will probably
 /// cost more on average than inlining would win.
 #[inline(never)]
-fn mark_inline_objects(
-    text: &str,
-    options: &AnalysisOptions<'_>,
-    data_sources: &AnalysisDataSources<'_>,
-    info: &mut [CharInfo],
-) {
+fn mark_inline_objects(text: &str, options: &AnalysisOptions<'_>, info: &mut [CharInfo]) {
     const LEN: usize = '\u{FFFC}'.len_utf8();
-    let is_mandatory = |ch| data_sources.properties(ch).is_mandatory_linebreak();
+    let is_mandatory = |ch| Properties::get(ch).is_mandatory_linebreak();
 
     // Between two objects, suppressing an opportunity wins.
     let combine = |a: Option<bool>, b: Option<bool>| match (a, b) {
@@ -1062,42 +951,10 @@ fn mark_inline_objects(
 }
 
 /// All characters contribute to shaping except:
-/// - Control characters
-/// - Format characters, unless they use the "Inherited" script
+/// - Control characters (`General_Category` `Cc`) and the line and paragraph separators
+/// - Default-ignorable code points that fonts do not draw, unless they use the "Inherited"
+///   script (joiners and variation selectors, which the shaper reads)
 #[inline(always)]
-pub(crate) fn contributes_to_shaping(general_category: GeneralCategory, script: Script) -> bool {
-    if matches!(
-        general_category,
-        GeneralCategory::Control
-            | GeneralCategory::LineSeparator
-            | GeneralCategory::ParagraphSeparator
-    ) {
-        return false;
-    }
-
-    !(general_category == GeneralCategory::Format && script != Script::Inherited)
-}
-
-#[cfg(test)]
-mod test {
-    use alloc::vec::Vec;
-    use icu_segmenter::WordSegmenter;
-    use icu_segmenter::options::WordBreakInvariantOptions;
-
-    /// For some characters, determining word boundaries requires a dictionary lookup.
-    ///
-    /// Without dictionaries, ICU4X reports such runs as being a single word. But note
-    /// UAX #29 Rule WB999 says that, without a dictionary, there should be word boundaries.
-    ///
-    /// We do that patchup ourselves. Once this test starts failing, it's likely ICU4X now follows
-    /// that rule, and we can drop the patchup (the code calling [`super::AnalysisDataSources::has_word_dictionary`]).
-    /// Once that's the case, [`parley_data::Properties::needs_dictionary_word_break`] can also be
-    /// dropped.
-    #[test]
-    fn icu4x_word_segmentation_patchup_required() {
-        let segmenter =
-            WordSegmenter::new_for_non_complex_scripts(WordBreakInvariantOptions::default());
-        let breaks: Vec<_> = segmenter.segment_str("中文文本测试").collect();
-        assert_eq!(breaks, &[0, 18]);
-    }
+pub(crate) fn contributes_to_shaping(ch: char) -> bool {
+    Properties::get(ch).contributes_to_shaping()
 }

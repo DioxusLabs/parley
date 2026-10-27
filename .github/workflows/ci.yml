@@ -11,13 +11,13 @@ env:
   RUST_MIN_VER: "1.88"
   # List of packages that will be checked with the minimum supported Rust version.
   # This should be limited to packages that are intended for publishing.
-  RUST_MIN_VER_PKGS: "-p parley -p parley_data -p parley_emoji -p parley_engine -p parlance -p fontique -p attributed_text"
+  RUST_MIN_VER_PKGS: "-p parley -p parley_emoji -p parley_engine -p parlance -p fontique -p attributed_text"
   # List of features that depend on the standard library and will be excluded from no_std checks.
   FEATURES_DEPENDING_ON_STD: "std,default,png,system,vello_hybrid"
   # List of packages that can not target Wasm.
-  NO_WASM_PKGS: "--exclude xtask --exclude parley_bench --exclude parley_data_gen"
+  NO_WASM_PKGS: "--exclude xtask --exclude parley_bench"
   # List of packages that can not target Android.
-  NO_ANDROID_PKGS: "--exclude xtask --exclude parley_bench --exclude parley_data_gen"
+  NO_ANDROID_PKGS: "--exclude xtask --exclude parley_bench"
 
 
 # Rationale
@@ -102,9 +102,6 @@ jobs:
 
       - name: Run cargo rdme (parley)
         run: cargo rdme --check --workspace-project=parley
-
-      - name: Run cargo rdme (parley_data)
-        run: cargo rdme --check --workspace-project=parley_data
 
       - name: Run cargo rdme (attributed_text)
         run: cargo rdme --check --workspace-project=attributed_text
@@ -405,32 +402,6 @@ jobs:
         run: cargo doc --workspace --locked --all-features --no-deps --document-private-items
         env:
           RUSTDOCFLAGS: '--cfg docsrs -D warnings'
-
-  unicode-data:
-    name: unicode data (regen check)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: install stable toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ env.RUST_STABLE_VER }}
-          components: rustfmt
-
-      - name: restore cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.event_name != 'merge_group' }}
-
-      - name: regenerate unicode data
-        run: cargo run --locked -p parley_data_gen -- ./parley_data/src/generated
-
-      - name: format generated code
-        run: cargo fmt -p parley_data
-
-      - name: check for differences
-        run: git diff --exit-code
 
   # If this fails, consider changing your text or adding something to .typos.toml.
   typos:

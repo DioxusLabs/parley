@@ -6,8 +6,6 @@ members = [
     "parlance",
     "parley",
     "parley_bench",
-    "parley_data",
-    "parley_data_gen",
     "parley_dev",
     "parley_engine",
     "parley_emoji",
@@ -19,7 +17,6 @@ members = [
     "examples/tiny_skia_render",
     "examples/vello_cpu_render",
     "examples/editor",
-    "examples/external_dictionaries",
     "xtask",
 ]
 
@@ -38,8 +35,6 @@ repository = "https://github.com/linebender/parley"
 parlance = { version = "0.1.1", default-features = false, path = "parlance" }
 fontique = { version = "0.12.0", default-features = false, path = "fontique" }
 parley = { version = "0.12.0", default-features = false, path = "parley" }
-parley_data = { version = "0.12.0", path = "parley_data", default-features = false }
-parley_data_gen = { path = "parley_data_gen" }
 parley_dev = { default-features = false, path = "parley_dev" }
 parley_engine = { version = "0.12.0", default-features = false, path = "parley_engine" }
 parley_emoji = { version = "0.12.0", default-features = false, path = "parley_emoji" }
@@ -47,21 +42,13 @@ parley_linebreaking_cases = { path = "parley_tests/linebreaking_cases" }
 
 # External dependencies
 bytemuck = { version = "1.25.2", default-features = false }
+cleft = { version = "0.1.0", default-features = false }
 harfrust = { version = "0.15.0", default-features = false }
 hashbrown = { version = "0.17.1", default-features = false, features = [
     "default-hasher",
     "raw-entry",
 ] }
-icu_collections = { version = "2.3.0", default-features = false }
-icu_locale_core = { version = "2.3.0", default-features = false }
-icu_normalizer = { version = "2.3.0", default-features = false }
-icu_properties = { version = "2.3.0", default-features = false }
-icu_provider = { version = "2.3.0", default-features = false }
-icu_provider_blob = { version = "2.3.0", default-features = false }
-# Check CachingDictionary and DictionaryProvider when upgrading.
-icu_segmenter = { version = "~2.3.0", default-features = false }
 linebender_resource_handle = { version = "0.1.1", default-features = false }
-packtab = { version = "1.9.0" }
 rand = { version = "0.10.3", default-features = false, features = ["std", "std_rng"] }
 rand_chacha = { version = "0.10.0", default-features = false }
 peniko = { version = "0.6.1", default-features = false }
