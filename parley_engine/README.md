@@ -108,7 +108,7 @@ The following crate [feature flags](https://doc.rust-lang.org/cargo/reference/fe
 - `bytemuck`: Forwarded to [`parlance`][] which then implements traits from `bytemuck` on its types.
 - `complex-scripts`: Enable dictionary-based line and word breaking for complex scripts (CJK, Thai, Khmer, Lao, Myanmar).
   When disabled, a lightweight segmenter is used that falls back to character-level breaks for those scripts.
-  See [`DictionaryProvider`][] for full details.
+  See [`Dictionaries`][] for full details.
 
 At least one of `std` and `libm` is required; `std` overrides `libm`.
 Note that Parley Engine requires that an allocator is available (i.e. it uses [`alloc`][]).
