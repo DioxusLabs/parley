@@ -121,7 +121,21 @@ impl Spacing {
     /// [tab-size]: https://www.w3.org/TR/css-text-4/#tab-size-property
     #[inline(always)]
     pub(crate) fn gaps(self, whitespace: Whitespace, is_default_ignorable: bool) -> Gaps {
-        if whitespace == Whitespace::Newline || whitespace == Whitespace::Tab {
+        self.gaps_with_tabs::<true>(whitespace, is_default_ignorable)
+    }
+
+    #[inline(always)]
+    pub(crate) fn gaps_no_tab(self, whitespace: Whitespace, is_default_ignorable: bool) -> Gaps {
+        self.gaps_with_tabs::<false>(whitespace, is_default_ignorable)
+    }
+
+    #[inline(always)]
+    pub(crate) fn gaps_with_tabs<const TABS: bool>(
+        self,
+        whitespace: Whitespace,
+        is_default_ignorable: bool,
+    ) -> Gaps {
+        if whitespace == Whitespace::Newline || (TABS && whitespace == Whitespace::Tab) {
             return Gaps::ZERO;
         }
 
@@ -169,6 +183,37 @@ impl Default for Justification {
     }
 }
 
+#[derive(Copy, Clone)]
+pub(crate) struct BreakSpacing {
+    spacing: Spacing,
+    justification: Justification,
+}
+
+impl BreakSpacing {
+    #[inline(always)]
+    pub(crate) const fn new(spacing: Spacing, justification: Justification) -> Self {
+        Self {
+            spacing,
+            justification,
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) fn atom_advance(self, atom: &Atom<'_>) -> f32 {
+        let first_character = atom.characters()[0];
+        let whitespace = first_character.whitespace;
+        let mut gaps = self
+            .spacing
+            .gaps_no_tab(whitespace, first_character.flags.is_default_ignorable());
+        if is_word_separator(whitespace)
+            && atom.shaped_clusters_range().end <= self.justification.justification_end_cluster
+        {
+            gaps.after += self.justification.amount_per_opportunity;
+        }
+        atom.advance() + gaps.total()
+    }
+}
+
 /// Additional spacing to apply, including the line's justification and tab advances (if any).
 ///
 /// Justification and tab advances depend on where the line's content lands, so neither is
@@ -185,6 +230,13 @@ pub(crate) struct EffectiveSpacing<'a> {
 }
 
 impl<'a> EffectiveSpacing<'a> {
+    #[inline(always)]
+    pub(crate) const fn glyph_spacing(self) -> GlyphSpacing {
+        GlyphSpacing {
+            spacing: self.spacing,
+            justification: self.justification,
+        }
+    }
     /// The combined [`Spacing`] of a run and the justification and tab advances of its line.
     ///
     /// To measure text for purposes like line breaking, pass [`Justification::NONE`] and no tab
@@ -207,6 +259,11 @@ impl<'a> EffectiveSpacing<'a> {
         self.spacing.is_zero()
             && self.justification.amount_per_opportunity == 0.
             && self.tab_advances.is_empty()
+    }
+
+    #[inline(always)]
+    pub(crate) const fn has_tab_advances(self) -> bool {
+        !self.tab_advances.is_empty()
     }
 
     /// The advance of the tab whose shaped cluster is `cluster`, or zero if the line has no
@@ -281,5 +338,32 @@ impl<'a> EffectiveSpacing<'a> {
                 .map(|atom| self.atom_advance(&atom))
                 .sum()
         }
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub(crate) struct GlyphSpacing {
+    spacing: Spacing,
+    justification: Justification,
+}
+
+impl GlyphSpacing {
+    #[inline(always)]
+    pub(crate) const fn is_zero(self) -> bool {
+        self.spacing.is_zero() && self.justification.amount_per_opportunity == 0.
+    }
+
+    #[inline(always)]
+    pub(crate) fn gaps(self, atom: &Atom<'_>) -> Gaps {
+        let first = atom.characters()[0];
+        let mut gaps = self
+            .spacing
+            .gaps(first.whitespace, first.flags.is_default_ignorable());
+        if is_word_separator(first.whitespace)
+            && atom.shaped_clusters_range().end <= self.justification.justification_end_cluster
+        {
+            gaps.after += self.justification.amount_per_opportunity;
+        }
+        gaps
     }
 }

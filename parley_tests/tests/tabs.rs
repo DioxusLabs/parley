@@ -14,8 +14,9 @@
 use crate::test_name;
 use crate::util::{ColorBrush, TestEnv};
 use parley::{
-    Alignment, AlignmentOptions, Cluster, ClusterSide, IndentOptions, Layout, PositionedLayoutItem,
-    StyleProperty, TabSize, TextWrapMode, WhiteSpaceCollapse,
+    Alignment, AlignmentOptions, Cluster, ClusterSide, IndentOptions, InlineBox, InlineBoxKind,
+    Layout, PositionedLayoutItem, StyleProperty, TabSize, TextWrapMode, VerticalAlign,
+    WhiteSpaceCollapse, YieldData,
 };
 
 fn nearly_eq(actual: f32, expected: f32) {
@@ -65,6 +66,81 @@ fn glyph_xs(layout: &Layout<ColorBrush>, line_index: usize) -> Vec<f32> {
                 .collect::<Vec<_>>()
         })
         .collect()
+}
+
+#[test]
+fn revert_to_partial_line_preserves_earlier_tabs() {
+    let mut env = TestEnv::new(test_name!(), None);
+    let text = "a\tb\tc";
+    let make_layout = |env: &mut TestEnv| {
+        let mut builder = env.ranged_builder(text);
+        builder.push_default(StyleProperty::TabSize(TabSize::new(80.)));
+        builder.push_inline_box(InlineBox {
+            id: 1,
+            kind: InlineBoxKind::CustomOutOfFlow,
+            index: 3,
+            width: 0.,
+            height: 0.,
+            baseline: None,
+            vertical_align: VerticalAlign::BASELINE,
+        });
+        builder.build(text)
+    };
+    let mut expected = make_layout(&mut env);
+    expected.break_all_lines(None);
+    let mut layout = make_layout(&mut env);
+    let mut breaker = layout.break_lines();
+    breaker.state_mut().set_layout_max_advance(f32::INFINITY);
+    breaker.state_mut().set_line_max_advance(f32::INFINITY);
+    let Some(YieldData::InlineBoxBreak(data)) = breaker.break_next() else {
+        panic!("expected inline box break");
+    };
+    let saved = breaker.state().clone();
+    breaker.state_mut().append_inline_box_to_line(
+        data.advance,
+        f32::NEG_INFINITY,
+        f32::NEG_INFINITY,
+    );
+    breaker.break_next();
+    breaker.revert_to(saved);
+    let Some(YieldData::InlineBoxBreak(data)) = breaker.break_next() else {
+        panic!("expected inline box break after revert");
+    };
+    breaker.state_mut().append_inline_box_to_line(
+        data.advance,
+        f32::NEG_INFINITY,
+        f32::NEG_INFINITY,
+    );
+    breaker.break_remaining(f32::INFINITY);
+    assert_eq!(glyph_xs(&layout, 0), glyph_xs(&expected, 0));
+    nearly_eq(layout.width(), expected.width());
+}
+
+#[test]
+fn retry_tab_after_max_height_yield() {
+    let mut env = TestEnv::new(test_name!(), None);
+    let text = "a\tb";
+    let make_layout = |env: &mut TestEnv| {
+        let mut builder = env.ranged_builder(text);
+        builder.push_default(StyleProperty::TabSize(TabSize::new(80.)));
+        builder.push(StyleProperty::FontSize(64.), 0..1);
+        builder.build(text)
+    };
+    let mut expected = make_layout(&mut env);
+    expected.break_all_lines(None);
+    let mut layout = make_layout(&mut env);
+    let mut breaker = layout.break_lines();
+    breaker.state_mut().set_layout_max_advance(f32::INFINITY);
+    breaker.state_mut().set_line_max_advance(f32::INFINITY);
+    breaker.state_mut().set_line_max_height(20.);
+    assert!(matches!(
+        breaker.break_next(),
+        Some(YieldData::MaxHeightExceeded(_))
+    ));
+    breaker.state_mut().set_line_max_height(f32::INFINITY);
+    breaker.break_remaining(f32::INFINITY);
+    assert_eq!(glyph_xs(&layout, 0), glyph_xs(&expected, 0));
+    nearly_eq(layout.width(), expected.width());
 }
 
 /// Guards against the tab's advance getting lost between the line breaker and the glyph

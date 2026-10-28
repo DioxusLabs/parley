@@ -417,6 +417,23 @@ fn content_widths_tabs() {
 }
 
 #[test]
+fn content_widths_tabs_followed_by_tabless_run() {
+    let mut env = TestEnv::new(test_name!(), None);
+    for text in ["AA AA\t  ", "AA AA\t B  ", "AA AA\t B \n"] {
+        let mut builder = env.ranged_builder(text);
+        builder.push_default(StyleProperty::WhiteSpaceCollapse(
+            WhiteSpaceCollapse::Collapse,
+        ));
+        builder.push(
+            StyleProperty::FontSize(24.),
+            text.find('\t').unwrap() + 1..text.len(),
+        );
+        let mut layout = builder.build(text);
+        assert_content_widths_match_layout(&mut layout);
+    }
+}
+
+#[test]
 fn content_widths_text_indent() {
     struct IndentCase {
         name: &'static str,
