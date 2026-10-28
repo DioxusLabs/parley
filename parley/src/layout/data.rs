@@ -622,11 +622,15 @@ impl ContentWidthsMeasurer {
             style.tab_size,
             style.tab_skip_threshold,
         );
-        let max = tab_advance(
-            self.running_max_width,
-            style.tab_size,
-            style.tab_skip_threshold,
-        );
+        let max = if self.running_min_width == self.running_max_width {
+            min
+        } else {
+            tab_advance(
+                self.running_max_width,
+                style.tab_size,
+                style.tab_skip_threshold,
+            )
+        };
         (min, max - min)
     }
 
