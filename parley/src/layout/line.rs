@@ -12,7 +12,7 @@ use crate::style::Brush;
 use crate::{BaselineShift, InlineBoxKind};
 
 use core::ops::Range;
-use parley_engine::{Atom, Atoms, Glyph};
+use parley_engine::{Atom, Atoms, Glyph, shape::Whitespace};
 
 /// Line in a text layout.
 #[derive(Copy, Clone)]
@@ -416,7 +416,14 @@ impl<'a> AtomIter<'a> {
             .map(|cluster| usize::from(cluster.glyph_len()))
             .sum();
         let mut advance = atom.advance();
-        if !self.spacing.is_zero() {
+        if !self.spacing.is_zero()
+            && (glyph_count != 0 || self.spacing.has_tab_advances() || {
+                let first = atom.characters()[0];
+                !matches!(first.whitespace, Whitespace::Tab | Whitespace::Newline)
+                    && (!first.flags.is_default_ignorable()
+                        || crate::layout::spacing::is_word_separator(first.whitespace))
+            })
+        {
             advance += self.spacing.gaps(atom).total();
         }
         (glyph_count, advance)

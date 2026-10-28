@@ -209,6 +209,11 @@ impl<'a> EffectiveSpacing<'a> {
             && self.tab_advances.is_empty()
     }
 
+    #[inline(always)]
+    pub(crate) const fn has_tab_advances(self) -> bool {
+        !self.tab_advances.is_empty()
+    }
+
     /// The advance of the tab whose shaped cluster is `cluster`, or zero if the line has no
     /// entry for it.
     #[inline]

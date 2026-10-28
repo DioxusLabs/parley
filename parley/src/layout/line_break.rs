@@ -814,20 +814,13 @@ impl BreakerState {
     ///
     /// A tab without an advance (e.g. under a zero tab size) gets no entry: a tab the line has no
     /// entry for reads as zero.
-    fn push_tab_advance(
-        &mut self,
-        tab_advances: &mut Vec<TabAdvance>,
-        atom: &Atom<'_>,
-        advance: f32,
-    ) {
+    /// Pass the cluster index rather than an atom reference to avoid spilling the hot-loop atom.
+    fn push_tab_advance(&mut self, tab_advances: &mut Vec<TabAdvance>, cluster: u32, advance: f32) {
         debug_assert_eq!(tab_advances.len(), self.tab_advances);
         if advance == 0. {
             return;
         }
-        tab_advances.push(TabAdvance {
-            cluster: atom.shaped_clusters_range().start,
-            advance,
-        });
+        tab_advances.push(TabAdvance { cluster, advance });
         self.tab_advances = tab_advances.len();
     }
 
@@ -1294,7 +1287,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                             if is_tab {
                                 self.state.push_tab_advance(
                                     &mut self.lines.tab_advances,
-                                    &atom,
+                                    atom.shaped_clusters_range().start,
                                     advance,
                                 );
                             }
@@ -1329,7 +1322,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 if is_tab {
                                     self.state.push_tab_advance(
                                         &mut self.lines.tab_advances,
-                                        &atom,
+                                        atom.shaped_clusters_range().start,
                                         advance,
                                     );
                                 }
@@ -1381,7 +1374,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                                 if is_tab {
                                     self.state.push_tab_advance(
                                         &mut self.lines.tab_advances,
-                                        &atom,
+                                        atom.shaped_clusters_range().start,
                                         advance,
                                     );
                                 }
@@ -1486,7 +1479,7 @@ impl<'a, B: Brush> BreakLines<'a, B> {
                         if is_tab {
                             self.state.push_tab_advance(
                                 &mut self.lines.tab_advances,
-                                &atom,
+                                atom.shaped_clusters_range().start,
                                 advance,
                             );
                         }

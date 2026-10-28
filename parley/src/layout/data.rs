@@ -43,6 +43,8 @@ pub(crate) struct RunData {
     /// This can happen when ligatures span across styles, or (awkwardly) if a style changes within
     /// a grapheme.
     pub(crate) has_mixed_style_atoms: bool,
+    /// Whether this run has tabs.
+    pub(crate) has_tabs: bool,
 }
 
 /// The metrics of a run's box. This differs from the style-derived box by taking into account any
@@ -413,6 +415,12 @@ impl<B: Brush> LayoutData<B> {
             spacing,
             run_box,
             has_mixed_style_atoms,
+            has_tabs: self
+                .shaped_text
+                .run_slice(shaped_run_idx as u32)
+                .shaped_clusters()
+                .iter()
+                .any(|cluster| cluster.whitespace() == Whitespace::Tab),
         };
 
         self.runs.push(run);
@@ -461,11 +469,11 @@ struct ContentWidthsMeasurer {
     /// min-content constraint. Can exceed `running_min_width` when the hanging whitespace started
     /// before the last break opportunity, in which case the line consists entirely of hanging
     /// whitespace.
-    running_min_hanging: f32,
+    running_hanging: f32,
 
-    /// The same under the max-content constraint. The two differ when the whitespace includes a
-    /// tab, as a tab's advance depends on its position on the line.
-    running_max_hanging: f32,
+    /// The max-content hanging advance minus the min-content hanging advance. Only tabs make them
+    /// differ, as a tab's advance depends on its position on the line.
+    running_max_hanging_extra: f32,
 
     /// Whether that running whitespace hangs conditionally before a forced break (following CSS
     /// Text 4 § 4.3.2, that's the case for `WhiteSpaceCollapse::Preserve`). Conditionally hanging
@@ -489,8 +497,8 @@ impl ContentWidthsMeasurer {
             max_width: 0.,
             running_min_width: first_line_indent,
             running_max_width: first_line_indent,
-            running_min_hanging: 0.,
-            running_max_hanging: 0.,
+            running_hanging: 0.,
+            running_max_hanging_extra: 0.,
             hangs_conditionally: false,
             text_wrap_mode: TextWrapMode::Wrap,
             soft_indent: indent_options.indent_following_soft_wrap_break(indent_amount),
@@ -512,7 +520,7 @@ impl ContentWidthsMeasurer {
         }
         self.min_width = self
             .min_width
-            .max(self.running_min_width - self.running_min_hanging);
+            .max(self.running_min_width - self.running_hanging);
         self.running_min_width = self.soft_indent;
     }
 
@@ -526,13 +534,13 @@ impl ContentWidthsMeasurer {
     fn hard_break(&mut self) {
         self.min_width = self
             .min_width
-            .max(self.running_min_width - self.running_min_hanging);
+            .max(self.running_min_width - self.running_hanging);
         if !self.hangs_conditionally {
-            self.running_max_width -= self.running_max_hanging;
+            self.running_max_width -= self.running_hanging + self.running_max_hanging_extra;
         }
         self.max_width = self.max_width.max(self.running_max_width);
-        self.running_min_hanging = 0.0;
-        self.running_max_hanging = 0.0;
+        self.running_hanging = 0.0;
+        self.running_max_hanging_extra = 0.0;
         self.line_has_content = false;
         self.running_min_width = self.hard_indent;
         self.running_max_width = self.hard_indent;
@@ -552,22 +560,36 @@ impl ContentWidthsMeasurer {
                     let can_hang = item.bidi_level == layout_data.base_level;
                     let is_rtl = item.bidi_level.is_rtl();
 
-                    if run_spacing.is_zero() {
-                        self.measure_text_run::<B, false>(
-                            &layout_data.styles,
+                    let styles = &layout_data.styles;
+                    match (run_spacing.is_zero(), layout_data.runs[item.index].has_tabs) {
+                        (true, false) => self.measure_text_run::<B, false, false>(
+                            styles,
                             slice,
                             run_spacing,
                             can_hang,
                             is_rtl,
-                        );
-                    } else {
-                        self.measure_text_run::<B, true>(
-                            &layout_data.styles,
+                        ),
+                        (false, false) => self.measure_text_run::<B, true, false>(
+                            styles,
                             slice,
                             run_spacing,
                             can_hang,
                             is_rtl,
-                        );
+                        ),
+                        (true, true) => self.measure_text_run::<B, false, true>(
+                            styles,
+                            slice,
+                            run_spacing,
+                            can_hang,
+                            is_rtl,
+                        ),
+                        (false, true) => self.measure_text_run::<B, true, true>(
+                            styles,
+                            slice,
+                            run_spacing,
+                            can_hang,
+                            is_rtl,
+                        ),
                     }
                 }
                 // Out-of-flow boxes take up no space.
@@ -592,6 +614,22 @@ impl ContentWidthsMeasurer {
         }
     }
 
+    /// A tab's min-content advance and the difference from its max-content advance.
+    #[inline]
+    fn tab_advances<B: Brush>(&self, style: &Style<B>) -> (f32, f32) {
+        let min = tab_advance(
+            self.running_min_width,
+            style.tab_size,
+            style.tab_skip_threshold,
+        );
+        let max = tab_advance(
+            self.running_max_width,
+            style.tab_size,
+            style.tab_skip_threshold,
+        );
+        (min, max - min)
+    }
+
     /// Measures a text run.
     ///
     /// The run is scanned one shaped cluster at a time. break opportunities are only considered at
@@ -604,7 +642,7 @@ impl ContentWidthsMeasurer {
     /// logically last cluster for LTR and its logically first cluster for RTL. The gap then hangs
     /// with that cluster, as in `atom_hanging_advance`. Without `SPACED`, `spacing` is ignored.
     #[inline(always)]
-    fn measure_text_run<B: Brush, const SPACED: bool>(
+    fn measure_text_run<B: Brush, const SPACED: bool, const TABS: bool>(
         &mut self,
         styles: &[Style<B>],
         slice: ShapedSlice<'_>,
@@ -652,21 +690,11 @@ impl ContentWidthsMeasurer {
                 continue;
             }
 
-            let (mut min_advance, mut max_advance) = if whitespace == Whitespace::Tab {
-                (
-                    tab_advance(
-                        self.running_min_width,
-                        style.tab_size,
-                        style.tab_skip_threshold,
-                    ),
-                    tab_advance(
-                        self.running_max_width,
-                        style.tab_size,
-                        style.tab_skip_threshold,
-                    ),
-                )
+            // `max_extra` is the max-content advance minus the min-content advance.
+            let (mut advance, max_extra) = if TABS && whitespace == Whitespace::Tab {
+                self.tab_advances(style)
             } else {
-                (cluster.advance, cluster.advance)
+                (cluster.advance, 0.)
             };
             if SPACED {
                 let owns_gap = if is_rtl {
@@ -677,12 +705,11 @@ impl ContentWidthsMeasurer {
                         .is_none_or(|next| next.is_grapheme_start())
                 };
                 if owns_gap {
-                    min_advance += gap;
-                    max_advance += gap;
+                    advance += gap;
                 }
             }
-            self.running_min_width += min_advance;
-            self.running_max_width += max_advance;
+            self.running_min_width += advance;
+            self.running_max_width += advance + max_extra;
 
             // A cluster hangs if all of its characters hang. Its first character is checked via the
             // cached flags so the common case never touches `characters`.
@@ -699,13 +726,13 @@ impl ContentWidthsMeasurer {
                             )
                         }));
             if hangs {
-                self.running_min_hanging += min_advance;
-                self.running_max_hanging += max_advance;
+                self.running_hanging += advance;
+                self.running_max_hanging_extra += max_extra;
                 self.hangs_conditionally =
                     style.white_space_collapse == WhiteSpaceCollapse::Preserve;
             } else {
-                self.running_min_hanging = 0.0;
-                self.running_max_hanging = 0.0;
+                self.running_hanging = 0.0;
+                self.running_max_hanging_extra = 0.0;
             }
         }
         self.line_has_content = empty_at != clusters.len();
