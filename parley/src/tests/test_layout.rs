@@ -175,7 +175,7 @@ fn numeric_tab_size_falls_back_and_scales_once_without_fonts() {
             shared: false,
             system_fonts: false,
         }),
-        source_cache: Default::default(),
+        source_cache: fontique::SourceCache::default(),
     };
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
     for text in ["", "\t"] {
