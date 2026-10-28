@@ -106,12 +106,21 @@ impl LineHeight {
     }
 }
 
+/// The distance between tab stops.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TabStopSize {
+    /// A distance in layout units.
+    Length(f32),
+    /// A multiple of the root style's space advance, including its letter and word spacing.
+    Spaces(f32),
+}
+
 /// The distance between tab stops, and how close to its next stop a tab may land before it skips
 /// to the one after. See [`StyleProperty::TabSize`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TabSize {
-    /// The distance between tab stops, in layout units.
-    pub size: f32,
+    /// The distance between tab stops.
+    pub size: TabStopSize,
     /// The skip threshold, in layout units: a tab whose next stop is closer than this skips to the
     /// stop after it, one stop at most. `None` uses half the root style's font size (`0.5em`).
     pub skip_threshold: Option<f32>,
@@ -121,7 +130,15 @@ impl TabSize {
     /// Tab stops every `size` layout units, with the default skip threshold.
     pub const fn new(size: f32) -> Self {
         Self {
-            size,
+            size: TabStopSize::Length(size),
+            skip_threshold: None,
+        }
+    }
+
+    /// Tab stops every `n` root-style space advances, with the default skip threshold.
+    pub const fn spaces(n: f32) -> Self {
+        Self {
+            size: TabStopSize::Spaces(n),
             skip_threshold: None,
         }
     }
@@ -135,17 +152,23 @@ impl TabSize {
     }
 
     pub(crate) fn nearly_eq(self, other: Self) -> bool {
-        nearly_eq(self.size, other.size)
-            && match (self.skip_threshold, other.skip_threshold) {
-                (Some(a), Some(b)) => nearly_eq(a, b),
-                (None, None) => true,
-                _ => false,
-            }
+        (match (self.size, other.size) {
+            (TabStopSize::Length(a), TabStopSize::Length(b))
+            | (TabStopSize::Spaces(a), TabStopSize::Spaces(b)) => nearly_eq(a, b),
+            _ => false,
+        }) && match (self.skip_threshold, other.skip_threshold) {
+            (Some(a), Some(b)) => nearly_eq(a, b),
+            (None, None) => true,
+            _ => false,
+        }
     }
 
     pub(crate) fn scale(self, scale: f32) -> Self {
         Self {
-            size: self.size * scale,
+            size: match self.size {
+                TabStopSize::Length(size) => TabStopSize::Length(size * scale),
+                TabStopSize::Spaces(n) => TabStopSize::Spaces(n),
+            },
             skip_threshold: self.skip_threshold.map(|x| x * scale),
         }
     }
@@ -328,9 +351,11 @@ pub enum StyleProperty<'a, B: Brush> {
     TextWrapMode(TextWrapMode),
     /// Whitespace collapsing and hanging behavior.
     WhiteSpaceCollapse(WhiteSpaceCollapse),
-    /// The distance between tab stops, in layout units. Corresponds to providing a length as
-    /// [`tab-size`](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/tab-size)
-    /// in CSS. Defaults to 0.0, so tabs have no effect on the text.
+    /// The distance between tab stops, as a length or a multiple of the root style's space
+    /// advance, including its letter and word spacing. If its first available font has no space
+    /// glyph, the advance falls back to half the root font size. Corresponds to CSS
+    /// [`tab-size`](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/tab-size).
+    /// Defaults to 0.0, so tabs have no effect on the text.
     ///
     /// A tab too close to its next stop skips to the one after it; see [`TabSize::skip_threshold`].
     TabSize(TabSize),

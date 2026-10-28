@@ -54,6 +54,7 @@ use alloc::vec::Vec;
 use core_maths::CoreFloat;
 use fontique::{Query, QueryFamily};
 use parley_engine::{FontInstance, FontMetrics, ShapedText};
+use skrifa::MetadataProvider;
 
 use crate::resolve::{ResolveContext, ResolvedStyle};
 use crate::style::Brush;
@@ -96,13 +97,15 @@ pub(crate) struct StyleMetrics {
     pub(crate) parent: u16,
     /// The style's font size, against which `sub`/`super` of children are resolved.
     pub(crate) font_size: f32,
+    /// Space advance without spacing, or half the font size if unavailable.
+    /// Zero when no style uses numeric tab sizes.
+    pub(crate) space_advance: f32,
 }
 
 /// Resolve the [`StyleMetrics`] of every style in `styles`, in table order.
 ///
 /// Relies on the style table being ordered parent-first (`style.parent <= index`), which both
-/// style builders guarantee. `shaped_text` is the already shaped text of the layout, whose run
-/// metrics are reused where a style's first available font was also used for shaping.
+/// style builders guarantee. Reuses matching shaped-run metrics when available.
 pub(crate) fn resolve_style_metrics<B: Brush>(
     rcx: &ResolveContext,
     fcx: &mut FontContext,
@@ -115,13 +118,19 @@ pub(crate) fn resolve_style_metrics<B: Brush>(
     out.reserve(styles.len());
 
     let mut query = fcx.collection.query(&mut fcx.source_cache);
+    let mut cached_space_glyph = None;
+    let measure_space = styles
+        .iter()
+        .any(|style| matches!(style.tab_size.size, crate::TabStopSize::Spaces(_)));
 
     for (index, style) in styles.iter().enumerate() {
-        let font_metrics = first_available_font(&mut query, rcx, style)
+        let font = first_available_font(&mut query, rcx, style);
+        let variations = rcx.variations(style.font_variations).unwrap_or(&[]);
+        let font_metrics = font
+            .as_ref()
             .and_then(|font| {
-                let variations = rcx.variations(style.font_variations).unwrap_or(&[]);
-                shaped_run_metrics(shaped_text, &font, style.font_size, variations)
-                    .or_else(|| FontMetrics::from_font_instance(&font, style.font_size, variations))
+                shaped_run_metrics(shaped_text, font, style.font_size, variations)
+                    .or_else(|| FontMetrics::from_font_instance(font, style.font_size, variations))
             })
             .unwrap_or_else(|| FontMetrics::fallback(style.font_size));
 
@@ -131,6 +140,15 @@ pub(crate) fn resolve_style_metrics<B: Brush>(
 
         let mut metrics = StyleMetrics::from_font(&font_metrics, line_height, quantize);
         metrics.font_size = style.font_size;
+
+        if measure_space {
+            metrics.space_advance = font
+                .as_ref()
+                .and_then(|font| {
+                    space_advance(font, style.font_size, variations, &mut cached_space_glyph)
+                })
+                .unwrap_or(0.5 * style.font_size);
+        }
 
         if index == 0 {
             // The root span box (the strut).
@@ -175,9 +193,7 @@ pub(crate) fn resolve_style_metrics<B: Brush>(
     }
 }
 
-/// The metrics of a shaped run using `font` at `font_size`, if any: the shaper has then already
-/// computed the metrics this style needs. Only used at the font's default variation location,
-/// which covers the common non-variable-font case without re-resolving axes.
+/// Reuse metrics at the default variation location without re-resolving axes.
 fn shaped_run_metrics(
     shaped_text: &ShapedText,
     font: &FontInstance,
@@ -200,6 +216,40 @@ fn shaped_run_metrics(
                     .all(|c| c.to_bits() == 0)
         })
         .map(|run| run.font_metrics)
+}
+
+fn space_advance(
+    font: &FontInstance,
+    font_size: f32,
+    variations: &[crate::FontVariation],
+    cached_glyph: &mut Option<(FontData, Option<skrifa::GlyphId>)>,
+) -> Option<f32> {
+    let font_ref = skrifa::FontRef::from_index(font.font.data.as_ref(), font.font.index).ok()?;
+    let glyph = if let Some((cached_font, glyph)) = cached_glyph.as_ref()
+        && *cached_font == font.font
+    {
+        *glyph
+    } else {
+        let glyph = font_ref
+            .charmap()
+            .map(' ')
+            .filter(|glyph| glyph.to_u32() != 0);
+        *cached_glyph = Some((font.font.clone(), glyph));
+        glyph
+    }?;
+    let location = font_ref.axes().location(
+        font.synthesis
+            .variation_settings()
+            .iter()
+            .map(|(tag, value)| (skrifa::Tag::new(&tag.to_be_bytes()), *value))
+            .chain(
+                variations
+                    .iter()
+                    .map(|v| (skrifa::Tag::new(&v.tag.to_bytes()), v.value)),
+            ),
+    );
+    skrifa::metrics::GlyphMetrics::new(&font_ref, skrifa::prelude::Size::new(font_size), &location)
+        .advance_width(glyph)
 }
 
 /// The line-height expanded box of a font at a resolved `line-height`: the font's content area
@@ -276,6 +326,7 @@ impl StyleMetrics {
             aligned_subtree_root: 0,
             parent: 0,
             font_size: 0.,
+            space_advance: 0.,
         }
     }
 }

@@ -61,10 +61,6 @@ pub(crate) fn shape_text<'a, B: Brush>(
 
     // Do nothing if there is no text or styles (there should always be a default style)
     if text.is_empty() || styles.is_empty() {
-        // Empty text may still have out-of-flow boxes.
-        for box_idx in 0..inline_boxes.len() {
-            layout.data.push_out_of_flow_box(box_idx, BidiLevel::new(0));
-        }
         return;
     }
 
@@ -190,7 +186,20 @@ pub(crate) fn shape_text<'a, B: Brush>(
         false,
         &mut layout.data.shaped_text,
     );
+}
 
+pub(crate) fn process_shaped_text<B: Brush>(
+    styles: &[ResolvedStyle<B>],
+    inline_boxes: &[LayoutInlineBox],
+    char_style_indices: &[u16],
+    layout: &mut Layout<B>,
+) {
+    if styles.is_empty() {
+        for box_idx in 0..inline_boxes.len() {
+            layout.data.push_out_of_flow_box(box_idx, BidiLevel::new(0));
+        }
+        return;
+    }
     // Out-of-flow boxes are laid out as items of their own.
     let mut out_of_flow_box_iter = inline_boxes
         .iter()

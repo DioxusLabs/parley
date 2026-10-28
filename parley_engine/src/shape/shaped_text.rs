@@ -351,16 +351,14 @@ impl ShapedText {
                 index
             });
 
-        let metrics = {
-            let font = &self.fonts[font_index];
-            let font_ref =
-                skrifa::FontRef::from_index(font.font.data.as_ref(), font.font.index).unwrap();
-            skrifa::metrics::Metrics::new(
-                &font_ref,
-                skrifa::prelude::Size::new(options.font_size),
-                normalized_coords,
-            )
-        };
+        let font = &self.fonts[font_index];
+        let font_ref =
+            skrifa::FontRef::from_index(font.font.data.as_ref(), font.font.index).unwrap();
+        let metrics = skrifa::metrics::Metrics::new(
+            &font_ref,
+            skrifa::prelude::Size::new(options.font_size),
+            normalized_coords,
+        );
         let units_per_em = metrics.units_per_em as f32;
         let font_metrics = FontMetrics::from_skrifa_metrics(&metrics, options.font_size);
 

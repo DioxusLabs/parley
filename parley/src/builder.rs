@@ -489,14 +489,6 @@ fn build_into_layout<B: Brush>(
         }
     }
 
-    // Copy the visual styles into the layout. The root style is at index 0.
-    let root_font_size = lcx.style_table.first().map_or(0., |style| style.font_size);
-    layout.data.styles.extend(
-        lcx.style_table
-            .iter()
-            .map(|s| s.as_layout_style(root_font_size)),
-    );
-
     {
         super::shape::shape_text(
             &lcx.rcx,
@@ -512,7 +504,6 @@ fn build_into_layout<B: Brush>(
         );
     }
 
-    // After shaping, so that the metrics of fonts used for shaping can be reused.
     crate::layout::style_metrics::resolve_style_metrics(
         &lcx.rcx,
         fcx,
@@ -520,6 +511,28 @@ fn build_into_layout<B: Brush>(
         &layout.data.shaped_text,
         options.quantize,
         &mut layout.data.style_metrics,
+    );
+
+    let root_font_size = lcx.style_table.first().map_or(0., |style| style.font_size);
+    let root_space = layout
+        .data
+        .style_metrics
+        .first()
+        .zip(lcx.style_table.first())
+        .map_or(0., |(metrics, style)| {
+            metrics.space_advance + style.letter_spacing + style.word_spacing
+        });
+    layout.data.styles.extend(
+        lcx.style_table
+            .iter()
+            .map(|s| s.as_layout_style(root_font_size, root_space)),
+    );
+
+    super::shape::process_shaped_text(
+        &lcx.style_table,
+        &lcx.inline_boxes,
+        &lcx.char_style_indices,
+        layout,
     );
 
     // Move inline boxes into the layout
