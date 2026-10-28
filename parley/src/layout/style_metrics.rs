@@ -54,6 +54,7 @@ use alloc::vec::Vec;
 use core_maths::CoreFloat;
 use fontique::{Query, QueryFamily};
 use parley_engine::{FontInstance, FontMetrics};
+use skrifa::MetadataProvider;
 
 use crate::resolve::{ResolveContext, ResolvedStyle};
 use crate::style::Brush;
@@ -115,6 +116,7 @@ pub(crate) fn resolve_style_metrics<B: Brush>(
     out.reserve(styles.len());
 
     let mut query = fcx.collection.query(&mut fcx.source_cache);
+    let mut cached_space_glyph = None;
 
     for (index, style) in styles.iter().enumerate() {
         let font = first_available_font(&mut query, rcx, style);
@@ -131,7 +133,12 @@ pub(crate) fn resolve_style_metrics<B: Brush>(
         let mut metrics = StyleMetrics::from_font(&font_metrics, line_height, quantize);
         metrics.font_size = style.font_size;
 
-        metrics.space_advance = font_metrics.space_advance.unwrap_or(0.5 * style.font_size);
+        metrics.space_advance = font
+            .as_ref()
+            .and_then(|font| {
+                space_advance(font, style.font_size, variations, &mut cached_space_glyph)
+            })
+            .unwrap_or(0.5 * style.font_size);
 
         if index == 0 {
             // The root span box (the strut).
@@ -174,6 +181,40 @@ pub(crate) fn resolve_style_metrics<B: Brush>(
 
         out.push(metrics);
     }
+}
+
+fn space_advance(
+    font: &FontInstance,
+    font_size: f32,
+    variations: &[crate::FontVariation],
+    cached_glyph: &mut Option<(FontData, Option<skrifa::GlyphId>)>,
+) -> Option<f32> {
+    let font_ref = skrifa::FontRef::from_index(font.font.data.as_ref(), font.font.index).ok()?;
+    let glyph = if let Some((cached_font, glyph)) = cached_glyph.as_ref()
+        && *cached_font == font.font
+    {
+        *glyph
+    } else {
+        let glyph = font_ref
+            .charmap()
+            .map(' ')
+            .filter(|glyph| glyph.to_u32() != 0);
+        *cached_glyph = Some((font.font.clone(), glyph));
+        glyph
+    }?;
+    let location = font_ref.axes().location(
+        font.synthesis
+            .variation_settings()
+            .iter()
+            .map(|(tag, value)| (skrifa::Tag::new(&tag.to_be_bytes()), *value))
+            .chain(
+                variations
+                    .iter()
+                    .map(|v| (skrifa::Tag::new(&v.tag.to_bytes()), v.value)),
+            ),
+    );
+    skrifa::metrics::GlyphMetrics::new(&font_ref, skrifa::prelude::Size::new(font_size), &location)
+        .advance_width(glyph)
 }
 
 /// The line-height expanded box of a font at a resolved `line-height`: the font's content area

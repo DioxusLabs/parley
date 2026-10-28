@@ -49,8 +49,6 @@ pub struct FontMetrics {
     /// Distance from the baseline to the top of the lowercase "x" or
     /// similar character.
     pub x_height: Option<f32>,
-    /// Advance of U+0020, if available. Not computed for shaped runs.
-    pub space_advance: Option<f32>,
 }
 
 impl FontMetrics {
@@ -69,7 +67,6 @@ impl FontMetrics {
             strikethrough_size: 0.,
             cap_height: None,
             x_height: None,
-            space_advance: None,
         }
     }
 
@@ -95,27 +92,14 @@ impl FontMetrics {
                         .map(|v| (skrifa::Tag::new(&v.tag.to_bytes()), v.value)),
                 ),
         );
-        let mut metrics = Self::from_skrifa_metrics(
+        Some(Self::from_skrifa_metrics(
             &skrifa::metrics::Metrics::new(
                 &font_ref,
                 skrifa::prelude::Size::new(font_size),
                 &location,
             ),
             font_size,
-        );
-        metrics.space_advance = font_ref
-            .charmap()
-            .map(' ')
-            .filter(|glyph| glyph.to_u32() != 0)
-            .and_then(|glyph| {
-                skrifa::metrics::GlyphMetrics::new(
-                    &font_ref,
-                    skrifa::prelude::Size::new(font_size),
-                    &location,
-                )
-                .advance_width(glyph)
-            });
-        Some(metrics)
+        ))
     }
 
     fn from_skrifa_metrics(metrics: &skrifa::metrics::Metrics, font_size: f32) -> Self {
@@ -144,7 +128,6 @@ impl FontMetrics {
             strikethrough_size,
             x_height: metrics.x_height,
             cap_height: metrics.cap_height,
-            space_advance: None,
         }
     }
 }

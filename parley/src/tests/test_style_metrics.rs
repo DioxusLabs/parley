@@ -64,6 +64,15 @@ fn one_metrics_entry_per_style() {
 }
 
 #[test]
+fn space_advance_uses_each_styles_font_size() {
+    let layout = build();
+    let m = metrics(&layout);
+    assert!(m[0].space_advance > 0.);
+    assert!((m[1].space_advance - 2. * m[0].space_advance).abs() < 1e-4);
+    assert!((m[2].space_advance - 0.5 * m[0].space_advance).abs() < 1e-4);
+}
+
+#[test]
 fn line_height_is_distributed_as_half_leading() {
     let layout = build();
     let root = metrics(&layout)[0];

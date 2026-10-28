@@ -125,9 +125,6 @@ fn numeric_tab_size_matches_space_at_variable_location() {
         let mut space_layout = builder.build(" ");
         space_layout.break_all_lines(None);
         let space = space_layout.full_width();
-        let run = space_layout.get(0).unwrap().runs().next().unwrap();
-        assert_eq!(run.font_metrics().space_advance, None);
-
         let text = "a\tb";
         let mut builder = env.ranged_builder(text);
         builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto Flex")));

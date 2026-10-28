@@ -2751,6 +2751,7 @@ dependencies = [
  "parley_dev",
  "parley_engine",
  "peniko",
+ "skrifa",
  "smallvec",
 ]
 
