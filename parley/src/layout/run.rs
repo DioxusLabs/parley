@@ -5,7 +5,7 @@ use crate::FontData;
 use crate::layout::cluster::Cluster;
 use crate::layout::data::{LineItemData, RunData};
 use crate::layout::layout::Layout;
-use crate::layout::spacing::{EffectiveSpacing, Gaps, Justification};
+use crate::layout::spacing::{EffectiveSpacing, Gaps, GlyphSpacing, Justification};
 use crate::style::Brush;
 
 use core::ops::Range;
@@ -276,7 +276,7 @@ pub(crate) struct Glyphs<'a> {
     slice: ShapedSlice<'a>,
     is_rtl: bool,
     /// The spacing to apply, if any. Without spacing, atoms are not tracked.
-    spacing: Option<EffectiveSpacing<'a>>,
+    spacing: Option<GlyphSpacing>,
     /// The shaped clusters not yet visited: all of `slice`'s clusters without spacing, otherwise
     /// those of the current atom. Visited in logical order for LTR text and in reverse for RTL.
     shaped_clusters: Range<u32>,
@@ -294,6 +294,7 @@ pub(crate) struct Glyphs<'a> {
 impl<'a> Glyphs<'a> {
     fn new(slice: ShapedSlice<'a>, is_rtl: bool, spacing: EffectiveSpacing<'a>) -> Self {
         let clusters = slice.shaped_clusters_range();
+        let spacing = spacing.glyph_spacing();
         Self {
             slice,
             is_rtl,

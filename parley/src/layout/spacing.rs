@@ -230,6 +230,13 @@ pub(crate) struct EffectiveSpacing<'a> {
 }
 
 impl<'a> EffectiveSpacing<'a> {
+    #[inline(always)]
+    pub(crate) const fn glyph_spacing(self) -> GlyphSpacing {
+        GlyphSpacing {
+            spacing: self.spacing,
+            justification: self.justification,
+        }
+    }
     /// The combined [`Spacing`] of a run and the justification and tab advances of its line.
     ///
     /// To measure text for purposes like line breaking, pass [`Justification::NONE`] and no tab
@@ -331,5 +338,32 @@ impl<'a> EffectiveSpacing<'a> {
                 .map(|atom| self.atom_advance(&atom))
                 .sum()
         }
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub(crate) struct GlyphSpacing {
+    spacing: Spacing,
+    justification: Justification,
+}
+
+impl GlyphSpacing {
+    #[inline(always)]
+    pub(crate) const fn is_zero(self) -> bool {
+        self.spacing.is_zero() && self.justification.amount_per_opportunity == 0.
+    }
+
+    #[inline(always)]
+    pub(crate) fn gaps(self, atom: &Atom<'_>) -> Gaps {
+        let first = atom.characters()[0];
+        let mut gaps = self
+            .spacing
+            .gaps(first.whitespace, first.flags.is_default_ignorable());
+        if is_word_separator(first.whitespace)
+            && atom.shaped_clusters_range().end <= self.justification.justification_end_cluster
+        {
+            gaps.after += self.justification.amount_per_opportunity;
+        }
+        gaps
     }
 }
