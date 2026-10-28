@@ -526,8 +526,8 @@ impl<B: Brush> ResolvedStyle<B> {
 
     /// The style as the layout sees it. `root_font_size` is the font size of the layout's root
     /// style, which the default skip threshold of a tab is relative to (see
-    /// [`TabSize::skip_threshold`]).
-    pub(crate) fn as_layout_style(&self, root_font_size: f32) -> layout::Style<B> {
+    /// [`TabSize::skip_threshold`]). `root_space` includes the root's spacing.
+    pub(crate) fn as_layout_style(&self, root_font_size: f32, root_space: f32) -> layout::Style<B> {
         layout::Style {
             parent: self.parent,
             brush: self.brush.clone(),
@@ -540,7 +540,7 @@ impl<B: Brush> ResolvedStyle<B> {
             white_space_collapse: self.white_space_collapse,
             tab_size: match self.tab_size.size {
                 TabStopSize::Length(length) => length,
-                TabStopSize::Spaces(_) => 0.,
+                TabStopSize::Spaces(n) => (n * root_space).max(0.),
             },
             tab_skip_threshold: self.tab_size.skip_threshold.unwrap_or(0.5 * root_font_size),
             locale: self.locale,

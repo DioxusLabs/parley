@@ -53,7 +53,7 @@ use alloc::vec::Vec;
 #[allow(unused_imports)]
 use core_maths::CoreFloat;
 use fontique::{Query, QueryFamily};
-use parley_engine::{FontInstance, FontMetrics};
+use parley_engine::{FontInstance, FontMetrics, ShapedText};
 use skrifa::MetadataProvider;
 
 use crate::resolve::{ResolveContext, ResolvedStyle};
@@ -104,11 +104,12 @@ pub(crate) struct StyleMetrics {
 /// Resolve the [`StyleMetrics`] of every style in `styles`, in table order.
 ///
 /// Relies on the style table being ordered parent-first (`style.parent <= index`), which both
-/// style builders guarantee.
+/// style builders guarantee. Reuses matching shaped-run metrics when available.
 pub(crate) fn resolve_style_metrics<B: Brush>(
     rcx: &ResolveContext,
     fcx: &mut FontContext,
     styles: &[ResolvedStyle<B>],
+    shaped_text: &ShapedText,
     quantize: bool,
     out: &mut Vec<StyleMetrics>,
 ) {
@@ -123,7 +124,10 @@ pub(crate) fn resolve_style_metrics<B: Brush>(
         let variations = rcx.variations(style.font_variations).unwrap_or(&[]);
         let font_metrics = font
             .as_ref()
-            .and_then(|font| FontMetrics::from_font_instance(font, style.font_size, variations))
+            .and_then(|font| {
+                shaped_run_metrics(shaped_text, font, style.font_size, variations)
+                    .or_else(|| FontMetrics::from_font_instance(font, style.font_size, variations))
+            })
             .unwrap_or_else(|| FontMetrics::fallback(style.font_size));
 
         let line_height = style
@@ -181,6 +185,31 @@ pub(crate) fn resolve_style_metrics<B: Brush>(
 
         out.push(metrics);
     }
+}
+
+/// Reuse metrics at the default variation location without re-resolving axes.
+fn shaped_run_metrics(
+    shaped_text: &ShapedText,
+    font: &FontInstance,
+    font_size: f32,
+    variations: &[crate::FontVariation],
+) -> Option<FontMetrics> {
+    if !variations.is_empty() || !font.synthesis.variation_settings().is_empty() {
+        return None;
+    }
+    let font_index = shaped_text.fonts().iter().position(|f| f == font)?;
+    let coords = shaped_text.normalized_coords();
+    shaped_text
+        .runs()
+        .iter()
+        .find(|run| {
+            run.font_index == font_index
+                && run.font_size.to_bits() == font_size.to_bits()
+                && coords[run.normalized_coords_range.clone()]
+                    .iter()
+                    .all(|c| c.to_bits() == 0)
+        })
+        .map(|run| run.font_metrics)
 }
 
 fn space_advance(

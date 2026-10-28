@@ -489,15 +489,6 @@ fn build_into_layout<B: Brush>(
         }
     }
 
-    // Shaping uses the visual styles; numeric tab sizes are resolved after the style metrics.
-    // The root style is at index 0.
-    let root_font_size = lcx.style_table.first().map_or(0., |style| style.font_size);
-    layout.data.styles.extend(
-        lcx.style_table
-            .iter()
-            .map(|s| s.as_layout_style(root_font_size)),
-    );
-
     {
         super::shape::shape_text(
             &lcx.rcx,
@@ -517,21 +508,32 @@ fn build_into_layout<B: Brush>(
         &lcx.rcx,
         fcx,
         &lcx.style_table,
+        &layout.data.shaped_text,
         options.quantize,
         &mut layout.data.style_metrics,
     );
 
-    if let (Some(root_metrics), Some(root_style)) =
-        (layout.data.style_metrics.first(), lcx.style_table.first())
-    {
-        let root_space =
-            root_metrics.space_advance + root_style.letter_spacing + root_style.word_spacing;
-        for (style, layout_style) in lcx.style_table.iter().zip(&mut layout.data.styles) {
-            if let crate::TabStopSize::Spaces(n) = style.tab_size.size {
-                layout_style.tab_size = (n * root_space).max(0.);
-            }
-        }
-    }
+    let root_font_size = lcx.style_table.first().map_or(0., |style| style.font_size);
+    let root_space = layout
+        .data
+        .style_metrics
+        .first()
+        .zip(lcx.style_table.first())
+        .map_or(0., |(metrics, style)| {
+            metrics.space_advance + style.letter_spacing + style.word_spacing
+        });
+    layout.data.styles.extend(
+        lcx.style_table
+            .iter()
+            .map(|s| s.as_layout_style(root_font_size, root_space)),
+    );
+
+    super::shape::process_shaped_text(
+        &lcx.style_table,
+        &lcx.inline_boxes,
+        &lcx.char_style_indices,
+        layout,
+    );
 
     // Move inline boxes into the layout
     layout.data.inline_boxes.clear();
