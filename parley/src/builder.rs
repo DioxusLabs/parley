@@ -492,10 +492,6 @@ fn build_into_layout<B: Brush>(
     // Shaping uses the visual styles; numeric tab sizes are resolved after the style metrics.
     // The root style is at index 0.
     let root_font_size = lcx.style_table.first().map_or(0., |style| style.font_size);
-    let measure_root_space = lcx
-        .style_table
-        .iter()
-        .any(|style| matches!(style.tab_size.size, crate::TabStopSize::Spaces(_)));
     layout.data.styles.extend(
         lcx.style_table
             .iter()
@@ -524,11 +520,10 @@ fn build_into_layout<B: Brush>(
         &lcx.style_table,
         &layout.data.shaped_text,
         options.quantize,
-        measure_root_space,
         &mut layout.data.style_metrics,
     );
 
-    if measure_root_space && let Some(root) = layout.data.style_metrics.first() {
+    if let Some(root) = layout.data.style_metrics.first() {
         let root_space = root.space_advance;
         for (style, layout_style) in lcx.style_table.iter().zip(&mut layout.data.styles) {
             if let crate::TabStopSize::Spaces(n) = style.tab_size.size {

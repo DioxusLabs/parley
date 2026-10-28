@@ -8,7 +8,6 @@ use core::mem;
 use harfrust::ShapeOptions as HarfShapeOptions;
 use linebender_resource_handle::{Blob, FontData};
 use parlance::{FontFeature, FontVariation, Language};
-use skrifa::MetadataProvider;
 
 use crate::{
     Analysis, CharInfo, ShapedText,
@@ -69,37 +68,6 @@ pub struct FontInstanceRef<'a> {
     pub index: u32,
     /// Font synthesis suggestions.
     pub synthesis: &'a fontique::Synthesis,
-}
-
-impl FontInstanceRef<'_> {
-    /// Returns the advance of a character's glyph at this font instance and size.
-    ///
-    /// Returns `None` if the font or glyph is unavailable.
-    pub fn glyph_advance(
-        self,
-        character: char,
-        font_size: f32,
-        variations: &[FontVariation],
-    ) -> Option<f32> {
-        let font = skrifa::FontRef::from_index(self.data.as_ref(), self.index).ok()?;
-        let glyph = font.charmap().map(character)?;
-        if glyph.to_u32() == 0 {
-            return None;
-        }
-        let location = font.axes().location(
-            self.synthesis
-                .variation_settings()
-                .iter()
-                .map(|(tag, value)| (skrifa::Tag::new(&tag.to_be_bytes()), *value))
-                .chain(
-                    variations
-                        .iter()
-                        .map(|v| (skrifa::Tag::new(&v.tag.to_bytes()), v.value)),
-                ),
-        );
-        skrifa::metrics::GlyphMetrics::new(&font, skrifa::prelude::Size::new(font_size), &location)
-            .advance_width(glyph)
-    }
 }
 
 impl From<FontInstanceRef<'_>> for FontInstance {

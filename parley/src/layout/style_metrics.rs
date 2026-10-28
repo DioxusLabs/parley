@@ -96,7 +96,7 @@ pub(crate) struct StyleMetrics {
     pub(crate) parent: u16,
     /// The style's font size, against which `sub`/`super` of children are resolved.
     pub(crate) font_size: f32,
-    /// Root space advance including spacing, measured only when numeric tab sizes are used.
+    /// Root space advance including spacing, or half the font size plus spacing if unavailable.
     pub(crate) space_advance: f32,
 }
 
@@ -105,14 +105,12 @@ pub(crate) struct StyleMetrics {
 /// Relies on the style table being ordered parent-first (`style.parent <= index`), which both
 /// style builders guarantee. `shaped_text` is the already shaped text of the layout, whose run
 /// metrics are reused where a style's first available font was also used for shaping.
-/// If `measure_root_space` is true, resolves the root space advance for numeric tab sizes.
 pub(crate) fn resolve_style_metrics<B: Brush>(
     rcx: &ResolveContext,
     fcx: &mut FontContext,
     styles: &[ResolvedStyle<B>],
     shaped_text: &ShapedText,
     quantize: bool,
-    measure_root_space: bool,
     out: &mut Vec<StyleMetrics>,
 ) {
     out.clear();
@@ -138,14 +136,8 @@ pub(crate) fn resolve_style_metrics<B: Brush>(
         let mut metrics = StyleMetrics::from_font(&font_metrics, line_height, quantize);
         metrics.font_size = style.font_size;
 
-        if index == 0 && measure_root_space {
-            metrics.space_advance = font
-                .as_ref()
-                .and_then(|font| {
-                    font.as_ref()
-                        .glyph_advance(' ', style.font_size, variations)
-                })
-                .unwrap_or(0.5 * style.font_size)
+        if index == 0 {
+            metrics.space_advance = font_metrics.space_advance.unwrap_or(0.5 * style.font_size)
                 + style.letter_spacing
                 + style.word_spacing;
         }

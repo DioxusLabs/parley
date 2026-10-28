@@ -16,6 +16,7 @@ use parley::{
     Alignment, AlignmentOptions, Cluster, ClusterSide, FontFamily, FontFamilyName, IndentOptions,
     Layout, PositionedLayoutItem, StyleProperty, TabSize, TextWrapMode, WhiteSpaceCollapse,
 };
+use parley::{FontVariation, FontVariations, setting::Tag};
 use std::borrow::Cow;
 
 fn nearly_eq(actual: f32, expected: f32) {
@@ -102,6 +103,43 @@ fn numeric_tab_size_in_span_uses_root_font() {
     let mut layout = builder.build(text);
     layout.break_all_lines(None);
     nearly_eq(glyph_xs(&layout, 0)[1], 8. * space);
+}
+
+#[test]
+fn numeric_tab_size_matches_run_space_metrics_at_variable_location() {
+    let mut env = TestEnv::new(test_name!(), None);
+    let variations = [FontVariation {
+        tag: Tag::new(b"wdth"),
+        value: 75.,
+    }];
+    for values in [&[][..], &variations[..]] {
+        let mut builder = env.ranged_builder(" ");
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto Flex")));
+        builder.push_default(StyleProperty::FontSize(32.));
+        builder.push_default(StyleProperty::FontVariations(FontVariations::List(
+            Cow::Borrowed(values),
+        )));
+        builder.push_default(StyleProperty::WhiteSpaceCollapse(
+            WhiteSpaceCollapse::Preserve,
+        ));
+        let mut space_layout = builder.build(" ");
+        space_layout.break_all_lines(None);
+        let space = space_layout.full_width();
+        let run = space_layout.get(0).unwrap().runs().next().unwrap();
+        nearly_eq(run.font_metrics().space_advance.unwrap(), space);
+
+        let text = "a\tb";
+        let mut builder = env.ranged_builder(text);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto Flex")));
+        builder.push_default(StyleProperty::FontSize(32.));
+        builder.push_default(StyleProperty::FontVariations(FontVariations::List(
+            Cow::Borrowed(values),
+        )));
+        builder.push_default(StyleProperty::TabSize(TabSize::spaces(8.)));
+        let mut layout = builder.build(text);
+        layout.break_all_lines(None);
+        nearly_eq(glyph_xs(&layout, 0)[1], 8. * space);
+    }
 }
 
 #[test]
