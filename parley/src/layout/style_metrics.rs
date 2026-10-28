@@ -103,25 +103,36 @@ pub(crate) struct StyleMetrics {
 /// Relies on the style table being ordered parent-first (`style.parent <= index`), which both
 /// style builders guarantee. `shaped_text` is the already shaped text of the layout, whose run
 /// metrics are reused where a style's first available font was also used for shaping.
+/// If `measure_root_space` is true, returns the root font's space advance when available.
 pub(crate) fn resolve_style_metrics<B: Brush>(
     rcx: &ResolveContext,
     fcx: &mut FontContext,
     styles: &[ResolvedStyle<B>],
     shaped_text: &ShapedText,
     quantize: bool,
+    measure_root_space: bool,
     out: &mut Vec<StyleMetrics>,
-) {
+) -> Option<f32> {
     out.clear();
     out.reserve(styles.len());
 
     let mut query = fcx.collection.query(&mut fcx.source_cache);
+    let mut root_space = None;
 
     for (index, style) in styles.iter().enumerate() {
-        let font_metrics = first_available_font(&mut query, rcx, style)
+        let font = first_available_font(&mut query, rcx, style);
+        let variations = rcx.variations(style.font_variations).unwrap_or(&[]);
+        if index == 0 && measure_root_space {
+            root_space = font.as_ref().and_then(|font| {
+                font.as_ref()
+                    .glyph_advance(' ', style.font_size, variations)
+            });
+        }
+        let font_metrics = font
+            .as_ref()
             .and_then(|font| {
-                let variations = rcx.variations(style.font_variations).unwrap_or(&[]);
-                shaped_run_metrics(shaped_text, &font, style.font_size, variations)
-                    .or_else(|| FontMetrics::from_font_instance(&font, style.font_size, variations))
+                shaped_run_metrics(shaped_text, font, style.font_size, variations)
+                    .or_else(|| FontMetrics::from_font_instance(font, style.font_size, variations))
             })
             .unwrap_or_else(|| FontMetrics::fallback(style.font_size));
 
@@ -173,6 +184,7 @@ pub(crate) fn resolve_style_metrics<B: Brush>(
 
         out.push(metrics);
     }
+    root_space
 }
 
 /// The metrics of a shaped run using `font` at `font_size`, if any: the shaper has then already

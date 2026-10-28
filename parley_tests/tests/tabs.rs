@@ -13,9 +13,10 @@
 use crate::test_name;
 use crate::util::{ColorBrush, TestEnv};
 use parley::{
-    Alignment, AlignmentOptions, Cluster, ClusterSide, IndentOptions, Layout, PositionedLayoutItem,
-    StyleProperty, TabSize, TextWrapMode, WhiteSpaceCollapse,
+    Alignment, AlignmentOptions, Cluster, ClusterSide, FontFamily, FontFamilyName, IndentOptions,
+    Layout, PositionedLayoutItem, StyleProperty, TabSize, TextWrapMode, WhiteSpaceCollapse,
 };
+use std::borrow::Cow;
 
 fn nearly_eq(actual: f32, expected: f32) {
     assert!((actual - expected).abs() < 1e-3, "{actual} != {expected}");
@@ -98,6 +99,39 @@ fn numeric_tab_size_in_span_uses_root_font() {
     let mut builder = env.ranged_builder(text);
     builder.push(StyleProperty::FontSize(64.), 1..2);
     builder.push(StyleProperty::TabSize(TabSize::spaces(8.)), 1..2);
+    let mut layout = builder.build(text);
+    layout.break_all_lines(None);
+    nearly_eq(glyph_xs(&layout, 0)[1], 8. * space);
+}
+
+#[test]
+fn numeric_tab_size_scans_past_font_without_space() {
+    let mut env = TestEnv::new(test_name!(), None);
+    assert!(env.collection().family_id("Noto Sans CJK SC").is_some());
+    let mut builder = env.ranged_builder(" ");
+    builder.push_default(StyleProperty::FontFamily(FontFamily::named("Roboto")));
+    builder.push_default(StyleProperty::FontSize(20.));
+    builder.push_default(StyleProperty::WhiteSpaceCollapse(
+        WhiteSpaceCollapse::Preserve,
+    ));
+    let mut space_layout = builder.build(" ");
+    space_layout.break_all_lines(None);
+    let space = space_layout.full_width();
+    assert!(
+        (space - 10.).abs() > 1e-3,
+        "must differ from 0.5em fallback"
+    );
+
+    let text = "a\tb";
+    let mut builder = env.ranged_builder(text);
+    builder.push_default(StyleProperty::FontFamily(FontFamily::List(Cow::Owned(
+        vec![
+            FontFamilyName::Named(Cow::Borrowed("Noto Sans CJK SC")),
+            FontFamilyName::Named(Cow::Borrowed("Roboto")),
+        ],
+    ))));
+    builder.push_default(StyleProperty::FontSize(20.));
+    builder.push_default(StyleProperty::TabSize(TabSize::spaces(8.)));
     let mut layout = builder.build(text);
     layout.break_all_lines(None);
     nearly_eq(glyph_xs(&layout, 0)[1], 8. * space);

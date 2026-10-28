@@ -489,25 +489,17 @@ fn build_into_layout<B: Brush>(
         }
     }
 
-    // Copy the visual styles into the layout. The root style is at index 0.
+    // Shaping uses the visual styles; numeric tab sizes are resolved after the style metrics.
+    // The root style is at index 0.
     let root_font_size = lcx.style_table.first().map_or(0., |style| style.font_size);
-    let root_space = if lcx
+    let measure_root_space = lcx
         .style_table
         .iter()
-        .any(|style| matches!(style.tab_size.size, crate::TabStopSize::Spaces(_)))
-    {
-        lcx.style_table.first().map_or(0., |root| {
-            super::shape::root_space_advance(&lcx.rcx, fcx, root).unwrap_or(0.5 * root.font_size)
-                + root.letter_spacing
-                + root.word_spacing
-        })
-    } else {
-        0.
-    };
+        .any(|style| matches!(style.tab_size.size, crate::TabStopSize::Spaces(_)));
     layout.data.styles.extend(
         lcx.style_table
             .iter()
-            .map(|s| s.as_layout_style(root_font_size, root_space)),
+            .map(|s| s.as_layout_style(root_font_size, 0.)),
     );
 
     {
@@ -526,14 +518,28 @@ fn build_into_layout<B: Brush>(
     }
 
     // After shaping, so that the metrics of fonts used for shaping can be reused.
-    crate::layout::style_metrics::resolve_style_metrics(
+    let root_space = crate::layout::style_metrics::resolve_style_metrics(
         &lcx.rcx,
         fcx,
         &lcx.style_table,
         &layout.data.shaped_text,
         options.quantize,
+        measure_root_space,
         &mut layout.data.style_metrics,
     );
+
+    if measure_root_space && let Some(root) = lcx.style_table.first() {
+        let root_space = root_space
+            .or_else(|| super::shape::root_space_advance(&lcx.rcx, fcx, root))
+            .unwrap_or(0.5 * root.font_size)
+            + root.letter_spacing
+            + root.word_spacing;
+        for (style, layout_style) in lcx.style_table.iter().zip(&mut layout.data.styles) {
+            if let crate::TabStopSize::Spaces(n) = style.tab_size.size {
+                layout_style.tab_size = (n * root_space).max(0.);
+            }
+        }
+    }
 
     // Move inline boxes into the layout
     layout.data.inline_boxes.clear();
