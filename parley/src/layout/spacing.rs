@@ -121,7 +121,15 @@ impl Spacing {
     /// [tab-size]: https://www.w3.org/TR/css-text-4/#tab-size-property
     #[inline(always)]
     pub(crate) fn gaps(self, whitespace: Whitespace, is_default_ignorable: bool) -> Gaps {
-        if whitespace == Whitespace::Newline || whitespace == Whitespace::Tab {
+        if whitespace == Whitespace::Tab {
+            return Gaps::ZERO;
+        }
+        self.gaps_no_tab(whitespace, is_default_ignorable)
+    }
+
+    #[inline(always)]
+    pub(crate) fn gaps_no_tab(self, whitespace: Whitespace, is_default_ignorable: bool) -> Gaps {
+        if whitespace == Whitespace::Newline {
             return Gaps::ZERO;
         }
 
@@ -166,6 +174,37 @@ impl Justification {
 impl Default for Justification {
     fn default() -> Self {
         Self::NONE
+    }
+}
+
+#[derive(Copy, Clone)]
+pub(crate) struct BreakSpacing {
+    spacing: Spacing,
+    justification: Justification,
+}
+
+impl BreakSpacing {
+    #[inline(always)]
+    pub(crate) const fn new(spacing: Spacing, justification: Justification) -> Self {
+        Self {
+            spacing,
+            justification,
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) fn atom_advance(self, atom: &Atom<'_>) -> f32 {
+        let first_character = atom.characters()[0];
+        let whitespace = first_character.whitespace;
+        let mut gaps = self
+            .spacing
+            .gaps_no_tab(whitespace, first_character.flags.is_default_ignorable());
+        if is_word_separator(whitespace)
+            && atom.shaped_clusters_range().end <= self.justification.justification_end_cluster
+        {
+            gaps.after += self.justification.amount_per_opportunity;
+        }
+        atom.advance() + gaps.total()
     }
 }
 
