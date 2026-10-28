@@ -143,7 +143,7 @@ mod tests {
                 }
             }
         }
-        let mut seed = 1u32;
+        let mut seed = 1_u32;
         for _ in 0..100_000 {
             let mut next = || {
                 seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
@@ -151,7 +151,7 @@ mod tests {
             };
             check(next(), next(), next());
         }
-        for size in [0.1f32, 4., 31.6875, f32::MIN_POSITIVE] {
+        for size in [0.1_f32, 4., 31.6875, f32::MIN_POSITIVE] {
             for n in [1., 2., 17., 1000., 8_388_607., 16_777_216.] {
                 let stop = size * n;
                 for bits in [
