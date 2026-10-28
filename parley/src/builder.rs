@@ -499,7 +499,7 @@ fn build_into_layout<B: Brush>(
     layout.data.styles.extend(
         lcx.style_table
             .iter()
-            .map(|s| s.as_layout_style(root_font_size, 0.)),
+            .map(|s| s.as_layout_style(root_font_size)),
     );
 
     {
@@ -518,7 +518,7 @@ fn build_into_layout<B: Brush>(
     }
 
     // After shaping, so that the metrics of fonts used for shaping can be reused.
-    let root_space = crate::layout::style_metrics::resolve_style_metrics(
+    crate::layout::style_metrics::resolve_style_metrics(
         &lcx.rcx,
         fcx,
         &lcx.style_table,
@@ -528,12 +528,8 @@ fn build_into_layout<B: Brush>(
         &mut layout.data.style_metrics,
     );
 
-    if measure_root_space && let Some(root) = lcx.style_table.first() {
-        let root_space = root_space
-            .or_else(|| super::shape::root_space_advance(&lcx.rcx, fcx, root))
-            .unwrap_or(0.5 * root.font_size)
-            + root.letter_spacing
-            + root.word_spacing;
+    if measure_root_space && let Some(root) = layout.data.style_metrics.first() {
+        let root_space = root.space_advance;
         for (style, layout_style) in lcx.style_table.iter().zip(&mut layout.data.styles) {
             if let crate::TabStopSize::Spaces(n) = style.tab_size.size {
                 layout_style.tab_size = (n * root_space).max(0.);

@@ -96,6 +96,8 @@ pub(crate) struct StyleMetrics {
     pub(crate) parent: u16,
     /// The style's font size, against which `sub`/`super` of children are resolved.
     pub(crate) font_size: f32,
+    /// Root space advance including spacing, measured only when numeric tab sizes are used.
+    pub(crate) space_advance: f32,
 }
 
 /// Resolve the [`StyleMetrics`] of every style in `styles`, in table order.
@@ -103,7 +105,7 @@ pub(crate) struct StyleMetrics {
 /// Relies on the style table being ordered parent-first (`style.parent <= index`), which both
 /// style builders guarantee. `shaped_text` is the already shaped text of the layout, whose run
 /// metrics are reused where a style's first available font was also used for shaping.
-/// If `measure_root_space` is true, returns the root font's space advance when available.
+/// If `measure_root_space` is true, resolves the root space advance for numeric tab sizes.
 pub(crate) fn resolve_style_metrics<B: Brush>(
     rcx: &ResolveContext,
     fcx: &mut FontContext,
@@ -112,22 +114,15 @@ pub(crate) fn resolve_style_metrics<B: Brush>(
     quantize: bool,
     measure_root_space: bool,
     out: &mut Vec<StyleMetrics>,
-) -> Option<f32> {
+) {
     out.clear();
     out.reserve(styles.len());
 
     let mut query = fcx.collection.query(&mut fcx.source_cache);
-    let mut root_space = None;
 
     for (index, style) in styles.iter().enumerate() {
         let font = first_available_font(&mut query, rcx, style);
         let variations = rcx.variations(style.font_variations).unwrap_or(&[]);
-        if index == 0 && measure_root_space {
-            root_space = font.as_ref().and_then(|font| {
-                font.as_ref()
-                    .glyph_advance(' ', style.font_size, variations)
-            });
-        }
         let font_metrics = font
             .as_ref()
             .and_then(|font| {
@@ -142,6 +137,18 @@ pub(crate) fn resolve_style_metrics<B: Brush>(
 
         let mut metrics = StyleMetrics::from_font(&font_metrics, line_height, quantize);
         metrics.font_size = style.font_size;
+
+        if index == 0 && measure_root_space {
+            metrics.space_advance = font
+                .as_ref()
+                .and_then(|font| {
+                    font.as_ref()
+                        .glyph_advance(' ', style.font_size, variations)
+                })
+                .unwrap_or(0.5 * style.font_size)
+                + style.letter_spacing
+                + style.word_spacing;
+        }
 
         if index == 0 {
             // The root span box (the strut).
@@ -184,7 +191,6 @@ pub(crate) fn resolve_style_metrics<B: Brush>(
 
         out.push(metrics);
     }
-    root_space
 }
 
 /// The metrics of a shaped run using `font` at `font_size`, if any: the shaper has then already
@@ -288,6 +294,7 @@ impl StyleMetrics {
             aligned_subtree_root: 0,
             parent: 0,
             font_size: 0.,
+            space_advance: 0.,
         }
     }
 }

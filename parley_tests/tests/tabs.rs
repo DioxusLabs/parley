@@ -105,7 +105,7 @@ fn numeric_tab_size_in_span_uses_root_font() {
 }
 
 #[test]
-fn numeric_tab_size_scans_past_font_without_space() {
+fn numeric_tab_size_falls_back_when_first_font_has_no_space() {
     let mut env = TestEnv::new(test_name!(), None);
     assert!(env.collection().family_id("Noto Sans CJK SC").is_some());
     let mut builder = env.ranged_builder(" ");
@@ -134,7 +134,7 @@ fn numeric_tab_size_scans_past_font_without_space() {
     builder.push_default(StyleProperty::TabSize(TabSize::spaces(8.)));
     let mut layout = builder.build(text);
     layout.break_all_lines(None);
-    nearly_eq(glyph_xs(&layout, 0)[1], 8. * space);
+    nearly_eq(glyph_xs(&layout, 0)[1], 8. * 10.);
 }
 
 #[test]

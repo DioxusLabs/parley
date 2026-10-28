@@ -352,8 +352,8 @@ pub enum StyleProperty<'a, B: Brush> {
     /// Whitespace collapsing and hanging behavior.
     WhiteSpaceCollapse(WhiteSpaceCollapse),
     /// The distance between tab stops, as a length or a multiple of the root style's space
-    /// advance, including its letter and word spacing. If no space glyph is available, the
-    /// advance falls back to half the root font size. Corresponds to CSS
+    /// advance, including its letter and word spacing. If its first available font has no space
+    /// glyph, the advance falls back to half the root font size. Corresponds to CSS
     /// [`tab-size`](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/tab-size).
     /// Defaults to 0.0, so tabs have no effect on the text.
     ///
