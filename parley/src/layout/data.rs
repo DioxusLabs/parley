@@ -560,36 +560,25 @@ impl ContentWidthsMeasurer {
                     let can_hang = item.bidi_level == layout_data.base_level;
                     let is_rtl = item.bidi_level.is_rtl();
 
-                    let styles = &layout_data.styles;
-                    match (run_spacing.is_zero(), layout_data.runs[item.index].has_tabs) {
-                        (true, false) => self.measure_text_run::<B, false, false>(
-                            styles,
+                    let has_tabs = layout_data.runs[item.index].has_tabs;
+                    if run_spacing.is_zero() {
+                        self.measure_text_run::<B, false>(
+                            &layout_data.styles,
                             slice,
                             run_spacing,
+                            has_tabs,
                             can_hang,
                             is_rtl,
-                        ),
-                        (false, false) => self.measure_text_run::<B, true, false>(
-                            styles,
+                        );
+                    } else {
+                        self.measure_text_run::<B, true>(
+                            &layout_data.styles,
                             slice,
                             run_spacing,
+                            has_tabs,
                             can_hang,
                             is_rtl,
-                        ),
-                        (true, true) => self.measure_text_run::<B, false, true>(
-                            styles,
-                            slice,
-                            run_spacing,
-                            can_hang,
-                            is_rtl,
-                        ),
-                        (false, true) => self.measure_text_run::<B, true, true>(
-                            styles,
-                            slice,
-                            run_spacing,
-                            can_hang,
-                            is_rtl,
-                        ),
+                        );
                     }
                 }
                 // Out-of-flow boxes take up no space.
@@ -642,11 +631,12 @@ impl ContentWidthsMeasurer {
     /// logically last cluster for LTR and its logically first cluster for RTL. The gap then hangs
     /// with that cluster, as in `atom_hanging_advance`. Without `SPACED`, `spacing` is ignored.
     #[inline(always)]
-    fn measure_text_run<B: Brush, const SPACED: bool, const TABS: bool>(
+    fn measure_text_run<B: Brush, const SPACED: bool>(
         &mut self,
         styles: &[Style<B>],
         slice: ShapedSlice<'_>,
         spacing: Spacing,
+        has_tabs: bool,
         can_hang: bool,
         is_rtl: bool,
     ) {
@@ -691,7 +681,7 @@ impl ContentWidthsMeasurer {
             }
 
             // `max_extra` is the max-content advance minus the min-content advance.
-            let (mut advance, max_extra) = if TABS && whitespace == Whitespace::Tab {
+            let (mut advance, max_extra) = if has_tabs && whitespace == Whitespace::Tab {
                 self.tab_advances(style)
             } else {
                 (cluster.advance, 0.)
