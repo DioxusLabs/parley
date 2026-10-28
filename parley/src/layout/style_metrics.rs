@@ -53,7 +53,7 @@ use alloc::vec::Vec;
 #[allow(unused_imports)]
 use core_maths::CoreFloat;
 use fontique::{Query, QueryFamily};
-use parley_engine::{FontInstance, FontMetrics, ShapedText};
+use parley_engine::{FontInstance, FontMetrics};
 
 use crate::resolve::{ResolveContext, ResolvedStyle};
 use crate::style::Brush;
@@ -96,20 +96,18 @@ pub(crate) struct StyleMetrics {
     pub(crate) parent: u16,
     /// The style's font size, against which `sub`/`super` of children are resolved.
     pub(crate) font_size: f32,
-    /// Root space advance including spacing, or half the font size plus spacing if unavailable.
+    /// Space advance without spacing, or half the font size if unavailable.
     pub(crate) space_advance: f32,
 }
 
 /// Resolve the [`StyleMetrics`] of every style in `styles`, in table order.
 ///
 /// Relies on the style table being ordered parent-first (`style.parent <= index`), which both
-/// style builders guarantee. `shaped_text` is the already shaped text of the layout, whose run
-/// metrics are reused where a style's first available font was also used for shaping.
+/// style builders guarantee.
 pub(crate) fn resolve_style_metrics<B: Brush>(
     rcx: &ResolveContext,
     fcx: &mut FontContext,
     styles: &[ResolvedStyle<B>],
-    shaped_text: &ShapedText,
     quantize: bool,
     out: &mut Vec<StyleMetrics>,
 ) {
@@ -123,10 +121,7 @@ pub(crate) fn resolve_style_metrics<B: Brush>(
         let variations = rcx.variations(style.font_variations).unwrap_or(&[]);
         let font_metrics = font
             .as_ref()
-            .and_then(|font| {
-                shaped_run_metrics(shaped_text, font, style.font_size, variations)
-                    .or_else(|| FontMetrics::from_font_instance(font, style.font_size, variations))
-            })
+            .and_then(|font| FontMetrics::from_font_instance(font, style.font_size, variations))
             .unwrap_or_else(|| FontMetrics::fallback(style.font_size));
 
         let line_height = style
@@ -136,11 +131,7 @@ pub(crate) fn resolve_style_metrics<B: Brush>(
         let mut metrics = StyleMetrics::from_font(&font_metrics, line_height, quantize);
         metrics.font_size = style.font_size;
 
-        if index == 0 {
-            metrics.space_advance = font_metrics.space_advance.unwrap_or(0.5 * style.font_size)
-                + style.letter_spacing
-                + style.word_spacing;
-        }
+        metrics.space_advance = font_metrics.space_advance.unwrap_or(0.5 * style.font_size);
 
         if index == 0 {
             // The root span box (the strut).
@@ -183,33 +174,6 @@ pub(crate) fn resolve_style_metrics<B: Brush>(
 
         out.push(metrics);
     }
-}
-
-/// The metrics of a shaped run using `font` at `font_size`, if any: the shaper has then already
-/// computed the metrics this style needs. Only used at the font's default variation location,
-/// which covers the common non-variable-font case without re-resolving axes.
-fn shaped_run_metrics(
-    shaped_text: &ShapedText,
-    font: &FontInstance,
-    font_size: f32,
-    variations: &[crate::FontVariation],
-) -> Option<FontMetrics> {
-    if !variations.is_empty() || !font.synthesis.variation_settings().is_empty() {
-        return None;
-    }
-    let font_index = shaped_text.fonts().iter().position(|f| f == font)?;
-    let coords = shaped_text.normalized_coords();
-    shaped_text
-        .runs()
-        .iter()
-        .find(|run| {
-            run.font_index == font_index
-                && run.font_size.to_bits() == font_size.to_bits()
-                && coords[run.normalized_coords_range.clone()]
-                    .iter()
-                    .all(|c| c.to_bits() == 0)
-        })
-        .map(|run| run.font_metrics)
 }
 
 /// The line-height expanded box of a font at a resolved `line-height`: the font's content area

@@ -49,7 +49,7 @@ pub struct FontMetrics {
     /// Distance from the baseline to the top of the lowercase "x" or
     /// similar character.
     pub x_height: Option<f32>,
-    /// Advance of the U+0020 glyph, if available.
+    /// Advance of U+0020, if available. Not computed for shaped runs.
     pub space_advance: Option<f32>,
 }
 
@@ -95,24 +95,30 @@ impl FontMetrics {
                         .map(|v| (skrifa::Tag::new(&v.tag.to_bytes()), v.value)),
                 ),
         );
-        Some(Self::from_skrifa_metrics(
+        let mut metrics = Self::from_skrifa_metrics(
             &skrifa::metrics::Metrics::new(
                 &font_ref,
                 skrifa::prelude::Size::new(font_size),
                 &location,
             ),
-            &font_ref,
             font_size,
-            (&location).into(),
-        ))
+        );
+        metrics.space_advance = font_ref
+            .charmap()
+            .map(' ')
+            .filter(|glyph| glyph.to_u32() != 0)
+            .and_then(|glyph| {
+                skrifa::metrics::GlyphMetrics::new(
+                    &font_ref,
+                    skrifa::prelude::Size::new(font_size),
+                    &location,
+                )
+                .advance_width(glyph)
+            });
+        Some(metrics)
     }
 
-    fn from_skrifa_metrics(
-        metrics: &skrifa::metrics::Metrics,
-        font: &skrifa::FontRef<'_>,
-        font_size: f32,
-        location: skrifa::instance::LocationRef<'_>,
-    ) -> Self {
+    fn from_skrifa_metrics(metrics: &skrifa::metrics::Metrics, font_size: f32) -> Self {
         // Default values from HarfBuzz: https://github.com/harfbuzz/harfbuzz/blob/12ee77ee00514c442bcd28f9aa9d56b708c37382/src/hb-ot-metrics.cc#L355-L372
         let fallback_decoration_size = font_size / 18.0;
 
@@ -138,18 +144,7 @@ impl FontMetrics {
             strikethrough_size,
             x_height: metrics.x_height,
             cap_height: metrics.cap_height,
-            space_advance: font
-                .charmap()
-                .map(' ')
-                .filter(|glyph| glyph.to_u32() != 0)
-                .and_then(|glyph| {
-                    skrifa::metrics::GlyphMetrics::new(
-                        font,
-                        skrifa::prelude::Size::new(font_size),
-                        location,
-                    )
-                    .advance_width(glyph)
-                }),
+            space_advance: None,
         }
     }
 }
@@ -382,12 +377,7 @@ impl ShapedText {
             normalized_coords,
         );
         let units_per_em = metrics.units_per_em as f32;
-        let font_metrics = FontMetrics::from_skrifa_metrics(
-            &metrics,
-            &font_ref,
-            options.font_size,
-            normalized_coords.into(),
-        );
+        let font_metrics = FontMetrics::from_skrifa_metrics(&metrics, options.font_size);
 
         // `HarfRust` returns glyphs in visual order, so we need to process them as such while
         // maintaining logical ordering of clusters.

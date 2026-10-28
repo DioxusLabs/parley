@@ -513,18 +513,19 @@ fn build_into_layout<B: Brush>(
         );
     }
 
-    // After shaping, so that the metrics of fonts used for shaping can be reused.
     crate::layout::style_metrics::resolve_style_metrics(
         &lcx.rcx,
         fcx,
         &lcx.style_table,
-        &layout.data.shaped_text,
         options.quantize,
         &mut layout.data.style_metrics,
     );
 
-    if let Some(root) = layout.data.style_metrics.first() {
-        let root_space = root.space_advance;
+    if let (Some(root_metrics), Some(root_style)) =
+        (layout.data.style_metrics.first(), lcx.style_table.first())
+    {
+        let root_space =
+            root_metrics.space_advance + root_style.letter_spacing + root_style.word_spacing;
         for (style, layout_style) in lcx.style_table.iter().zip(&mut layout.data.styles) {
             if let crate::TabStopSize::Spaces(n) = style.tab_size.size {
                 layout_style.tab_size = (n * root_space).max(0.);

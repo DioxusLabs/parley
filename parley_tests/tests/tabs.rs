@@ -106,7 +106,7 @@ fn numeric_tab_size_in_span_uses_root_font() {
 }
 
 #[test]
-fn numeric_tab_size_matches_run_space_metrics_at_variable_location() {
+fn numeric_tab_size_matches_space_at_variable_location() {
     let mut env = TestEnv::new(test_name!(), None);
     let variations = [FontVariation {
         tag: Tag::new(b"wdth"),
@@ -126,7 +126,7 @@ fn numeric_tab_size_matches_run_space_metrics_at_variable_location() {
         space_layout.break_all_lines(None);
         let space = space_layout.full_width();
         let run = space_layout.get(0).unwrap().runs().next().unwrap();
-        nearly_eq(run.font_metrics().space_advance.unwrap(), space);
+        assert_eq!(run.font_metrics().space_advance, None);
 
         let text = "a\tb";
         let mut builder = env.ranged_builder(text);
