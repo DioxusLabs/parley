@@ -491,10 +491,23 @@ fn build_into_layout<B: Brush>(
 
     // Copy the visual styles into the layout. The root style is at index 0.
     let root_font_size = lcx.style_table.first().map_or(0., |style| style.font_size);
+    let root_space = if lcx
+        .style_table
+        .iter()
+        .any(|style| matches!(style.tab_size.size, crate::TabStopSize::Spaces(_)))
+    {
+        lcx.style_table.first().map_or(0., |root| {
+            super::shape::root_space_advance(&lcx.rcx, fcx, root).unwrap_or(0.5 * root.font_size)
+                + root.letter_spacing
+                + root.word_spacing
+        })
+    } else {
+        0.
+    };
     layout.data.styles.extend(
         lcx.style_table
             .iter()
-            .map(|s| s.as_layout_style(root_font_size)),
+            .map(|s| s.as_layout_style(root_font_size, root_space)),
     );
 
     {

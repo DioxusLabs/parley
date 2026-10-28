@@ -366,13 +366,14 @@ fn content_widths_tabs() {
     // Tabs advance at least half a space. The first tab reaches the first stop; "BB CC" then
     // ends between the second stop (minus half a space) and the third, so the second tab reaches
     // the third stop.
-    let tab_size = TabSize::new(tab_size).with_skip_threshold(space / 2.);
-    assert!(aa < tab_size.size);
-    assert!(bb_cc >= tab_size.size - space / 2. && bb_cc < 2. * tab_size.size - space / 2.);
+    assert!(aa < tab_size);
+    assert!(bb_cc >= tab_size - space / 2. && bb_cc < 2. * tab_size - space / 2.);
 
     let text = "AA\tBB CC\tDD";
     let mut builder = env.ranged_builder(text);
-    builder.push_default(StyleProperty::TabSize(tab_size));
+    builder.push_default(StyleProperty::TabSize(
+        TabSize::new(tab_size).with_skip_threshold(space / 2.),
+    ));
     let mut layout = builder.build(text);
     let widths = assert_content_widths_match_layout(&mut layout);
     let widest_word = ["AA", "BB", "CC", "DD"]
@@ -384,7 +385,7 @@ fn content_widths_tabs() {
         "Min content width {} should be the widest word {widest_word}, with the tabs hanging",
         widths.min
     );
-    let expected_max = 3. * tab_size.size + dd;
+    let expected_max = 3. * tab_size + dd;
     assert!(
         (widths.max - expected_max).abs() < 1e-3,
         "Max content width {} should reach the third stop then DD ({expected_max})",
@@ -395,7 +396,9 @@ fn content_widths_tabs() {
     // takes a full tab size.
     for text in ["AA\tBB", "\tAA BB", "AA\n\tBB"] {
         let mut builder = env.ranged_builder(text);
-        builder.push_default(StyleProperty::TabSize(tab_size));
+        builder.push_default(StyleProperty::TabSize(
+            TabSize::new(tab_size).with_skip_threshold(space / 2.),
+        ));
         let mut layout = builder.build(text);
         layout.set_text_indent(10., IndentOptions::default());
         assert_content_widths_match_layout(&mut layout);

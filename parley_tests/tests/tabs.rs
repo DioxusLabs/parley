@@ -8,8 +8,7 @@
 //! measurement, or an invariant of Parley's own. The snapshot tests carry most of the value; the
 //! numeric tests pin down one rule each.
 //!
-//! The tab size is a length. The tests express it as a multiple of the advance of a space, as CSS
-//! does, so that the expected positions can be read as "n spaces in".
+//! Length tab sizes are often expressed as multiples of the space advance for readability.
 
 use crate::test_name;
 use crate::util::{ColorBrush, TestEnv};
@@ -65,6 +64,53 @@ fn glyph_xs(layout: &Layout<ColorBrush>, line_index: usize) -> Vec<f32> {
                 .collect::<Vec<_>>()
         })
         .collect()
+}
+
+#[test]
+fn numeric_tab_size_uses_root_space_and_spacing() {
+    let mut env = TestEnv::new(test_name!(), None);
+    let space = advance(&mut env, " ");
+    let text = "a\tb";
+    for (letter, word) in [(0., 0.), (2., 0.), (0., 3.), (2., 3.)] {
+        let mut layouts = Vec::new();
+        for size in [
+            TabSize::spaces(8.),
+            TabSize::new(8. * (space + letter + word)),
+        ] {
+            let mut builder = env.ranged_builder(text);
+            builder.push_default(StyleProperty::LetterSpacing(letter));
+            builder.push_default(StyleProperty::WordSpacing(word));
+            builder.push_default(StyleProperty::TabSize(size));
+            let mut layout = builder.build(text);
+            layout.break_all_lines(None);
+            layouts.push(layout);
+        }
+        nearly_eq(glyph_xs(&layouts[0], 0)[1], glyph_xs(&layouts[1], 0)[1]);
+        nearly_eq(layouts[0].full_width(), layouts[1].full_width());
+    }
+}
+
+#[test]
+fn numeric_tab_size_in_span_uses_root_font() {
+    let mut env = TestEnv::new(test_name!(), None);
+    let space = advance(&mut env, " ");
+    let text = "a\tb";
+    let mut builder = env.ranged_builder(text);
+    builder.push(StyleProperty::FontSize(64.), 1..2);
+    builder.push(StyleProperty::TabSize(TabSize::spaces(8.)), 1..2);
+    let mut layout = builder.build(text);
+    layout.break_all_lines(None);
+    nearly_eq(glyph_xs(&layout, 0)[1], 8. * space);
+}
+
+#[test]
+fn nonpositive_numeric_tab_size_has_no_advance() {
+    let mut env = TestEnv::new(test_name!(), None);
+    let expected = advance(&mut env, "ab");
+    for n in [0., -2.] {
+        let layout = build(&mut env, "a\tb", TabSize::spaces(n));
+        nearly_eq(layout.full_width(), expected);
+    }
 }
 
 /// Guards against the tab's advance getting lost between the line breaker and the glyph

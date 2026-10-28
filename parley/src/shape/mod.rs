@@ -41,6 +41,65 @@ const OPTIONAL_LIGATURES_OFF: [FontFeature; 4] = [
     FontFeature::new(Tag::new(b"hlig"), 0),
 ];
 
+pub(crate) fn root_space_advance<B: Brush>(
+    rcx: &ResolveContext,
+    fcx: &mut FontContext,
+    root: &ResolvedStyle<B>,
+) -> Option<f32> {
+    let mut query = fcx.collection.query(&mut fcx.source_cache);
+    query.set_families(
+        rcx.stack(root.font_family)
+            .unwrap_or(&[])
+            .iter()
+            .copied()
+            .map(QueryFamily::Id),
+    );
+    query.set_attributes(fontique::Attributes {
+        width: root.font_width,
+        weight: root.font_weight,
+        style: root.font_style,
+    });
+    query.set_fallbacks(fontique::FallbackKey::new(
+        fontique::Script::from_bytes(*b"Zyyy"),
+        root.locale.as_ref(),
+    ));
+    let mut advance = None;
+    let mut query_yields_charmap = false;
+    query.matches_with(|font| {
+        let Some(charmap) = font.charmap() else {
+            return fontique::QueryStatus::Continue;
+        };
+        query_yields_charmap = true;
+        if !charmap.map(' ').is_some_and(|glyph| glyph != 0) {
+            return fontique::QueryStatus::Continue;
+        }
+        let font = FontInstanceRef {
+            data: &font.blob,
+            index: font.index,
+            synthesis: &font.synthesis,
+        };
+        advance = font.glyph_advance(
+            ' ',
+            root.font_size,
+            rcx.variations(root.font_variations).unwrap_or(&[]),
+        );
+        fontique::QueryStatus::Stop
+    });
+    if !query_yields_charmap && let Some(font) = any_font(&mut query) {
+        advance = FontInstanceRef {
+            data: &font.blob,
+            index: font.index,
+            synthesis: &font.synthesis,
+        }
+        .glyph_advance(
+            ' ',
+            root.font_size,
+            rcx.variations(root.font_variations).unwrap_or(&[]),
+        );
+    }
+    advance
+}
+
 pub(crate) fn shape_text<'a, B: Brush>(
     rcx: &'a ResolveContext,
     fcx: &'a mut FontContext,

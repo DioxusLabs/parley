@@ -167,3 +167,29 @@ fn tab_size_scales_like_other_lengths() {
         assert_eq!(layout.data.styles[0].tab_skip_threshold, 3. * scale);
     }
 }
+
+#[test]
+fn numeric_tab_size_falls_back_and_scales_once_without_fonts() {
+    let mut fcx = crate::FontContext {
+        collection: fontique::Collection::new(fontique::CollectionOptions {
+            shared: false,
+            system_fonts: false,
+        }),
+        source_cache: Default::default(),
+    };
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    for text in ["", "\t"] {
+        for scale in [1., 2.] {
+            let mut builder = lcx.ranged_builder(&mut fcx, text, scale, false);
+            builder.push_default(crate::StyleProperty::FontSize(20.));
+            builder.push_default(crate::StyleProperty::LetterSpacing(2.));
+            builder.push_default(crate::StyleProperty::WordSpacing(3.));
+            builder.push_default(crate::StyleProperty::TabSize(
+                crate::TabSize::spaces(4.).with_skip_threshold(3.),
+            ));
+            let layout = builder.build(text);
+            assert_eq!(layout.data.styles[0].tab_size, 4. * (10. + 2. + 3.) * scale);
+            assert_eq!(layout.data.styles[0].tab_skip_threshold, 3. * scale);
+        }
+    }
+}

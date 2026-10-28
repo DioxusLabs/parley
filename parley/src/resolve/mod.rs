@@ -17,7 +17,7 @@ use super::style::{
 use crate::font::FontContext;
 use crate::style::TextStyle;
 use crate::util::nearly_eq;
-use crate::{LineBreak, LineHeight, OverflowWrap, TabSize, VerticalAlign, layout};
+use crate::{LineBreak, LineHeight, OverflowWrap, TabSize, TabStopSize, VerticalAlign, layout};
 use crate::{TextWrapMode, WhiteSpaceCollapse, WordBreak};
 use core::borrow::Borrow;
 use core::ops::Range;
@@ -527,7 +527,7 @@ impl<B: Brush> ResolvedStyle<B> {
     /// The style as the layout sees it. `root_font_size` is the font size of the layout's root
     /// style, which the default skip threshold of a tab is relative to (see
     /// [`TabSize::skip_threshold`]).
-    pub(crate) fn as_layout_style(&self, root_font_size: f32) -> layout::Style<B> {
+    pub(crate) fn as_layout_style(&self, root_font_size: f32, root_space: f32) -> layout::Style<B> {
         layout::Style {
             parent: self.parent,
             brush: self.brush.clone(),
@@ -538,7 +538,10 @@ impl<B: Brush> ResolvedStyle<B> {
             overflow_wrap: self.overflow_wrap,
             text_wrap_mode: self.text_wrap_mode,
             white_space_collapse: self.white_space_collapse,
-            tab_size: self.tab_size.size,
+            tab_size: match self.tab_size.size {
+                TabStopSize::Length(length) => length,
+                TabStopSize::Spaces(n) => (n * root_space).max(0.),
+            },
             tab_skip_threshold: self.tab_size.skip_threshold.unwrap_or(0.5 * root_font_size),
             locale: self.locale,
         }
