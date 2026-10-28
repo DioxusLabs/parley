@@ -121,15 +121,21 @@ impl Spacing {
     /// [tab-size]: https://www.w3.org/TR/css-text-4/#tab-size-property
     #[inline(always)]
     pub(crate) fn gaps(self, whitespace: Whitespace, is_default_ignorable: bool) -> Gaps {
-        if whitespace == Whitespace::Tab {
-            return Gaps::ZERO;
-        }
-        self.gaps_no_tab(whitespace, is_default_ignorable)
+        self.gaps_with_tabs::<true>(whitespace, is_default_ignorable)
     }
 
     #[inline(always)]
     pub(crate) fn gaps_no_tab(self, whitespace: Whitespace, is_default_ignorable: bool) -> Gaps {
-        if whitespace == Whitespace::Newline {
+        self.gaps_with_tabs::<false>(whitespace, is_default_ignorable)
+    }
+
+    #[inline(always)]
+    pub(crate) fn gaps_with_tabs<const TABS: bool>(
+        self,
+        whitespace: Whitespace,
+        is_default_ignorable: bool,
+    ) -> Gaps {
+        if whitespace == Whitespace::Newline || (TABS && whitespace == Whitespace::Tab) {
             return Gaps::ZERO;
         }
 

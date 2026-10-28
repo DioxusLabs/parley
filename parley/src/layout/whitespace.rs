@@ -59,15 +59,26 @@ impl WhiteSpaceCollapse {
 // https://github.com/linebender/parley/pull/762#discussion_r3923722770.
 #[inline(always)]
 pub(crate) fn whitespace_hangs<B: Brush>(whitespace: Whitespace, style: &Style<B>) -> bool {
+    whitespace_hangs_with_tabs::<B, true>(whitespace, style)
+}
+
+#[inline(always)]
+pub(crate) fn whitespace_hangs_with_tabs<B: Brush, const TABS: bool>(
+    whitespace: Whitespace,
+    style: &Style<B>,
+) -> bool {
     match whitespace {
         Whitespace::Newline => true,
-        Whitespace::Space | Whitespace::IdeographicSpace | Whitespace::Tab => {
-            match style.white_space_collapse {
-                WhiteSpaceCollapse::BreakSpaces => false,
-                WhiteSpaceCollapse::Preserve => style.text_wrap_mode == TextWrapMode::Wrap,
-                _ => true,
-            }
-        }
+        Whitespace::Space | Whitespace::IdeographicSpace => match style.white_space_collapse {
+            WhiteSpaceCollapse::BreakSpaces => false,
+            WhiteSpaceCollapse::Preserve => style.text_wrap_mode == TextWrapMode::Wrap,
+            _ => true,
+        },
+        Whitespace::Tab if TABS => match style.white_space_collapse {
+            WhiteSpaceCollapse::BreakSpaces => false,
+            WhiteSpaceCollapse::Preserve => style.text_wrap_mode == TextWrapMode::Wrap,
+            _ => true,
+        },
         _ => false,
     }
 }

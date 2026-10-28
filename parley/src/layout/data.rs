@@ -5,7 +5,7 @@ use crate::inline_box::LayoutInlineBox;
 use crate::layout::spacing::{Justification, Spacing};
 use crate::layout::style_metrics::{BoxMetrics, StyleMetrics, inline_box_placement};
 use crate::layout::tab::tab_advance;
-use crate::layout::whitespace::whitespace_hangs;
+use crate::layout::whitespace::whitespace_hangs_with_tabs;
 use crate::layout::{ContentWidths, LineMetrics, Style};
 use crate::resolve::ResolvedStyle;
 use crate::style::Brush;
@@ -471,10 +471,6 @@ struct ContentWidthsMeasurer {
     /// whitespace.
     running_hanging: f32,
 
-    /// The max-content hanging advance minus the min-content hanging advance. Only tabs make them
-    /// differ, as a tab's advance depends on its position on the line.
-    running_max_hanging_extra: f32,
-
     /// Whether that running whitespace hangs conditionally before a forced break (following CSS
     /// Text 4 § 4.3.2, that's the case for `WhiteSpaceCollapse::Preserve`). Conditionally hanging
     /// whitespace only hangs if it doesn't fit, which here means it counts towards the max-content
@@ -498,7 +494,6 @@ impl ContentWidthsMeasurer {
             running_min_width: first_line_indent,
             running_max_width: first_line_indent,
             running_hanging: 0.,
-            running_max_hanging_extra: 0.,
             hangs_conditionally: false,
             text_wrap_mode: TextWrapMode::Wrap,
             soft_indent: indent_options.indent_following_soft_wrap_break(indent_amount),
@@ -531,16 +526,16 @@ impl ContentWidthsMeasurer {
     ///
     /// [css-inline-formatting]: https://www.w3.org/TR/CSS22/visuren.html#inline-formatting
     #[inline(always)]
-    fn hard_break(&mut self) {
+    fn hard_break(&mut self, running_max_hanging_extra: &mut f32) {
         self.min_width = self
             .min_width
             .max(self.running_min_width - self.running_hanging);
         if !self.hangs_conditionally {
-            self.running_max_width -= self.running_hanging + self.running_max_hanging_extra;
+            self.running_max_width -= self.running_hanging + *running_max_hanging_extra;
         }
         self.max_width = self.max_width.max(self.running_max_width);
         self.running_hanging = 0.0;
-        self.running_max_hanging_extra = 0.0;
+        *running_max_hanging_extra = 0.0;
         self.line_has_content = false;
         self.running_min_width = self.hard_indent;
         self.running_max_width = self.hard_indent;
@@ -548,6 +543,7 @@ impl ContentWidthsMeasurer {
 
     #[inline(always)]
     fn measure<B: Brush>(mut self, layout_data: &LayoutData<B>) -> ContentWidths {
+        let mut running_max_hanging_extra = 0.;
         for item in &layout_data.items {
             match item.kind {
                 LayoutItemKind::TextRun => {
@@ -563,6 +559,7 @@ impl ContentWidthsMeasurer {
                     let styles = &layout_data.styles;
                     match (run_spacing.is_zero(), layout_data.runs[item.index].has_tabs) {
                         (true, false) => self.measure_text_run::<B, false, false>(
+                            &mut running_max_hanging_extra,
                             styles,
                             slice,
                             run_spacing,
@@ -570,6 +567,7 @@ impl ContentWidthsMeasurer {
                             is_rtl,
                         ),
                         (false, false) => self.measure_text_run::<B, true, false>(
+                            &mut running_max_hanging_extra,
                             styles,
                             slice,
                             run_spacing,
@@ -577,6 +575,7 @@ impl ContentWidthsMeasurer {
                             is_rtl,
                         ),
                         (true, true) => self.measure_text_run::<B, false, true>(
+                            &mut running_max_hanging_extra,
                             styles,
                             slice,
                             run_spacing,
@@ -584,6 +583,7 @@ impl ContentWidthsMeasurer {
                             is_rtl,
                         ),
                         (false, true) => self.measure_text_run::<B, true, true>(
+                            &mut running_max_hanging_extra,
                             styles,
                             slice,
                             run_spacing,
@@ -600,7 +600,7 @@ impl ContentWidthsMeasurer {
         // The end of a layout is considered to be a forced line break as per CSS Text 4 § 5, so
         // whitespace can hang conditionally.
         if self.line_has_content {
-            self.hard_break();
+            self.hard_break(&mut running_max_hanging_extra);
         }
 
         // Negative-width inline boxes (e.g. negative margins) can make the max-content width
@@ -644,6 +644,7 @@ impl ContentWidthsMeasurer {
     #[inline(always)]
     fn measure_text_run<B: Brush, const SPACED: bool, const TABS: bool>(
         &mut self,
+        running_max_hanging_extra: &mut f32,
         styles: &[Style<B>],
         slice: ShapedSlice<'_>,
         spacing: Spacing,
@@ -657,6 +658,7 @@ impl ContentWidthsMeasurer {
         // The spacing gap of the current atom.
         let mut gap = 0.;
         let mut skip_atom = false;
+        let mut extra_reset = false;
         for (i, cluster) in clusters.iter().enumerate() {
             let whitespace = cluster.whitespace();
             let style = &styles[cluster.style_index as usize];
@@ -674,14 +676,18 @@ impl ContentWidthsMeasurer {
                 // `Whitespace::Newline` are forced breaks. Note newlines have no advance.
                 if whitespace == Whitespace::Newline {
                     // Newlines hang, so whitespace before them keeps hanging.
-                    self.hard_break();
+                    if !TABS && extra_reset {
+                        *running_max_hanging_extra = 0.;
+                        extra_reset = false;
+                    }
+                    self.hard_break(running_max_hanging_extra);
                     empty_at = i + 1;
                     skip_atom = true;
                     continue;
                 }
                 if SPACED {
                     gap = spacing
-                        .gaps(whitespace, cluster.is_default_ignorable())
+                        .gaps_with_tabs::<TABS>(whitespace, cluster.is_default_ignorable())
                         .after;
                 }
             } else if skip_atom {
@@ -709,31 +715,44 @@ impl ContentWidthsMeasurer {
                 }
             }
             self.running_min_width += advance;
-            self.running_max_width += advance + max_extra;
+            if TABS {
+                self.running_max_width += advance + max_extra;
+            } else {
+                self.running_max_width += advance;
+            }
 
             // A cluster hangs if all of its characters hang. Its first character is checked via the
             // cached flags so the common case never touches `characters`.
             let hangs = can_hang
-                && whitespace_hangs(whitespace, style)
+                && whitespace_hangs_with_tabs::<B, TABS>(whitespace, style)
                 && (cluster.char_len() == 1
                     || slice
                         .characters_in(cluster.chars_range())
                         .iter()
                         .all(|character| {
-                            whitespace_hangs(
+                            whitespace_hangs_with_tabs::<B, TABS>(
                                 character.whitespace,
                                 &styles[character.style_index as usize],
                             )
                         }));
             if hangs {
                 self.running_hanging += advance;
-                self.running_max_hanging_extra += max_extra;
+                if TABS {
+                    *running_max_hanging_extra += max_extra;
+                }
                 self.hangs_conditionally =
                     style.white_space_collapse == WhiteSpaceCollapse::Preserve;
             } else {
                 self.running_hanging = 0.0;
-                self.running_max_hanging_extra = 0.0;
+                if TABS {
+                    *running_max_hanging_extra = 0.0;
+                } else {
+                    extra_reset = true;
+                }
             }
+        }
+        if !TABS && extra_reset {
+            *running_max_hanging_extra = 0.;
         }
         self.line_has_content = empty_at != clusters.len();
     }
