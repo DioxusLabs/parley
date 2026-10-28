@@ -8,7 +8,7 @@ use super::utils::fonts::{FONT_FAMILY_LIST, create_font_context};
 use crate::layout::style_metrics::StyleMetrics;
 use crate::{
     AlignmentBaseline, BaselineShift, FontFamily, InlineBox, InlineBoxKind, Layout, LayoutContext,
-    LineHeight, StyleProperty, TextStyle, VerticalAlign,
+    LineHeight, StyleProperty, TabSize, TextStyle, VerticalAlign,
 };
 
 fn root_style() -> TextStyle<'static, 'static, ColorBrush> {
@@ -65,11 +65,36 @@ fn one_metrics_entry_per_style() {
 
 #[test]
 fn space_advance_uses_each_styles_font_size() {
-    let layout = build();
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let root = TextStyle {
+        tab_size: TabSize::spaces(8.),
+        ..root_style()
+    };
+    let mut builder = lcx.tree_builder(&mut fcx, 1., false, &root);
+    builder.push_text("root ");
+    builder.push_style_span(TextStyle {
+        font_size: 40.,
+        ..root_style()
+    });
+    builder.push_style_span(TextStyle {
+        font_size: 10.,
+        ..root_style()
+    });
+    builder.push_text("B");
+    builder.pop_style_span();
+    builder.pop_style_span();
+    let (layout, _) = builder.build();
     let m = metrics(&layout);
     assert!(m[0].space_advance > 0.);
     assert!((m[1].space_advance - 2. * m[0].space_advance).abs() < 1e-4);
     assert!((m[2].space_advance - 0.5 * m[0].space_advance).abs() < 1e-4);
+}
+
+#[test]
+fn space_advance_is_not_measured_without_numeric_tabs() {
+    let layout = build();
+    assert!(metrics(&layout).iter().all(|m| m.space_advance == 0.));
 }
 
 #[test]

@@ -98,6 +98,7 @@ pub(crate) struct StyleMetrics {
     /// The style's font size, against which `sub`/`super` of children are resolved.
     pub(crate) font_size: f32,
     /// Space advance without spacing, or half the font size if unavailable.
+    /// Zero when no style uses numeric tab sizes.
     pub(crate) space_advance: f32,
 }
 
@@ -118,6 +119,9 @@ pub(crate) fn resolve_style_metrics<B: Brush>(
 
     let mut query = fcx.collection.query(&mut fcx.source_cache);
     let mut cached_space_glyph = None;
+    let measure_space = styles
+        .iter()
+        .any(|style| matches!(style.tab_size.size, crate::TabStopSize::Spaces(_)));
 
     for (index, style) in styles.iter().enumerate() {
         let font = first_available_font(&mut query, rcx, style);
@@ -137,12 +141,14 @@ pub(crate) fn resolve_style_metrics<B: Brush>(
         let mut metrics = StyleMetrics::from_font(&font_metrics, line_height, quantize);
         metrics.font_size = style.font_size;
 
-        metrics.space_advance = font
-            .as_ref()
-            .and_then(|font| {
-                space_advance(font, style.font_size, variations, &mut cached_space_glyph)
-            })
-            .unwrap_or(0.5 * style.font_size);
+        if measure_space {
+            metrics.space_advance = font
+                .as_ref()
+                .and_then(|font| {
+                    space_advance(font, style.font_size, variations, &mut cached_space_glyph)
+                })
+                .unwrap_or(0.5 * style.font_size);
+        }
 
         if index == 0 {
             // The root span box (the strut).
