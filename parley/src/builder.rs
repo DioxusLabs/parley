@@ -353,8 +353,8 @@ impl<'b, B: Brush> StyleRunBuilder<'b, B> {
 pub struct TreeBuilder<'a, B: Brush> {
     /// The style run builder that the tree's styles, runs and inline boxes are pushed to.
     pub(crate) sink: StyleRunBuilder<'a, B>,
-    /// Taken from the [`LayoutContext`] while building, and returned to it when dropped.
-    pub(crate) tree: TreeStyleBuilder<B>,
+    /// The caller's reusable tree state.
+    pub(crate) tree: &'a mut TreeStyleBuilder<B>,
 }
 
 impl<'b, B: Brush> TreeBuilder<'b, B> {
@@ -463,12 +463,6 @@ impl<'b, B: Brush> TreeBuilder<'b, B> {
         let mut layout = Layout::default();
         let text = self.build_into(&mut layout);
         (layout, text)
-    }
-}
-
-impl<B: Brush> Drop for TreeBuilder<'_, B> {
-    fn drop(&mut self) {
-        self.sink.lcx.tree_style_builder = core::mem::take(&mut self.tree);
     }
 }
 

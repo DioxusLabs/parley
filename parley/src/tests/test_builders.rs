@@ -16,8 +16,8 @@ use super::utils::{
 use crate::{
     BaseDirection, BreakReason, FontContext, FontFamily, FontFeatures, FontVariations, InlineBox,
     InlineBoxKind, Layout, LayoutContext, LineBreak, LineHeight, OverflowWrap, RangedBuilder,
-    StyleProperty, StyleRunBuilder, TextStyle, TextWrapMode, TreeBuilder, VerticalAlign,
-    WhiteSpaceCollapse, WordBreak,
+    StyleProperty, StyleRunBuilder, TextStyle, TextWrapMode, TreeBuilder, TreeStyleBuilder,
+    VerticalAlign, WhiteSpaceCollapse, WordBreak,
 };
 
 /// Set of options for [`build_layout_with_ranged`].
@@ -57,7 +57,14 @@ fn build_layout_with_tree(
     opts: &TreeOptions<'_, '_>,
     with_builder: impl Fn(&mut TreeBuilder<'_, ColorBrush>),
 ) -> Layout<ColorBrush> {
-    let mut tb = lcx.tree_builder(fcx, opts.scale, opts.quantize, opts.root_style);
+    let mut tree_style_builder = TreeStyleBuilder::default();
+    let mut tb = lcx.tree_builder(
+        fcx,
+        &mut tree_style_builder,
+        opts.scale,
+        opts.quantize,
+        opts.root_style,
+    );
     with_builder(&mut tb);
     let (mut layout, _) = tb.build();
     layout.break_all_lines(opts.max_advance);
@@ -103,7 +110,8 @@ fn builders_apply_base_direction() {
         font_family: FontFamily::from(FONT_FAMILY_LIST),
         ..TextStyle::default()
     };
-    let mut tree = lcx.tree_builder(&mut fcx, 1.0, true, &root_style);
+    let mut tree_style_builder = TreeStyleBuilder::default();
+    let mut tree = lcx.tree_builder(&mut fcx, &mut tree_style_builder, 1.0, true, &root_style);
     tree.set_base_direction(BaseDirection::Rtl);
     tree.push_text(text);
     let (mut tree_layout, _) = tree.build();
@@ -653,7 +661,8 @@ fn builders_empty_text_after_styled_layout_reuses_context() {
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
 
     let root = TextStyle::default();
-    let mut builder = lcx.tree_builder(&mut fcx, 1.0, true, &root);
+    let mut tree_style_builder = TreeStyleBuilder::default();
+    let mut builder = lcx.tree_builder(&mut fcx, &mut tree_style_builder, 1.0, true, &root);
     builder.push_style_span(TextStyle {
         font_size: 20.,
         ..Default::default()

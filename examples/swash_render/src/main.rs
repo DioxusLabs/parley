@@ -84,8 +84,14 @@ fn main() {
             ..TextStyle::default()
         };
 
-        let mut builder =
-            layout_cx.tree_builder(&mut font_cx, display_scale, quantize, &root_style);
+        let mut tree_style_builder = parley::TreeStyleBuilder::default();
+        let mut builder = layout_cx.tree_builder(
+            &mut font_cx,
+            &mut tree_style_builder,
+            display_scale,
+            quantize,
+            &root_style,
+        );
 
         builder.push_style_modification_span(&[bold_style]);
         builder.push_text(&text[0..5]);

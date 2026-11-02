@@ -12,7 +12,7 @@ use fontique::{Blob, Collection, CollectionOptions, SourceCache};
 use parley::{
     BoundingBox, FontContext, FontFamily, FontFamilyName, Layout, LayoutContext, LineHeight,
     PlainEditor, PlainEditorDriver, PositionedLayoutItem, RangedBuilder, StyleProperty, TextStyle,
-    TreeBuilder,
+    TreeBuilder, TreeStyleBuilder,
 };
 use peniko::{Color, kurbo::Size};
 use vello_cpu::Pixmap;
@@ -45,6 +45,7 @@ pub(crate) struct TestEnv {
     check_counter: u32,
     font_cx: FontContext,
     layout_cx: LayoutContext<ColorBrush>,
+    tree_style_builder: TreeStyleBuilder<ColorBrush>,
     text_color: Color,
     rendering_config: RenderingConfig,
     cursor_size: f32,
@@ -132,6 +133,7 @@ impl TestEnv {
             check_counter: 0,
             font_cx: create_font_context(),
             layout_cx: LayoutContext::new(),
+            tree_style_builder: TreeStyleBuilder::default(),
             text_color: Color::BLACK,
             rendering_config: RenderingConfig {
                 background_color: Color::WHITE,
@@ -196,9 +198,13 @@ impl TestEnv {
 
     pub(crate) fn tree_builder(&mut self) -> TreeBuilder<'_, ColorBrush> {
         let default_style = self.default_style();
-        let mut builder =
-            self.layout_cx
-                .tree_builder(&mut self.font_cx, 1.0, true, &TextStyle::default());
+        let mut builder = self.layout_cx.tree_builder(
+            &mut self.font_cx,
+            &mut self.tree_style_builder,
+            1.0,
+            true,
+            &TextStyle::default(),
+        );
         builder.push_style_modification_span(&default_style);
         builder
     }
