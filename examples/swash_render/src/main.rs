@@ -154,7 +154,14 @@ fn main() {
         );
 
         // Creates a RangedBuilder
-        let mut builder = layout_cx.ranged_builder(&mut font_cx, &text, display_scale, quantize);
+        let mut ranged_style_builder = parley::RangedStyleBuilder::default();
+        let mut builder = layout_cx.ranged_builder(
+            &mut font_cx,
+            &mut ranged_style_builder,
+            &text,
+            display_scale,
+            quantize,
+        );
 
         // Set default text colour styles (set foreground text color)
         builder.push_default(brush_style);

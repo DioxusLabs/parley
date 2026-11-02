@@ -15,7 +15,10 @@ use core::{
 use crate::editing::{Cursor, Selection};
 use crate::layout::{Affinity, Alignment, AlignmentOptions, Layout};
 use crate::style::Brush;
-use crate::{BaseDirection, BoundingBox, FontContext, LayoutContext, StyleProperty, StyleSet};
+use crate::{
+    BaseDirection, BoundingBox, FontContext, LayoutContext, RangedStyleBuilder, StyleProperty,
+    StyleSet,
+};
 
 /// Opaque representation of a generation.
 ///
@@ -107,6 +110,7 @@ where
     // Not all operations on `PlainEditor` need to operate on a
     // clean layout, and not all operations trigger a layout.
     layout_dirty: bool,
+    ranged_style_builder: RangedStyleBuilder<T>,
     // TODO: We could avoid redoing the full text layout if only
     // linebreaking or alignment were changed.
     // linebreak_dirty: bool,
@@ -134,6 +138,7 @@ where
             scale: 1.0,
             quantize: true,
             layout_dirty: true,
+            ranged_style_builder: RangedStyleBuilder::default(),
             alignment: Alignment::Start,
             base_direction: BaseDirection::Auto,
             // We don't use the `default` value to start with, as our consumers
@@ -1197,8 +1202,13 @@ where
     }
     /// Update the layout.
     fn update_layout(&mut self, font_cx: &mut FontContext, layout_cx: &mut LayoutContext<T>) {
-        let mut builder =
-            layout_cx.ranged_builder(font_cx, &self.buffer, self.scale, self.quantize);
+        let mut builder = layout_cx.ranged_builder(
+            font_cx,
+            &mut self.ranged_style_builder,
+            &self.buffer,
+            self.scale,
+            self.quantize,
+        );
         builder.set_base_direction(self.base_direction);
         for prop in self.default_style.inner().values() {
             builder.push_default(prop.to_owned());

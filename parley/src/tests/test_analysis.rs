@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use crate::{
-    FontContext, Language, LayoutContext, LineBreak, RangedBuilder, StyleProperty,
-    WhiteSpaceCollapse, WordBreak,
+    FontContext, Language, LayoutContext, LineBreak, RangedBuilder, RangedStyleBuilder,
+    StyleProperty, WhiteSpaceCollapse, WordBreak,
 };
 use alloc::{vec, vec::Vec};
 use fontique::FontWeight;
@@ -17,6 +17,7 @@ const HAS_DICTIONARIES: bool = cfg!(feature = "complex-scripts");
 struct TestContext {
     pub layout_context: LayoutContext,
     pub font_context: FontContext,
+    pub ranged_style_builder: RangedStyleBuilder<[u8; 4]>,
 }
 
 impl TestContext {
@@ -139,6 +140,7 @@ fn verify_analysis(
     {
         let mut builder = test_context.layout_context.ranged_builder(
             &mut test_context.font_context,
+            &mut test_context.ranged_style_builder,
             text,
             1.,
             true,
@@ -162,6 +164,7 @@ fn verify_analysis_with_override(
     {
         let mut builder = test_context.layout_context.ranged_builder(
             &mut test_context.font_context,
+            &mut test_context.ranged_style_builder,
             text,
             1.,
             true,
@@ -1219,6 +1222,7 @@ fn test_line_break_override_applies_under_anywhere() {
         let text = "a b/c";
         let mut builder = test_context.layout_context.ranged_builder(
             &mut test_context.font_context,
+            &mut test_context.ranged_style_builder,
             text,
             1.,
             true,

@@ -49,8 +49,8 @@ impl BuilderOptions<'_> {
 pub struct RangedBuilder<'a, B: Brush> {
     /// The style run builder that the resolved styles, runs and inline boxes are pushed to.
     pub(crate) sink: StyleRunBuilder<'a, B>,
-    /// Taken from the [`LayoutContext`] while building, and returned to it when dropped.
-    pub(crate) ranged: RangedStyleBuilder<B>,
+    /// The caller's reusable ranged state.
+    pub(crate) ranged: &'a mut RangedStyleBuilder<B>,
 }
 
 impl<'b, B: Brush> RangedBuilder<'b, B> {
@@ -117,12 +117,6 @@ impl<'b, B: Brush> RangedBuilder<'b, B> {
         let mut layout = Layout::default();
         self.build_into(&mut layout, text);
         layout
-    }
-}
-
-impl<B: Brush> Drop for RangedBuilder<'_, B> {
-    fn drop(&mut self) {
-        self.sink.lcx.ranged_style_builder = core::mem::take(&mut self.ranged);
     }
 }
 
