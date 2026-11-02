@@ -30,9 +30,14 @@ pub fn defaults() -> Vec<Benchmark> {
                 |b| {
                     b.iter(|| {
                         let text = &sample.text;
-                        with_contexts(|font_cx, layout_cx| {
-                            let mut builder =
-                                layout_cx.ranged_builder(font_cx, text, DISPLAY_SCALE, QUANTIZE);
+                        with_contexts(|font_cx, layout_cx, ranged_style_builder| {
+                            let mut builder = layout_cx.ranged_builder(
+                                font_cx,
+                                ranged_style_builder,
+                                text,
+                                DISPLAY_SCALE,
+                                QUANTIZE,
+                            );
                             builder.push_default(FontFamily::from(FONT_FAMILY_LIST));
 
                             let mut layout: Layout<ColorBrush> = builder.build(text);
@@ -69,9 +74,14 @@ pub fn spacing() -> Vec<Benchmark> {
                 |b| {
                     b.iter(|| {
                         let text = &sample.text;
-                        with_contexts(|font_cx, layout_cx| {
-                            let mut builder =
-                                layout_cx.ranged_builder(font_cx, text, DISPLAY_SCALE, QUANTIZE);
+                        with_contexts(|font_cx, layout_cx, ranged_style_builder| {
+                            let mut builder = layout_cx.ranged_builder(
+                                font_cx,
+                                ranged_style_builder,
+                                text,
+                                DISPLAY_SCALE,
+                                QUANTIZE,
+                            );
                             builder.push_default(FontFamily::from(FONT_FAMILY_LIST));
                             builder.push_default(StyleProperty::WordSpacing(WORD_SPACING));
                             builder.push_default(StyleProperty::LetterSpacing(LETTER_SPACING));
@@ -107,8 +117,14 @@ pub fn repeated_justification() -> [Benchmark; 1] {
         ),
         move |b| {
             let text = &sample.text;
-            let mut layout = with_contexts(|font_cx, layout_cx| {
-                let mut builder = layout_cx.ranged_builder(font_cx, text, DISPLAY_SCALE, QUANTIZE);
+            let mut layout = with_contexts(|font_cx, layout_cx, ranged_style_builder| {
+                let mut builder = layout_cx.ranged_builder(
+                    font_cx,
+                    ranged_style_builder,
+                    text,
+                    DISPLAY_SCALE,
+                    QUANTIZE,
+                );
                 builder.push_default(FontFamily::from(FONT_FAMILY_LIST));
 
                 let mut layout: Layout<ColorBrush> = builder.build(text);
@@ -473,8 +489,9 @@ pub(crate) fn build_layout<'a>(
     const DISPLAY_SCALE: f32 = 1.0;
     const QUANTIZE: bool = true;
 
-    with_contexts(|font_cx, layout_cx| {
-        let mut builder = layout_cx.ranged_builder(font_cx, text, DISPLAY_SCALE, QUANTIZE);
+    with_contexts(|font_cx, layout_cx, ranged_style_builder| {
+        let mut builder =
+            layout_cx.ranged_builder(font_cx, ranged_style_builder, text, DISPLAY_SCALE, QUANTIZE);
         builder.push_default(FontFamily::from(FONT_FAMILY_LIST));
         for (style, range) in styles {
             builder.push(style, range);
@@ -557,8 +574,14 @@ pub fn long_line() -> Vec<Benchmark> {
     const QUANTIZE: bool = true;
 
     fn layout_long_line(text: &str, max_advance: Option<f32>, alignment: Alignment) {
-        with_contexts(|font_cx, layout_cx| {
-            let mut builder = layout_cx.ranged_builder(font_cx, text, DISPLAY_SCALE, QUANTIZE);
+        with_contexts(|font_cx, layout_cx, ranged_style_builder| {
+            let mut builder = layout_cx.ranged_builder(
+                font_cx,
+                ranged_style_builder,
+                text,
+                DISPLAY_SCALE,
+                QUANTIZE,
+            );
             builder.push_default(FontFamily::from(FONT_FAMILY_LIST));
 
             let mut layout: Layout<ColorBrush> = builder.build(text);

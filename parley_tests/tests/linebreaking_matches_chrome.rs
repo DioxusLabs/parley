@@ -94,6 +94,8 @@ fn check_font(font_family: &str, expected_residuals: u64) {
 
     let mut layout_cx = LayoutContext::<()>::new();
 
+    let mut ranged_style_builder = parley::RangedStyleBuilder::default();
+
     let mut failures = 0_u64;
     let mut residuals = 0_u64;
     let mut report = String::new();
@@ -105,7 +107,13 @@ fn check_font(font_family: &str, expected_residuals: u64) {
             "This code is not written to be robust against non-ASCII text, primarily to the DOM's use of UTF-16."
         );
 
-        let mut builder = layout_cx.ranged_builder(&mut font_cx, &case.text, 1.0, false);
+        let mut builder = layout_cx.ranged_builder(
+            &mut font_cx,
+            &mut ranged_style_builder,
+            &case.text,
+            1.0,
+            false,
+        );
         builder.set_line_break_override(Some(CHROMIUM_LINE_BREAK_OVERRIDE));
         builder.push_default(FontFamily::named(font.family));
         builder.push_default(StyleProperty::FontSize(chromium_quantized_font_size(

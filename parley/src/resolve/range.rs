@@ -10,14 +10,22 @@ use crate::builder::StyleRunBuilder;
 use crate::util::resolve_range;
 use core::ops::RangeBounds;
 
-/// Builder for constructing an ordered sequence of non-overlapping ranged
-/// styles from a collection of ranged style properties.
+/// The reusable state of a [`RangedBuilder`](crate::RangedBuilder): the properties pushed so
+/// far and the styles they resolve to. Pass one to
+/// [`LayoutContext::ranged_builder`](crate::LayoutContext::ranged_builder); keeping it across
+/// layouts reuses its allocations.
 #[derive(Clone)]
-pub(crate) struct RangedStyleBuilder<B: Brush> {
+pub struct RangedStyleBuilder<B: Brush> {
     properties: Vec<RangedProperty<B>>,
     scratch_styles: Vec<RangedStyle<B>>,
     root_style: ResolvedStyle<B>,
     len: usize,
+}
+
+impl<B: Brush> core::fmt::Debug for RangedStyleBuilder<B> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("RangedStyleBuilder").finish_non_exhaustive()
+    }
 }
 
 impl<B: Brush> Default for RangedStyleBuilder<B> {

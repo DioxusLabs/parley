@@ -8,7 +8,7 @@ use super::utils::fonts::{FONT_FAMILY_LIST, create_font_context};
 use crate::layout::style_metrics::StyleMetrics;
 use crate::{
     AlignmentBaseline, BaselineShift, FontFamily, InlineBox, InlineBoxKind, Layout, LayoutContext,
-    LineHeight, StyleProperty, TextStyle, VerticalAlign,
+    LineHeight, StyleProperty, TextStyle, TreeStyleBuilder, VerticalAlign,
 };
 
 fn root_style() -> TextStyle<'static, 'static, ColorBrush> {
@@ -26,7 +26,8 @@ fn build() -> Layout<ColorBrush> {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
     let root = root_style();
-    let mut builder = lcx.tree_builder(&mut fcx, 1., false, &root);
+    let mut tree_style_builder = TreeStyleBuilder::default();
+    let mut builder = lcx.tree_builder(&mut fcx, &mut tree_style_builder, 1., false, &root);
     builder.push_text("root ");
     builder.push_style_span(TextStyle {
         font_size: 40.,
@@ -114,7 +115,8 @@ fn text_top_middle_and_text_bottom() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
     let root = root_style();
-    let mut builder = lcx.tree_builder(&mut fcx, 1., false, &root);
+    let mut tree_style_builder = TreeStyleBuilder::default();
+    let mut builder = lcx.tree_builder(&mut fcx, &mut tree_style_builder, 1., false, &root);
     for align in [
         VerticalAlign::TEXT_TOP,
         VerticalAlign::MIDDLE,
@@ -147,7 +149,8 @@ fn alignment_baseline_and_baseline_shift_compose() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
     let root = root_style();
-    let mut builder = lcx.tree_builder(&mut fcx, 1., false, &root);
+    let mut tree_style_builder = TreeStyleBuilder::default();
+    let mut builder = lcx.tree_builder(&mut fcx, &mut tree_style_builder, 1., false, &root);
     for align in [
         VerticalAlign::TEXT_TOP,
         VerticalAlign::new(AlignmentBaseline::TextTop, BaselineShift::Length(-4.)),
@@ -177,7 +180,8 @@ fn trailing_line_after_newline_keeps_newline_style() {
         line_height: LineHeight::Absolute(10.),
         ..root_style()
     };
-    let mut builder = lcx.tree_builder(&mut fcx, 1., false, &root);
+    let mut tree_style_builder = TreeStyleBuilder::default();
+    let mut builder = lcx.tree_builder(&mut fcx, &mut tree_style_builder, 1., false, &root);
     builder.push_style_span(TextStyle {
         font_size: 40.,
         line_height: LineHeight::Absolute(40.),
@@ -202,7 +206,8 @@ fn quantized_shifted_baselines_are_whole_pixels() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
     let root = root_style();
-    let mut builder = lcx.tree_builder(&mut fcx, 1., true, &root);
+    let mut tree_style_builder = TreeStyleBuilder::default();
+    let mut builder = lcx.tree_builder(&mut fcx, &mut tree_style_builder, 1., true, &root);
     builder.push_text("a");
     for align in [
         VerticalAlign::length(0.5),
@@ -248,7 +253,8 @@ fn quantization_does_not_compound_along_ancestors() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
     let root = root_style();
-    let mut builder = lcx.tree_builder(&mut fcx, 1., true, &root);
+    let mut tree_style_builder = TreeStyleBuilder::default();
+    let mut builder = lcx.tree_builder(&mut fcx, &mut tree_style_builder, 1., true, &root);
     builder.push_text("a");
     for _ in 0..3 {
         builder.push_style_span(TextStyle {
@@ -281,7 +287,8 @@ fn quantized_metrics_are_whole_pixels() {
         line_height: LineHeight::MetricsRelative(1.),
         ..root_style()
     };
-    let mut builder = lcx.tree_builder(&mut fcx, 1., true, &root);
+    let mut tree_style_builder = TreeStyleBuilder::default();
+    let mut builder = lcx.tree_builder(&mut fcx, &mut tree_style_builder, 1., true, &root);
     builder.push_text("x");
     let (layout, _) = builder.build();
     let root = metrics(&layout)[0];
@@ -297,7 +304,8 @@ fn line_with_only_out_of_flow_boxes_is_invisible() {
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
     let root = root_style();
     let mut line_height = |height: f32, kind: InlineBoxKind| {
-        let mut builder = lcx.tree_builder(&mut fcx, 1., false, &root);
+        let mut tree_style_builder = TreeStyleBuilder::default();
+        let mut builder = lcx.tree_builder(&mut fcx, &mut tree_style_builder, 1., false, &root);
         builder.push_inline_box(InlineBox {
             id: 0,
             kind,
@@ -325,7 +333,8 @@ fn quantized_inline_box_extents_are_not_rounded_separately() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
     let root = root_style();
-    let mut builder = lcx.tree_builder(&mut fcx, 1., true, &root);
+    let mut tree_style_builder = TreeStyleBuilder::default();
+    let mut builder = lcx.tree_builder(&mut fcx, &mut tree_style_builder, 1., true, &root);
     // Baseline splits the box into 40.5 above and 40.5 below the baseline; rounding each
     // separately would reserve 82px for an 81px box.
     builder.push_inline_box(InlineBox {
@@ -350,7 +359,8 @@ fn line_with_negative_height_inline_box_is_not_invisible() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
     let root = root_style();
-    let mut builder = lcx.tree_builder(&mut fcx, 1., false, &root);
+    let mut tree_style_builder = TreeStyleBuilder::default();
+    let mut builder = lcx.tree_builder(&mut fcx, &mut tree_style_builder, 1., false, &root);
     builder.push_inline_box(InlineBox {
         id: 0,
         kind: InlineBoxKind::InFlow,
@@ -389,8 +399,10 @@ fn fallback_font_glyphs_only_size_the_line_for_normal_line_height() {
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
     let roboto = [parlance::FontFamilyName::Named("Roboto".into())];
     let mut line_height = |text: &str, line_height: LineHeight| {
+        let mut tree_style_builder = TreeStyleBuilder::default();
         let mut builder = lcx.tree_builder(
             &mut fcx,
+            &mut tree_style_builder,
             1.,
             false,
             &TextStyle {
@@ -429,7 +441,8 @@ fn breaking_after_reverting_to_a_default_state_does_not_panic() {
     // (empty) line rather than one that indexing the root aligned subtree would panic on.
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
-    let mut builder = lcx.tree_builder(&mut fcx, 1., false, &root_style());
+    let mut tree_style_builder = TreeStyleBuilder::default();
+    let mut builder = lcx.tree_builder(&mut fcx, &mut tree_style_builder, 1., false, &root_style());
     builder.push_text("one two three four");
     let (mut layout, _) = builder.build();
 
@@ -474,7 +487,8 @@ fn style_run_builder_with_parents_matches_tree_builder() {
         vertical_align: VerticalAlign::MIDDLE,
     };
 
-    let mut builder = lcx.tree_builder(&mut fcx, 1., false, &root);
+    let mut tree_style_builder = TreeStyleBuilder::default();
+    let mut builder = lcx.tree_builder(&mut fcx, &mut tree_style_builder, 1., false, &root);
     builder.push_text("root ");
     builder.push_style_span(a.clone());
     builder.push_text("A ");

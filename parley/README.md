@@ -73,7 +73,8 @@ let mut layout_cx = LayoutContext::new();
 // Create a `RangedBuilder` or a `TreeBuilder`, which are used to construct a `Layout`.
 const DISPLAY_SCALE : f32 = 1.0;
 const TEXT : &str = "Lorem\u{FFFC} Ipsum...";
-let mut builder = layout_cx.ranged_builder(&mut font_cx, &TEXT, DISPLAY_SCALE, true);
+let mut ranged_style_builder = parley::RangedStyleBuilder::default();
+let mut builder = layout_cx.ranged_builder(&mut font_cx, &mut ranged_style_builder, &TEXT, DISPLAY_SCALE, true);
 
 // Set default styles that apply to the entire layout
 builder.push_default(StyleProperty::FontSize(16.0));

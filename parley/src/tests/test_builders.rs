@@ -16,8 +16,8 @@ use super::utils::{
 use crate::{
     BaseDirection, BreakReason, FontContext, FontFamily, FontFeatures, FontVariations, InlineBox,
     InlineBoxKind, Layout, LayoutContext, LineBreak, LineHeight, OverflowWrap, RangedBuilder,
-    StyleProperty, StyleRunBuilder, TextStyle, TextWrapMode, TreeBuilder, VerticalAlign,
-    WhiteSpaceCollapse, WordBreak,
+    StyleProperty, StyleRunBuilder, TextStyle, TextWrapMode, TreeBuilder, TreeStyleBuilder,
+    VerticalAlign, WhiteSpaceCollapse, WordBreak,
 };
 
 /// Set of options for [`build_layout_with_ranged`].
@@ -43,7 +43,14 @@ fn build_layout_with_ranged(
     opts: &RangedOptions<'_>,
     with_builder: impl Fn(&mut RangedBuilder<'_, ColorBrush>),
 ) -> Layout<ColorBrush> {
-    let mut rb = lcx.ranged_builder(fcx, opts.text, opts.scale, opts.quantize);
+    let mut ranged_style_builder = crate::RangedStyleBuilder::default();
+    let mut rb = lcx.ranged_builder(
+        fcx,
+        &mut ranged_style_builder,
+        opts.text,
+        opts.scale,
+        opts.quantize,
+    );
     with_builder(&mut rb);
     let mut layout = rb.build(opts.text);
     layout.break_all_lines(opts.max_advance);
@@ -57,7 +64,14 @@ fn build_layout_with_tree(
     opts: &TreeOptions<'_, '_>,
     with_builder: impl Fn(&mut TreeBuilder<'_, ColorBrush>),
 ) -> Layout<ColorBrush> {
-    let mut tb = lcx.tree_builder(fcx, opts.scale, opts.quantize, opts.root_style);
+    let mut tree_style_builder = TreeStyleBuilder::default();
+    let mut tb = lcx.tree_builder(
+        fcx,
+        &mut tree_style_builder,
+        opts.scale,
+        opts.quantize,
+        opts.root_style,
+    );
     with_builder(&mut tb);
     let (mut layout, _) = tb.build();
     layout.break_all_lines(opts.max_advance);
@@ -84,7 +98,8 @@ fn builders_apply_base_direction() {
     let mut fcx = create_font_context();
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
 
-    let mut ranged = lcx.ranged_builder(&mut fcx, text, 1.0, true);
+    let mut ranged_style_builder = crate::RangedStyleBuilder::default();
+    let mut ranged = lcx.ranged_builder(&mut fcx, &mut ranged_style_builder, text, 1.0, true);
     ranged.push_default(FontFamily::from(FONT_FAMILY_LIST));
     ranged.set_base_direction(BaseDirection::Rtl);
     let mut ranged_layout = ranged.build(text);
@@ -103,7 +118,8 @@ fn builders_apply_base_direction() {
         font_family: FontFamily::from(FONT_FAMILY_LIST),
         ..TextStyle::default()
     };
-    let mut tree = lcx.tree_builder(&mut fcx, 1.0, true, &root_style);
+    let mut tree_style_builder = TreeStyleBuilder::default();
+    let mut tree = lcx.tree_builder(&mut fcx, &mut tree_style_builder, 1.0, true, &root_style);
     tree.set_base_direction(BaseDirection::Rtl);
     tree.push_text(text);
     let (mut tree_layout, _) = tree.build();
@@ -540,17 +556,23 @@ fn ranged_builder_reuse_layout() {
 
     let mut layout = Layout::new();
 
-    let mut builder = lcx.ranged_builder(&mut fcx, FIRST_TEXT, 1., false);
+    let mut ranged_style_builder = crate::RangedStyleBuilder::default();
+    let mut builder =
+        lcx.ranged_builder(&mut fcx, &mut ranged_style_builder, FIRST_TEXT, 1., false);
     builder.push_default(FontFamily::from(FONT_FAMILY_LIST));
     builder.build_into(&mut layout, FIRST_TEXT);
     layout.break_all_lines(Some(MAX_ADVANCE));
 
-    let mut builder = lcx.ranged_builder(&mut fcx, SECOND_TEXT, 1., false);
+    let mut ranged_style_builder = crate::RangedStyleBuilder::default();
+    let mut builder =
+        lcx.ranged_builder(&mut fcx, &mut ranged_style_builder, SECOND_TEXT, 1., false);
     builder.push_default(FontFamily::from(FONT_FAMILY_LIST));
     builder.build_into(&mut layout, SECOND_TEXT);
     layout.break_all_lines(Some(MAX_ADVANCE));
 
-    let mut builder = lcx.ranged_builder(&mut fcx, SECOND_TEXT, 1., false);
+    let mut ranged_style_builder = crate::RangedStyleBuilder::default();
+    let mut builder =
+        lcx.ranged_builder(&mut fcx, &mut ranged_style_builder, SECOND_TEXT, 1., false);
     builder.push_default(FontFamily::from(FONT_FAMILY_LIST));
     let mut expected = builder.build(SECOND_TEXT);
     expected.break_all_lines(Some(MAX_ADVANCE));
@@ -653,7 +675,8 @@ fn builders_empty_text_after_styled_layout_reuses_context() {
     let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
 
     let root = TextStyle::default();
-    let mut builder = lcx.tree_builder(&mut fcx, 1.0, true, &root);
+    let mut tree_style_builder = TreeStyleBuilder::default();
+    let mut builder = lcx.tree_builder(&mut fcx, &mut tree_style_builder, 1.0, true, &root);
     builder.push_style_span(TextStyle {
         font_size: 20.,
         ..Default::default()
@@ -665,7 +688,8 @@ fn builders_empty_text_after_styled_layout_reuses_context() {
 
     // The empty layout is shaped with a substitute space, which must use the root style rather
     // than a stale style index left over from the previous layout.
-    let builder = lcx.ranged_builder(&mut fcx, "", 1.0, true);
+    let mut ranged_style_builder = crate::RangedStyleBuilder::default();
+    let builder = lcx.ranged_builder(&mut fcx, &mut ranged_style_builder, "", 1.0, true);
     let mut layout = builder.build("");
     layout.break_all_lines(None);
     assert_eq!(layout.lines().count(), 1);

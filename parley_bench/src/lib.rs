@@ -13,7 +13,7 @@ use std::{
 };
 
 use parley::{
-    FontContext, FontFamilyName, LayoutContext,
+    FontContext, FontFamilyName, LayoutContext, RangedStyleBuilder,
     fontique::{Blob, Collection, CollectionOptions, SourceCache},
 };
 
@@ -28,17 +28,26 @@ pub struct ColorBrush {}
 std::thread_local! {
     static FONT_CX_TL: RefCell<FontContext> = RefCell::new(create_font_context());
     static LAYOUT_CX_TL: RefCell<LayoutContext<ColorBrush>> = RefCell::new(LayoutContext::new());
+    static RANGED_STYLE_BUILDER_TL: RefCell<RangedStyleBuilder<ColorBrush>> = RefCell::new(RangedStyleBuilder::default());
 }
 
-/// Runs the provided closure with mutable access to the thread-local font and layout contexts.
+/// Runs the provided closure with mutable access to the thread-local font and layout contexts
+/// and ranged style builder.
 pub fn with_contexts<R>(
-    f: impl FnOnce(&mut FontContext, &mut LayoutContext<ColorBrush>) -> R,
+    f: impl FnOnce(
+        &mut FontContext,
+        &mut LayoutContext<ColorBrush>,
+        &mut RangedStyleBuilder<ColorBrush>,
+    ) -> R,
 ) -> R {
     FONT_CX_TL.with(|font_cell| {
         LAYOUT_CX_TL.with(|layout_cell| {
-            let mut font_cx = font_cell.borrow_mut();
-            let mut layout_cx = layout_cell.borrow_mut();
-            f(&mut font_cx, &mut layout_cx)
+            RANGED_STYLE_BUILDER_TL.with(|ranged_cell| {
+                let mut font_cx = font_cell.borrow_mut();
+                let mut layout_cx = layout_cell.borrow_mut();
+                let mut ranged_style_builder = ranged_cell.borrow_mut();
+                f(&mut font_cx, &mut layout_cx, &mut ranged_style_builder)
+            })
         })
     })
 }

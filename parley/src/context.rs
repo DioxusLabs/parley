@@ -34,10 +34,6 @@ pub struct LayoutContext<B: Brush = [u8; 4]> {
     pub(crate) break_spaces: Vec<Range<usize>>,
     pub(crate) inline_objects: Vec<InlineObject>,
 
-    // Reusable style builders (to amortise allocations)
-    pub(crate) ranged_style_builder: RangedStyleBuilder<B>,
-    pub(crate) tree_style_builder: TreeStyleBuilder<B>,
-
     /// Style index for each character, parallel to [`Analysis::char_info`].
     pub(crate) char_style_indices: Vec<u16>,
     pub(crate) scx: Shaper,
@@ -55,8 +51,6 @@ impl<B: Brush> LayoutContext<B> {
             analysis: Analysis::new(),
             line_break: Vec::new(),
             break_spaces: Vec::new(),
-            ranged_style_builder: RangedStyleBuilder::default(),
-            tree_style_builder: TreeStyleBuilder::default(),
             char_style_indices: vec![],
             scx: Shaper::default(),
         }
@@ -94,6 +88,7 @@ impl<B: Brush> LayoutContext<B> {
     pub fn ranged_builder<'a>(
         &'a mut self,
         fcx: &'a mut FontContext,
+        ranged: &'a mut RangedStyleBuilder<B>,
         text: &'a str,
         scale: f32,
         quantize: bool,
@@ -104,7 +99,6 @@ impl<B: Brush> LayoutContext<B> {
 
         fcx.source_cache.prune(128, false);
 
-        let mut ranged = core::mem::take(&mut self.ranged_style_builder);
         ranged.begin(resolved_root_style, text.len());
         let sink = StyleRunBuilder {
             options: BuilderOptions::new(scale, quantize),
@@ -193,6 +187,7 @@ impl<B: Brush> LayoutContext<B> {
     pub fn tree_builder<'a>(
         &'a mut self,
         fcx: &'a mut FontContext,
+        tree: &'a mut TreeStyleBuilder<B>,
         scale: f32,
         quantize: bool,
         root_style: &TextStyle<'_, '_, B>,
@@ -203,7 +198,6 @@ impl<B: Brush> LayoutContext<B> {
 
         fcx.source_cache.prune(128, false);
 
-        let mut tree = core::mem::take(&mut self.tree_style_builder);
         let mut sink = StyleRunBuilder {
             options: BuilderOptions::new(scale, quantize),
             len: None,

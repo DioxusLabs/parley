@@ -14,7 +14,8 @@ fn clear_resets_to_new() {
 
     static TEXT: &str = "Some text that will wrap across several lines.";
 
-    let mut builder = lcx.ranged_builder(&mut fcx, TEXT, 1., false);
+    let mut ranged_style_builder = crate::RangedStyleBuilder::default();
+    let mut builder = lcx.ranged_builder(&mut fcx, &mut ranged_style_builder, TEXT, 1., false);
     builder.push_default(FontFamily::from(FONT_FAMILY_LIST));
     let mut layout = builder.build(TEXT);
     layout.set_text_indent(10., IndentOptions::default());

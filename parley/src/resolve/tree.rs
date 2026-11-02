@@ -34,10 +34,11 @@ fn is_segment_break(c: char) -> bool {
     matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}')
 }
 
-/// Builder for constructing a tree of styles, which materialises the styles and style runs
-/// that text is attributed to into a [`StyleRunBuilder`].
+/// The reusable state of a [`TreeBuilder`](crate::TreeBuilder): the tree of styles and the
+/// text pushed so far. Pass one to [`LayoutContext::tree_builder`](crate::LayoutContext::tree_builder);
+/// keeping it across layouts reuses its allocations.
 #[derive(Clone)]
-pub(crate) struct TreeStyleBuilder<B: Brush> {
+pub struct TreeStyleBuilder<B: Brush> {
     tree: Vec<StyleTreeNode<B>>,
     text: String,
     current_span: usize,
