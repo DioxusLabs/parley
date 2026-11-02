@@ -14,10 +14,10 @@ use super::utils::{
     fonts::{FONT_FAMILY_LIST, create_font_context},
 };
 use crate::{
-    BaseDirection, BreakReason, FontContext, FontFamily, FontFeatures, FontVariations, Layout,
-    LayoutContext, LineBreak, LineHeight, OverflowWrap, RangedBuilder, StyleProperty,
-    StyleRunBuilder, TextStyle, TextWrapMode, TreeBuilder, VerticalAlign, WhiteSpaceCollapse,
-    WordBreak,
+    BaseDirection, BreakReason, FontContext, FontFamily, FontFeatures, FontVariations, InlineBox,
+    InlineBoxKind, Layout, LayoutContext, LineBreak, LineHeight, OverflowWrap, RangedBuilder,
+    StyleProperty, StyleRunBuilder, TextStyle, TextWrapMode, TreeBuilder, VerticalAlign,
+    WhiteSpaceCollapse, WordBreak,
 };
 
 /// Set of options for [`build_layout_with_ranged`].
@@ -669,4 +669,56 @@ fn builders_empty_text_after_styled_layout_reuses_context() {
     let mut layout = builder.build("");
     layout.break_all_lines(None);
     assert_eq!(layout.lines().count(), 1);
+}
+
+#[test]
+#[should_panic(expected = "parent style that was previously added")]
+fn style_runs_child_style_requires_existing_parent() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let mut builder = lcx.style_run_builder(&mut fcx, "a", 1., false);
+    builder.push_style(create_root_style());
+    builder.push_child_style(1, create_root_style());
+}
+
+#[test]
+#[should_panic(expected = "parent style that was previously added")]
+fn style_runs_child_inline_box_requires_existing_parent() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let mut builder = lcx.style_run_builder(&mut fcx, "a", 1., false);
+    builder.push_style(create_root_style());
+    builder.push_child_inline_box(
+        1,
+        InlineBox {
+            id: 0,
+            kind: InlineBoxKind::InFlow,
+            index: 0,
+            width: 1.,
+            height: 1.,
+            baseline: None,
+            vertical_align: VerticalAlign::BASELINE,
+        },
+    );
+}
+
+#[test]
+#[should_panic(expected = "explicit run end")]
+fn style_runs_without_text_require_bounded_runs() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let mut builder = lcx.style_run_builder_without_text(&mut fcx, 1., false);
+    let style = builder.push_style(create_root_style());
+    builder.push_style_run(style, ..);
+}
+
+#[test]
+#[should_panic(expected = "cover the full text")]
+fn style_runs_without_text_check_coverage_at_build() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let mut builder = lcx.style_run_builder_without_text(&mut fcx, 1., false);
+    let style = builder.push_style(create_root_style());
+    builder.push_style_run(style, 0..1);
+    builder.build("ab");
 }

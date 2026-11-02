@@ -5,7 +5,8 @@
 
 use alloc::vec;
 
-use super::{Brush, RangedProperty, RangedStyle, ResolvedProperty, ResolvedStyle, StyleRun, Vec};
+use super::{Brush, RangedProperty, RangedStyle, ResolvedProperty, ResolvedStyle, Vec};
+use crate::builder::StyleRunBuilder;
 use crate::util::resolve_range;
 use core::ops::RangeBounds;
 
@@ -71,14 +72,8 @@ impl<B: Brush> RangedStyleBuilder<B> {
         self.properties.push(RangedProperty { property, range });
     }
 
-    /// Computes style table + style runs for the ranged properties.
-    pub(crate) fn finish(
-        &mut self,
-        style_table: &mut Vec<ResolvedStyle<B>>,
-        style_runs: &mut Vec<StyleRun>,
-    ) {
-        style_table.clear();
-        style_runs.clear();
+    /// Computes the styles and style runs for the ranged properties and pushes them to `sink`.
+    pub(crate) fn finish(&mut self, sink: &mut StyleRunBuilder<'_, B>) {
         if self.len == usize::MAX {
             self.properties.clear();
             self.scratch_styles.clear();
@@ -155,25 +150,19 @@ impl<B: Brush> RangedStyleBuilder<B> {
         styles.truncate(styles.len() - merged_count);
 
         // The root style is always at index 0 and is the parent of every other style.
-        style_table.reserve(styles.len() + 1);
-        style_runs.reserve(styles.len());
-        style_table.push(self.root_style.clone());
+        sink.reserve(styles.len() + 1, styles.len());
+        let root_style = core::mem::take(&mut self.root_style);
+        sink.push_resolved_style(0, root_style.clone());
         for style in styles.drain(..) {
-            let style_index = if style.style == style_table[0] {
+            let style_index = if style.style == root_style {
                 0
             } else {
-                assert!(style_table.len() <= u16::MAX as usize, "too many styles");
-                style_table.push(style.style);
-                (style_table.len() - 1) as u16
+                sink.push_resolved_style(0, style.style)
             };
-            style_runs.push(StyleRun {
-                style_index,
-                range: style.range,
-            });
+            sink.push_style_run(style_index, style.range);
         }
 
         self.properties.clear();
-        self.root_style = ResolvedStyle::default();
         self.len = usize::MAX;
     }
 }

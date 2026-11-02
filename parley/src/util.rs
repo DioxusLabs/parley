@@ -28,6 +28,22 @@ pub(crate) fn resolve_range(range: impl RangeBounds<usize>, len: usize) -> Range
     start.min(len)..end.min(len)
 }
 
+/// Resolves a `RangeBounds` whose end is bounded, for text whose length is not yet known.
+/// Returns `None` if the end is unbounded.
+pub(crate) fn resolve_bounded_range(range: impl RangeBounds<usize>) -> Option<Range<usize>> {
+    let start = match range.start_bound() {
+        Bound::Unbounded => 0,
+        Bound::Included(n) => *n,
+        Bound::Excluded(n) => *n + 1,
+    };
+    let end = match range.end_bound() {
+        Bound::Unbounded => return None,
+        Bound::Included(n) => *n + 1,
+        Bound::Excluded(n) => *n,
+    };
+    Some(start..end)
+}
+
 /// A bounding box.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct BoundingBox {
