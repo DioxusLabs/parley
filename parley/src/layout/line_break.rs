@@ -643,6 +643,9 @@ pub struct BreakerState {
     /// The y coordinate of the top/start of the current line
     /// Use of f64 here is important. f32 causes test failures due to accumulated error
     line_y: f64,
+    /// The y coordinate of the bottom of the bottom-most non-empty line committed so far.
+    /// Lines may be moved with [`Self::set_line_y`], so this isn't necessarily the sum of line heights.
+    max_line_bottom: f64,
 
     /// The max advance of the entire layout.
     layout_max_advance: f32,
@@ -678,6 +681,7 @@ impl Default for BreakerState {
             cluster_idx: 0,
             line_x: 0.0,
             line_y: 0.0,
+            max_line_bottom: 0.0,
             layout_max_advance: 0.0,
             line_max_advance: 0.0,
             line_max_height: f32::MAX,
@@ -923,6 +927,10 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         self.reset_line();
 
         self.state.line_y += line_height as f64;
+        // Don't include the trailing empty line (after a final newline) in the layout's height.
+        if !self.lines.lines.last().unwrap().item_range.is_empty() {
+            self.state.max_line_bottom = self.state.max_line_bottom.max(self.state.line_y);
+        }
 
         Some(YieldData::LineBreak(
             self.last_line_data(reason, line_y_start),
@@ -1578,13 +1586,11 @@ impl<B: Brush> Drop for BreakLines<'_, B> {
         // The "width" excludes hanging whitespace. The "full_width" includes it.
         let mut layout_width = 0_f32;
         let mut layout_full_width = 0_f32;
-        let mut height = 0_f64; // f32 causes test failures due to accumulated error
         for line in &self.lines.lines {
             let indent_extra = line.metrics.indent.max(0.0);
             let line_max = line.metrics.inline_min_coord + line.metrics.advance + indent_extra;
             layout_full_width = layout_full_width.max(line_max);
             layout_width = layout_width.max(line_max - line.metrics.hanging_advance);
-            height += line.metrics.line_height as f64;
         }
 
         // If laying out with infinite width constraint, then set all lines' "max_width"
@@ -1597,17 +1603,10 @@ impl<B: Brush> Drop for BreakLines<'_, B> {
             }
         }
 
-        // Don't include the last line's line_height in the layout's height if the last line is empty
-        if let Some(last_line) = self.lines.lines.last()
-            && last_line.item_range.is_empty()
-        {
-            height -= last_line.metrics.line_height as f64;
-        }
-
         // Save the computed widths/height to the layout
         self.layout.data.width = layout_width;
         self.layout.data.full_width = layout_full_width;
-        self.layout.data.height = height as f32;
+        self.layout.data.height = self.state.max_line_bottom as f32;
         self.layout.data.layout_max_advance = self.state.layout_max_advance;
 
         // Save the computed lines to the layout
