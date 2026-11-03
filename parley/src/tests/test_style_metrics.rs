@@ -444,3 +444,26 @@ fn breaking_after_reverting_to_a_default_state_does_not_panic() {
         assert!(line.metrics().line_height > 0.);
     }
 }
+
+#[test]
+fn layout_height_includes_lines_moved_down() {
+    let mut fcx = create_font_context();
+    let mut lcx: LayoutContext<ColorBrush> = LayoutContext::new();
+    let mut builder = lcx.tree_builder(&mut fcx, 1., false, &root_style());
+    builder.push_text("one two three four");
+    let (mut layout, _) = builder.build();
+
+    // Move the second line down by 50px (e.g. to place it below a float).
+    let mut breaker = layout.break_lines();
+    breaker.break_next_with_length(4).unwrap();
+    let state = breaker.state_mut();
+    state.set_line_y(state.line_y() + 50.);
+    while breaker.break_next_with_length(4).is_some() {}
+    breaker.finish();
+
+    let line_count = layout.len();
+    assert!(line_count >= 2);
+    assert_eq!(layout.height(), 30. * line_count as f32 + 50.);
+    let last = layout.lines().last().unwrap();
+    assert_eq!(layout.height(), last.metrics().block_max_coord);
+}
