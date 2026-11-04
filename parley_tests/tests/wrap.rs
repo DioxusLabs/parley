@@ -6,8 +6,8 @@
 use crate::test_name;
 use crate::util::{ColorBrush, TestEnv};
 use parley::{
-    Alignment, AlignmentOptions, BreakReason, CHROMIUM_LINE_BREAK_OVERRIDE, OverflowWrap,
-    StyleProperty, TextWrapMode, WordBreak,
+    Alignment, AlignmentOptions, BreakReason, CHROMIUM_LINE_BREAK_OVERRIDE, InlineBox,
+    InlineBoxKind, OverflowWrap, StyleProperty, TextWrapMode, VerticalAlign, WordBreak,
 };
 use peniko::color::palette::css;
 
@@ -517,4 +517,52 @@ fn line_break_override_does_not_affect_forced_breaks() {
             .collect();
         assert_eq!(lines, ["a\n", "b"], "override returning Some({forced})");
     }
+}
+
+/// The wrap mode of the nearest common ancestor controls a soft wrap opportunity between two
+/// atomic inlines (CSS Text 3 § 5.1).
+#[test]
+fn text_wrap_mode_of_common_ancestor_controls_break_between_inline_boxes() {
+    let mut env = TestEnv::new(test_name!(), None);
+    let inline_box = |id| InlineBox {
+        id,
+        kind: InlineBoxKind::InFlow,
+        index: 0,
+        width: 10.0,
+        height: 10.0,
+        baseline: None,
+        vertical_align: VerticalAlign::BASELINE,
+    };
+    let nowrap = [StyleProperty::TextWrapMode(TextWrapMode::NoWrap)];
+
+    // Each box in its own `nowrap` span inside a wrappable parent: the boxes can wrap.
+    let mut builder = env.tree_builder();
+    for id in 0..2 {
+        builder.push_style_modification_span(&nowrap);
+        builder.push_inline_box(inline_box(id));
+        builder.pop_style_span();
+    }
+    let (mut layout, _) = builder.build();
+    layout.break_all_lines(Some(15.0));
+    assert_eq!(layout.len(), 2);
+
+    // Both boxes in one `nowrap` span: the boxes can't wrap.
+    let mut builder = env.tree_builder();
+    builder.push_style_modification_span(&nowrap);
+    builder.push_inline_box(inline_box(0));
+    builder.push_inline_box(inline_box(1));
+    builder.pop_style_span();
+    let (mut layout, _) = builder.build();
+    layout.break_all_lines(Some(15.0));
+    assert_eq!(layout.len(), 1);
+
+    // `nowrap` text followed by a box in a wrappable parent: the box can wrap.
+    let mut builder = env.tree_builder();
+    builder.push_style_modification_span(&nowrap);
+    builder.push_text("A");
+    builder.pop_style_span();
+    builder.push_inline_box(inline_box(0));
+    let (mut layout, _) = builder.build();
+    layout.break_all_lines(Some(1.0));
+    assert_eq!(layout.len(), 2);
 }

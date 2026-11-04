@@ -47,6 +47,8 @@ pub(crate) struct TreeStyleBuilder<B: Brush> {
     /// same inline formatting context, so that it can collapse across span and inline box
     /// boundaries and be removed at the end of the text.
     pending_whitespace: Option<PendingWhitespace>,
+    /// The span that the last committed character belongs to.
+    last_span: Option<usize>,
 }
 
 impl<B: Brush> Default for TreeStyleBuilder<B> {
@@ -58,6 +60,7 @@ impl<B: Brush> Default for TreeStyleBuilder<B> {
             text: String::new(),
             current_span: usize::MAX,
             pending_whitespace: None,
+            last_span: None,
         }
     }
 }
@@ -77,6 +80,7 @@ impl<B: Brush> TreeStyleBuilder<B> {
         self.style_runs.clear();
         self.text.clear();
         self.pending_whitespace = None;
+        self.last_span = None;
 
         // The root style is always materialised at index 0 so that it can act as the parent of
         // every other style (and as the strut for otherwise empty lines).
@@ -183,7 +187,9 @@ impl<B: Brush> TreeStyleBuilder<B> {
         } else {
             self.resolve_style_id(pending.span)
         };
+        self.wrap_span_boundary(pending.span);
         self.commit_styled_text(style_index, " ");
+        self.last_span = Some(pending.span);
     }
 
     /// The style table index of the span that text is currently being pushed into.
@@ -193,8 +199,75 @@ impl<B: Brush> TreeStyleBuilder<B> {
 
     /// Appends already white space processed `text` to the buffer, attributed to `span`.
     fn commit_text(&mut self, span: usize, text: &str) {
+        self.wrap_span_boundary(span);
         let style_index = self.resolve_style_id(span);
         self.commit_styled_text(style_index, text);
+        self.last_span = Some(span);
+    }
+
+    /// Before committing content to `span`, applies the wrapping of the nearest common ancestor of
+    /// `span` and the span of the last committed character to the boundary between them.
+    ///
+    /// Per CSS Text 3 § 5.1, the `white-space` of the nearest common ancestor of the two
+    /// characters or atomic inlines controls a soft wrap opportunity between them. The line
+    /// breaker applies the wrap mode of the character before an opportunity, so when only the
+    /// ancestor allows wrapping, the last character is given its span's wrappable style.
+    fn wrap_span_boundary(&mut self, span: usize) {
+        let Some(last_span) = self.last_span else {
+            return;
+        };
+        if last_span == span || self.tree[last_span].style.text_wrap_mode == TextWrapMode::Wrap {
+            return;
+        }
+        let Some(last_char) = self.text.chars().next_back() else {
+            return;
+        };
+        // Preserved white space hangs depending on its own wrap mode, so it keeps its style.
+        if last_char.is_whitespace() {
+            return;
+        }
+        if self.tree[self.common_ancestor(last_span, span)]
+            .style
+            .text_wrap_mode
+            != TextWrapMode::Wrap
+        {
+            return;
+        }
+
+        let style_index = self.resolve_wrappable_style_id(last_span);
+        let end = self.text.len();
+        let start = end - last_char.len_utf8();
+        let Some(run) = self.style_runs.last_mut() else {
+            return;
+        };
+        if run.style_index == style_index || run.range.end != end {
+            return;
+        }
+        if run.range.start == start {
+            run.style_index = style_index;
+        } else {
+            run.range.end = start;
+            self.style_runs.push(StyleRun {
+                style_index,
+                range: start..end,
+            });
+        }
+    }
+
+    /// The nearest span that is an ancestor of (or equal to) both `a` and `b`.
+    fn common_ancestor(&self, a: usize, b: usize) -> usize {
+        let mut a_ancestor = Some(a);
+        while let Some(candidate) = a_ancestor {
+            let mut b_ancestor = Some(b);
+            while let Some(other) = b_ancestor {
+                if other == candidate {
+                    return candidate;
+                }
+                b_ancestor = self.tree[other].parent;
+            }
+            a_ancestor = self.tree[candidate].parent;
+        }
+        0
     }
 
     /// Appends already white space processed `text` to the buffer with the given style.
