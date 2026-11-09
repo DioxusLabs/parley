@@ -242,6 +242,17 @@ impl Ord for Coverage {
     }
 }
 
+/// A form of a [`CharCluster`]'s characters, see [`CharCluster::calculate_coverage_and_form`].
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum ClusterForm {
+    /// The cluster's characters as written.
+    Original,
+    /// The canonical composition of the cluster's characters.
+    Composed,
+    /// The canonical decomposition of the cluster's characters.
+    Decomposed,
+}
+
 impl CharCluster {
     #[inline]
     pub(crate) fn clear(&mut self) {
@@ -350,22 +361,41 @@ impl CharCluster {
     /// [`Coverage::total`] may be different from the count of [`Self::chars`], and may also differ
     /// between subsequent calls due to returning the best coverage of either the original
     /// characters or one of the normalized forms.
+    ///
+    /// See [`Self::calculate_coverage_and_form`] to also learn which form the coverage is of.
     pub fn calculate_coverage(&mut self, covers: impl Fn(char) -> bool) -> Coverage {
+        self.calculate_coverage_and_form(covers).0
+    }
+
+    /// Calculate a candidate font's coverage of this character cluster, and the form of the
+    /// cluster that coverage is of.
+    ///
+    /// This is [`Self::calculate_coverage`], additionally returning the [`ClusterForm`] the
+    /// returned coverage was calculated for. Font selection can use this to prefer fonts covering
+    /// the cluster as written over fonts only covering its canonical decomposition, as
+    /// a font covering only the decomposition may not be able to render it as a unit (e.g.,
+    /// a font with conjoining Hangul jamo, but no Hangul shaping).
+    pub fn calculate_coverage_and_form(
+        &mut self,
+        covers: impl Fn(char) -> bool,
+    ) -> (Coverage, ClusterForm) {
         let len = self.len();
         let mut best_coverage = Mapper {
             chars: &self.chars[..len],
             map_len: self.map_len,
         }
         .coverage(&covers);
+        let mut best_form = ClusterForm::Original;
         if best_coverage.is_complete() {
-            return best_coverage;
+            return (best_coverage, best_form);
         }
         if self.force_normalize && self.composed().is_some() {
             let coverage = self.comp.coverage(&covers);
             if coverage > best_coverage {
                 best_coverage = coverage;
+                best_form = ClusterForm::Composed;
                 if coverage.is_complete() {
-                    return best_coverage;
+                    return (best_coverage, best_form);
                 }
             }
         }
@@ -373,22 +403,24 @@ impl CharCluster {
             let coverage = self.decomp.coverage(&covers);
             if coverage > best_coverage {
                 best_coverage = coverage;
+                best_form = ClusterForm::Decomposed;
                 if coverage.is_complete() {
-                    return best_coverage;
+                    return (best_coverage, best_form);
                 }
             }
             if !self.force_normalize && self.composed().is_some() {
                 let coverage = self.comp.coverage(&covers);
                 if coverage > best_coverage {
                     best_coverage = coverage;
+                    best_form = ClusterForm::Composed;
                     if coverage.is_complete() {
-                        return best_coverage;
+                        return (best_coverage, best_form);
                     }
                 }
             }
         }
 
-        best_coverage
+        (best_coverage, best_form)
     }
 
     /// Rebuilds `self` in-place using the existing allocation for the given grapheme.

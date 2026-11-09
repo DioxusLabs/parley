@@ -5,7 +5,7 @@
 //! and `icu` for text analysis.
 
 use alloc::vec::Vec;
-use parley_engine::shape::{CharCluster, Coverage};
+use parley_engine::shape::{CharCluster, ClusterForm, Coverage};
 use parley_engine::{Analysis, FontInstance, FontInstanceRef, ShapeOptions, Shaper};
 use smallvec::SmallVec;
 
@@ -396,13 +396,18 @@ impl<'a, 'b, B: Brush> parley_engine::FontSelector for FontSelector<'a, 'b, B> {
 
         let mut selected_font = None;
         let mut best_coverage = Coverage::NONE;
+        // The first font completely covering the cluster only through its canonical
+        // decomposition. Like Gecko, WebKit and Android's minikin, a font covering the cluster as
+        // written is preferred, as a font with only the decomposed characters may not render them
+        // as a unit (e.g., precomposed Hangul syllables in a font with only conjoining jamo).
+        let mut decomposed_font = None;
 
         self.query.matches_with(|font| {
             let Some(charmap) = font.charmap() else {
                 return fontique::QueryStatus::Continue;
             };
 
-            let coverage = cluster.calculate_coverage(|ch| {
+            let (coverage, form) = cluster.calculate_coverage_and_form(|ch| {
                 charmap
                     .map(ch)
                     .map(|g| {
@@ -411,7 +416,12 @@ impl<'a, 'b, B: Brush> parley_engine::FontSelector for FontSelector<'a, 'b, B> {
                     })
                     .unwrap_or_default()
             });
-            if coverage > best_coverage {
+            if coverage.is_complete() && form == ClusterForm::Decomposed {
+                if decomposed_font.is_none() {
+                    decomposed_font = Some(font);
+                }
+                fontique::QueryStatus::Continue
+            } else if coverage > best_coverage {
                 selected_font = Some(font);
                 best_coverage = coverage;
 
@@ -427,6 +437,10 @@ impl<'a, 'b, B: Brush> parley_engine::FontSelector for FontSelector<'a, 'b, B> {
                 fontique::QueryStatus::Continue
             }
         });
+
+        if !best_coverage.is_complete() && decomposed_font.is_some() {
+            selected_font = decomposed_font;
+        }
 
         selected_font.map(|font| FontInstanceRef {
             data: &font.blob,

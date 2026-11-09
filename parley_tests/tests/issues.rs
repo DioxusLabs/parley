@@ -7,8 +7,8 @@ use crate::test_name;
 use crate::util::TestEnv;
 use parley::VerticalAlign;
 use parley::{
-    Alignment, AlignmentOptions, FontFamily, InlineBox, InlineBoxKind, PositionedLayoutItem,
-    StyleProperty, TextWrapMode,
+    Alignment, AlignmentOptions, FontFamily, FontFamilyName, InlineBox, InlineBoxKind,
+    PositionedLayoutItem, StyleProperty, TextWrapMode,
 };
 
 /// Test that rendering RTL text doesn't affect subsequent LTR layouts.
@@ -234,4 +234,42 @@ fn no_break_after_inline_box_with_nowrap() {
 
     let layout = build_layout(&mut env, TextWrapMode::NoWrap);
     assert_eq!(layout.len(), 1, "Expected a single line");
+}
+
+/// Test that font selection prefers a font covering a character as written over an earlier font
+/// covering only its canonical decomposition.
+/// See <https://github.com/linebender/parley/issues/948>.
+#[test]
+fn issue_948_prefer_original_form_coverage() {
+    let mut env = TestEnv::new(test_name!(), None);
+
+    // Roboto Flex has U+0041 A and U+030C COMBINING CARON, but not U+01CD Ǎ, which Arimo has.
+    let text = "\u{01CD}";
+    let mut run_font = |families: &[&'static str]| {
+        let families: Vec<_> = families
+            .iter()
+            .map(|family| FontFamilyName::Named((*family).into()))
+            .collect();
+        let mut builder = env.ranged_builder(text);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::from(&families[..])));
+        let mut layout = builder.build(text);
+        layout.break_all_lines(None);
+
+        let line = layout.lines().next().unwrap();
+        let item = line.items().next().unwrap();
+        let PositionedLayoutItem::GlyphRun(glyph_run) = item else {
+            unreachable!()
+        };
+        glyph_run.run().font().clone()
+    };
+
+    let arimo = run_font(&["Arimo"]);
+    let roboto_flex = run_font(&["Roboto Flex"]);
+    assert_ne!(arimo, roboto_flex);
+
+    assert_eq!(
+        run_font(&["Roboto Flex", "Arimo"]),
+        arimo,
+        "Expected the font covering the precomposed character"
+    );
 }
