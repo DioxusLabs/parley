@@ -643,7 +643,7 @@ mod tests {
     use alloc::{sync::Arc, vec, vec::Vec};
 
     use linebender_resource_handle::{Blob, FontData};
-    use fontique::Synthesis;
+    use parlance::Synthesis;
 
     use crate::{
         Analysis, AnalysisOptions, Analyzer, FontInstance, FontInstanceRef, FontSelector,
