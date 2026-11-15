@@ -138,7 +138,7 @@ impl FontInfo {
                 } else if self.has_slant_axis() {
                     synth.vars[len] = (Tag::new(b"slnt"), -14.0);
                     len += 1;
-                } else if self.style == FontStyleRange::Normal {
+                } else if self.style.is_normal() {
                     synth.skew = 14;
                 }
             }
@@ -153,7 +153,7 @@ impl FontInfo {
                 } else if self.has_italic_axis() && degrees > 0. {
                     synth.vars[len] = (Tag::new(b"ital"), 1.0);
                     len += 1;
-                } else if self.style == FontStyleRange::Normal {
+                } else if self.style.is_normal() {
                     synth.skew = degrees as i8;
                 }
             }
