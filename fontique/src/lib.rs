@@ -86,11 +86,11 @@ pub use charmap::{Charmap, CharmapIndex, UnicodeRangeSet};
 pub use collection::{Collection, CollectionOptions, Query, QueryFamily, QueryFont, QueryStatus};
 pub use fallback::FallbackKey;
 pub use family::{FamilyId, FamilyInfo};
-pub use font::{AxisInfo, FontInfo, FontInfoOverride, Synthesis};
+pub use font::{AxisInfo, FontInfo, FontInfoOverride};
 pub use impl_fontconfig::FromFontconfig;
 pub use parlance::{
     FontRange, FontStyle, FontStyleRange, FontWeight, FontWeightRange, FontWidth, FontWidthRange,
-    GenericFamily, Language, Script,
+    GenericFamily, Language, Script, Synthesis,
 };
 pub use source::{SourceId, SourceInfo, SourceKind};
 
