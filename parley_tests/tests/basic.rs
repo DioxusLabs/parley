@@ -21,7 +21,18 @@ fn plain_multiline_text() {
     let builder = env.ranged_builder(text);
     let mut layout = builder.build(text);
     layout.break_all_lines(None);
-    layout.align(Alignment::Start, AlignmentOptions::default());
+
+    env.check_layout_snapshot(&layout);
+}
+
+#[test]
+fn newline_resets_bidi() {
+    let mut env = TestEnv::new(test_name!(), None);
+
+    let text = "\u{2068}!?\nكتاب!\n123-456";
+    let builder = env.ranged_builder(text);
+    let mut layout = builder.build(text);
+    layout.break_all_lines(Some(100.));
 
     env.check_layout_snapshot(&layout);
 }
@@ -77,7 +88,6 @@ fn placing_inboxes() {
         });
         let mut layout = builder.build(&text);
         layout.break_all_lines(None);
-        layout.align(Alignment::Start, AlignmentOptions::default());
         env.with_name(test_case_name).check_layout_snapshot(&layout);
     }
 }
@@ -100,8 +110,8 @@ fn only_inboxes_wrap() {
         });
     }
     let mut layout = builder.build(&text);
+    layout.set_alignment(Alignment::Center, AlignmentOptions::default());
     layout.break_all_lines(Some(40.0));
-    layout.align(Alignment::Center, AlignmentOptions::default());
 
     env.check_layout_snapshot(&layout);
 }
@@ -142,7 +152,6 @@ fn full_width_inbox() {
         });
         let mut layout = builder.build(text);
         layout.break_all_lines(Some(100.));
-        layout.align(Alignment::Start, AlignmentOptions::default());
         env.with_name(test_case_name).check_layout_snapshot(&layout);
     }
 }
@@ -193,7 +202,6 @@ fn inbox_separated_by_whitespace() {
     });
     let (mut layout, _text) = builder.build();
     layout.break_all_lines(Some(100.));
-    layout.align(Alignment::Start, AlignmentOptions::default());
     env.check_layout_snapshot(&layout);
 }
 
@@ -223,7 +231,6 @@ fn inbox_with_baseline() {
         });
         let mut layout = builder.build(text);
         layout.break_all_lines(None);
-        layout.align(Alignment::Start, AlignmentOptions::default());
         env.with_name(test_case_name).check_layout_snapshot(&layout);
     }
 }
@@ -257,7 +264,6 @@ fn inboxes_with_matching_baselines() {
     });
     let mut layout = builder.build(text);
     layout.break_all_lines(None);
-    layout.align(Alignment::Start, AlignmentOptions::default());
     env.check_layout_snapshot(&layout);
 }
 
@@ -297,7 +303,6 @@ fn inboxes_with_large_ascent_and_descent() {
     });
     let mut layout = builder.build(text);
     layout.break_all_lines(None);
-    layout.align(Alignment::Start, AlignmentOptions::default());
 
     // The middle line (containing the boxes) should be tall enough to contain the first box's
     // ascent (38px) plus the second box's descent (40 - 2 = 38px).
@@ -329,7 +334,6 @@ fn inbox_below_baseline_keeps_grid() {
     });
     let mut layout = builder.build(text);
     layout.break_all_lines(None);
-    layout.align(Alignment::Start, AlignmentOptions::default());
 
     // Every line has the same 60px line height, so consecutive baselines must be exactly 60px
     // apart. The inline box on the middle line fits within the line and must not disturb this.
@@ -359,7 +363,6 @@ fn trailing_whitespace_ltr() {
         let builder = env.ranged_builder(text);
         let mut layout = builder.build(text);
         layout.break_all_lines(Some(45.));
-        layout.align(Alignment::Start, AlignmentOptions::default());
 
         env.with_name("soft_wrap").check_layout_snapshot(&layout);
     }
@@ -369,7 +372,6 @@ fn trailing_whitespace_ltr() {
         let builder = env.ranged_builder(text);
         let mut layout = builder.build(text);
         layout.break_all_lines(None);
-        layout.align(Alignment::Start, AlignmentOptions::default());
 
         env.with_name("hard_wrap").check_layout_snapshot(&layout);
     }
@@ -384,7 +386,6 @@ fn trailing_whitespace_rtl() {
         let builder = env.ranged_builder(text);
         let mut layout = builder.build(text);
         layout.break_all_lines(Some(45.));
-        layout.align(Alignment::Start, AlignmentOptions::default());
 
         env.with_name("soft_wrap").check_layout_snapshot(&layout);
     }
@@ -394,7 +395,6 @@ fn trailing_whitespace_rtl() {
         let builder = env.ranged_builder(text);
         let mut layout = builder.build(text);
         layout.break_all_lines(None);
-        layout.align(Alignment::Start, AlignmentOptions::default());
 
         env.with_name("hard_wrap").check_layout_snapshot(&layout);
     }
@@ -412,7 +412,6 @@ fn trailing_whitespace_bidi() {
             let builder = env.ranged_builder(text);
             let mut layout = builder.build(text);
             layout.break_all_lines(Some(45.));
-            layout.align(Alignment::Start, AlignmentOptions::default());
 
             env.with_name(test_case_name).check_layout_snapshot(&layout);
         }
@@ -426,7 +425,6 @@ fn trailing_whitespace_bidi() {
             let builder = env.ranged_builder(text);
             let mut layout = builder.build(text);
             layout.break_all_lines(None);
-            layout.align(Alignment::Start, AlignmentOptions::default());
 
             env.with_name(test_case_name).check_layout_snapshot(&layout);
         }
@@ -452,7 +450,6 @@ fn leading_whitespace() {
         builder.push_text("  Line 2");
         let (mut layout, _) = builder.build();
         layout.break_all_lines(None);
-        layout.align(Alignment::Start, AlignmentOptions::default());
         env.with_name(test_case_name).check_layout_snapshot(&layout);
     }
 }
@@ -770,8 +767,8 @@ fn base_level_alignment_ltr() {
         let text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
         let builder = env.ranged_builder(text);
         let mut layout = builder.build(text);
+        layout.set_alignment(alignment, AlignmentOptions::default());
         layout.break_all_lines(Some(150.0));
-        layout.align(alignment, AlignmentOptions::default());
         env.with_name(test_case_name).check_layout_snapshot(&layout);
     }
 }
@@ -789,8 +786,8 @@ fn base_level_alignment_rtl() {
         let text = "عند برمجة أجهزة الكمبيوتر، قد تجد نفسك فجأة في مواقف غريبة، مثل الكتابة بلغة لا تتحدثها فعليًا.";
         let builder = env.ranged_builder(text);
         let mut layout = builder.build(text);
+        layout.set_alignment(alignment, AlignmentOptions::default());
         layout.break_all_lines(Some(150.0));
-        layout.align(alignment, AlignmentOptions::default());
         env.with_name(test_case_name).check_layout_snapshot(&layout);
     }
 }
@@ -813,14 +810,14 @@ fn last_line_alignment() {
         ] {
             let builder = env.ranged_builder(text);
             let mut layout = builder.build(text);
-            layout.break_all_lines(Some(150.0));
-            layout.align(
+            layout.set_alignment(
                 alignment,
                 AlignmentOptions {
                     last_line_alignment: Some(last_line_alignment),
                     ..AlignmentOptions::default()
                 },
             );
+            layout.break_all_lines(Some(150.0));
             env.with_name(&format!("{text_name}_{test_case_name}"))
                 .check_layout_snapshot(&layout);
         }
@@ -829,17 +826,30 @@ fn last_line_alignment() {
 
 #[test]
 /// On overflow without alignment-on-overflow, RTL-text should be start-aligned (i.e., aligned to
-/// the right edge, overflowing on the left).
+/// the right edge, overflowing on the left). Justified text is too (even with
+/// alignment-on-overflow, because it can't shrink the line).
 fn overflow_alignment_rtl() {
     let mut env = TestEnv::new(test_name!(), None);
 
-    let text = "عند برمجة أجهزة الكمبيوتر، قد تجد نفسك فجأة في مواقف غريبة، مثل الكتابة بلغة لا تتحدثها فعليًا.";
-    let builder = env.ranged_builder(text);
-    let mut layout = builder.build(text);
-    layout.break_all_lines(Some(1000.0));
-    layout.align(Alignment::Center, AlignmentOptions::default());
-    env.rendering_config().size = Some(Size::new(10., layout.height().into()));
-    env.check_layout_snapshot(&layout);
+    // The NBSP in the text below produces a line that slightly overflows, and gives that line a
+    // justification opportunity whose spacing should remain at 0 (because the line overflows).
+    let text = "عند برمجة أجهزة\u{A0}الكمبيوتر، قد تجد نفسك فجأة في مواقف غريبة، مثل الكتابة بلغة لا تتحدثها فعليًا.";
+    for (alignment, align_when_overflowing, test_case_name) in [
+        (Alignment::Center, false, "center"),
+        (Alignment::Justify, true, "justify_align_when_overflowing"),
+    ] {
+        let builder = env.ranged_builder(text);
+        let mut layout = builder.build(text);
+        layout.set_alignment(
+            alignment,
+            AlignmentOptions {
+                align_when_overflowing,
+                ..AlignmentOptions::default()
+            },
+        );
+        layout.break_all_lines(Some(100.0));
+        env.with_name(test_case_name).check_layout_snapshot(&layout);
+    }
 }
 
 #[test]
@@ -855,8 +865,8 @@ fn dont_justify_space_inside_grapheme() {
     let builder = env.ranged_builder(text);
     let mut layout = builder.build(text);
     // Breaks after "cc ", leaving the first line one space to stretch.
+    layout.set_alignment(Alignment::Justify, AlignmentOptions::default());
     layout.break_all_lines(Some(80.0));
-    layout.align(Alignment::Justify, AlignmentOptions::default());
 
     env.check_layout_snapshot(&layout);
 }
@@ -876,8 +886,8 @@ fn justify_with_overflowing_trailing_space() {
     let mut builder = env.ranged_builder(text);
     builder.push_default(StyleProperty::WordSpacing(48.0));
     let mut layout = builder.build(text);
+    layout.set_alignment(Alignment::Justify, AlignmentOptions::default());
     layout.break_all_lines(Some(280.0));
-    layout.align(Alignment::Justify, AlignmentOptions::default());
 
     env.check_layout_snapshot(&layout);
 
@@ -904,8 +914,8 @@ fn justify_consecutive_spaces() {
     let text = "Foo bar baz supercalifragilistic.\n\nFoo   bar baz supercalifragilistic.";
     let builder = env.ranged_builder(text);
     let mut layout = builder.build(text);
+    layout.set_alignment(Alignment::Justify, AlignmentOptions::default());
     layout.break_all_lines(Some(150.0));
-    layout.align(Alignment::Justify, AlignmentOptions::default());
 
     env.check_layout_snapshot(&layout);
 
@@ -943,8 +953,8 @@ fn justify_with_multiple_trailing_spaces() {
     // because of a font size change).
     builder.push(StyleProperty::FontSize(15.9), 10..11);
     let mut layout = builder.build(text);
+    layout.set_alignment(Alignment::Justify, AlignmentOptions::default());
     layout.break_all_lines(Some(max_advance));
-    layout.align(Alignment::Justify, AlignmentOptions::default());
     env.check_cluster_snapshot(&layout, text, 12.0);
 }
 
@@ -960,8 +970,8 @@ fn trailing_nbsp_doesnt_hang_but_also_doesnt_justify_ltr() {
     let builder = env.ranged_builder(text);
 
     let mut layout = builder.build(text);
+    layout.set_alignment(Alignment::Justify, AlignmentOptions::default());
     layout.break_all_lines(Some(max_advance));
-    layout.align(Alignment::Justify, AlignmentOptions::default());
     env.check_cluster_snapshot(&layout, text, 12.0);
 }
 
@@ -981,8 +991,8 @@ fn trailing_nbsp_doesnt_hang_but_also_doesnt_justify_rtl() {
     builder.push_default(StyleProperty::WordSpacing(12.0));
 
     let mut layout = builder.build(text);
+    layout.set_alignment(Alignment::Justify, AlignmentOptions::default());
     layout.break_all_lines(Some(max_advance));
-    layout.align(Alignment::Justify, AlignmentOptions::default());
     env.check_cluster_snapshot(&layout, text, 12.0);
 }
 
@@ -1001,11 +1011,9 @@ fn content_widths() {
     } = layout.calculate_content_widths();
 
     layout.break_all_lines(Some(min_content_width));
-    layout.align(Alignment::Start, AlignmentOptions::default());
     env.with_name("min").check_layout_snapshot(&layout);
 
     layout.break_all_lines(Some(max_content_width));
-    layout.align(Alignment::Start, AlignmentOptions::default());
     env.with_name("max").check_layout_snapshot(&layout);
 }
 
@@ -1024,11 +1032,9 @@ fn content_widths_rtl() {
     } = layout.calculate_content_widths();
 
     layout.break_all_lines(Some(min_content_width));
-    layout.align(Alignment::Start, AlignmentOptions::default());
     env.with_name("min").check_layout_snapshot(&layout);
 
     layout.break_all_lines(Some(max_content_width));
-    layout.align(Alignment::Start, AlignmentOptions::default());
     assert!(
         layout.width() <= max_content_width,
         "Layout should never be wider than the max content width"
@@ -1075,7 +1081,6 @@ fn text_range_rtl() {
     let builder = env.ranged_builder(text);
     let mut layout = builder.build(text);
     layout.break_all_lines(Some(100.0));
-    layout.align(Alignment::Start, AlignmentOptions::default());
 
     for line in layout.lines() {
         for item in line.items() {
@@ -1091,19 +1096,16 @@ fn text_range_rtl() {
 }
 
 #[test]
-/// Layouts can be re-line-broken and re-aligned.
+/// Layouts can be re-line-broken, which re-aligns them.
 fn realign() {
     let mut env = TestEnv::new(test_name!(), None);
 
     let text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
     let builder = env.ranged_builder(text);
     let mut layout = builder.build(text);
-    layout.break_all_lines(Some(150.0));
-    for idx in 0..8 {
-        if [2, 3, 4].contains(&idx) {
-            layout.break_all_lines(Some(150.0));
-        }
-        layout.align(Alignment::Justify, AlignmentOptions::default());
+    layout.set_alignment(Alignment::Justify, AlignmentOptions::default());
+    for _ in 0..4 {
+        layout.break_all_lines(Some(150.0));
     }
     env.check_layout_snapshot(&layout);
 }
@@ -1138,7 +1140,7 @@ fn realign_all() {
                 ..AlignmentOptions::default()
             },
             "none",
-            "awo_true",
+            "align_when_overflowing_true",
         ),
         (
             None,
@@ -1147,7 +1149,7 @@ fn realign_all() {
                 ..AlignmentOptions::default()
             },
             "none",
-            "awo_false",
+            "align_when_overflowing_false",
         ),
     ];
 
@@ -1158,8 +1160,8 @@ fn realign_all() {
             for (max_advance, opts, _, _) in all_opts {
                 let builder = env.ranged_builder(text);
                 let mut layout = builder.build(text);
+                layout.set_alignment(alignment, opts);
                 layout.break_all_lines(max_advance);
-                layout.align(alignment, opts);
                 layouts.push(layout);
             }
         }
@@ -1169,7 +1171,7 @@ fn realign_all() {
     let mut idx = 0;
     for (text_idx, (_, text_name)) in texts.iter().enumerate() {
         for (_, align_name) in alignments {
-            for (max_advance, _, ma_name, opts_name) in all_opts {
+            for (_, _, ma_name, opts_name) in all_opts {
                 let layout = &layouts[idx];
                 idx += 1;
 
@@ -1181,13 +1183,8 @@ fn realign_all() {
                 for (top_alignment, align_name) in alignments {
                     for (top_max_advance, top_opts, ma_name, opts_name) in all_opts {
                         let mut top_layout = layout.clone();
-                        // Only break lines again if the max advance differs from base,
-                        // because otherwise we already have the correct line breaks.
-                        // We want to specifically test the optimization of skipping it.
-                        if max_advance != top_max_advance {
-                            top_layout.break_all_lines(top_max_advance);
-                        }
-                        top_layout.align(top_alignment, top_opts);
+                        top_layout.set_alignment(top_alignment, top_opts);
+                        top_layout.break_all_lines(top_max_advance);
 
                         let top_name = format!("{text_name}_{align_name}_{opts_name}_{ma_name}");
                         //env.with_name(&top_name).check_layout_snapshot(&top_layout);
@@ -1284,8 +1281,8 @@ fn trailing_whitespace_alignment_by_collapse_mode() {
         let mut builder = env.ranged_builder(text);
         builder.push_default(StyleProperty::WhiteSpaceCollapse(mode));
         let mut layout = builder.build(text);
+        layout.set_alignment(Alignment::End, AlignmentOptions::default());
         layout.break_all_lines(Some(60.0));
-        layout.align(Alignment::End, AlignmentOptions::default());
         env.with_name(test_case_name).check_layout_snapshot(&layout);
 
         let first_line_advance = layout.get(0).unwrap().metrics().advance;

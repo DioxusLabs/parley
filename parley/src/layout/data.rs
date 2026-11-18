@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use crate::inline_box::LayoutInlineBox;
-use crate::layout::spacing::{Justification, Spacing};
+use crate::layout::spacing::{Gaps, Justification, Spacing};
 use crate::layout::style_metrics::{BoxMetrics, StyleMetrics, inline_box_placement};
 use crate::layout::whitespace::whitespace_hangs;
 use crate::layout::{ContentWidths, LineMetrics, Style};
@@ -92,6 +92,8 @@ pub(crate) struct LineData {
     /// The number of justification opportunities on the line.
     pub(crate) num_justification_opportunities: u32,
     pub(crate) justification: Justification,
+    /// Whether any text run on this line has word or letter spacing.
+    pub(crate) has_spacing: bool,
     /// This line's entries in [`LayoutData::aligned_subtree_offsets`].
     ///
     /// Empty for lines with only baseline-relative content because the root aligned subtree
@@ -161,6 +163,11 @@ pub(crate) struct LineItemData {
     ///
     /// The bounds are atom-aligned.
     pub(crate) shaped_cluster_range: Range<u32>,
+    /// Index in [`LayoutData::cluster_gaps`] of this run's first shaped cluster's [`Gaps`].
+    ///
+    /// When there is no spacing or justification (i.e. no additional gaps), this is `None`.
+    /// Note that this is only initialised during alignment.
+    pub(crate) gaps_start: Option<u32>,
 }
 
 impl LineItemData {
@@ -208,6 +215,14 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) runs: Vec<RunData>,
     pub(crate) items: Vec<LayoutItem>,
 
+    // Settings for line breaking and alignment
+    pub(crate) alignment_setting: super::Alignment,
+    pub(crate) alignment_options: super::AlignmentOptions,
+    /// The text-indent amount in layout units.
+    pub(crate) indent_amount: f32,
+    /// Options controlling text-indent behavior.
+    pub(crate) indent_options: IndentOptions,
+
     // Output of line breaking
     /// The lines in the
     pub(crate) lines: Vec<LineData>,
@@ -228,12 +243,11 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) height: f32,
 
     // Output of alignment
-    /// The alignment that was applied to the layout, if any.
+    /// Additional spacing for shaped clusters with non-zero spacing or justification.
+    /// Each line item's spacing starts at [`LineItemData::gaps_start`].
+    pub(crate) cluster_gaps: Vec<Gaps>,
+    /// The alignment that was applied when the layout was line broken, if any.
     pub(crate) alignment: Option<super::Alignment>,
-    /// The text-indent amount in layout units.
-    pub(crate) indent_amount: f32,
-    /// Options controlling text-indent behavior (each-line, hanging).
-    pub(crate) indent_options: IndentOptions,
 }
 
 impl<B: Brush> Default for LayoutData<B> {
@@ -255,6 +269,9 @@ impl<B: Brush> Default for LayoutData<B> {
             lines: Vec::new(),
             line_items: Vec::new(),
             aligned_subtree_offsets: Vec::new(),
+            cluster_gaps: Vec::new(),
+            alignment_setting: super::Alignment::default(),
+            alignment_options: super::AlignmentOptions::default(),
             alignment: None,
             layout_max_advance: 0.0,
             indent_amount: 0.0,
@@ -284,6 +301,9 @@ impl<B: Brush> LayoutData<B> {
         self.lines.clear();
         self.line_items.clear();
         self.aligned_subtree_offsets.clear();
+        self.cluster_gaps.clear();
+        self.alignment_setting = super::Alignment::default();
+        self.alignment_options = super::AlignmentOptions::default();
         self.alignment = None;
     }
 
@@ -544,8 +564,9 @@ impl ContentWidthsMeasurer {
         }
 
         // The end of a layout is considered to be a forced line break as per CSS Text 4 § 5, so
-        // whitespace can hang conditionally.
-        if self.line_has_content {
+        // whitespace can hang conditionally. We consider an empty layout to still have at least one
+        // line (that way it gets, e.g., indentation).
+        if self.line_has_content || layout_data.items.is_empty() {
             self.hard_break();
         }
 
@@ -610,7 +631,9 @@ impl ContentWidthsMeasurer {
                     continue;
                 }
                 if SPACED {
-                    gap = spacing.gaps(whitespace).after;
+                    gap = spacing
+                        .gaps(whitespace, cluster.is_default_ignorable())
+                        .after;
                 }
             } else if skip_atom {
                 // The next line starts after the whole newline atom.

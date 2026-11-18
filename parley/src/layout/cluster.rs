@@ -6,6 +6,7 @@ use crate::layout::data::BreakReason;
 use crate::layout::layout::Layout;
 use crate::layout::line::{Line, LineItem};
 use crate::layout::run::Run;
+use crate::layout::spacing::Gaps;
 use crate::style::Brush;
 
 use core::ops::Range;
@@ -184,8 +185,22 @@ impl<'a, B: Brush> Cluster<'a, B> {
     /// [`Self::is_ligature_continuation`]), the shaped cluster's advance is split evenly over the
     /// clusters it overlaps.
     pub fn advance(&self) -> f32 {
-        let spacing = self.run.line_spacing();
-        spacing.grapheme_advance(&self.atom, self.grapheme, self.is_rtl())
+        let gaps = self
+            .run
+            .gaps()
+            .map_or(Gaps::ZERO, |cluster_gaps| cluster_gaps.for_atom(&self.atom));
+
+        // TODO: perhaps spacing should not be applied if the grapheme `Grapheme::continues_before`
+        // / `Grapheme::continues_after`. The same then should hold true in `gaps` computed for an
+        // atom.
+        let (owns_before, owns_after) = if self.is_rtl() {
+            (self.grapheme.is_atom_end(), self.grapheme.is_atom_start())
+        } else {
+            (self.grapheme.is_atom_start(), self.grapheme.is_atom_end())
+        };
+        self.grapheme.advance()
+            + if owns_before { gaps.before } else { 0. }
+            + if owns_after { gaps.after } else { 0. }
     }
 
     /// Returns `true` if this is a right-to-left cluster.
@@ -442,7 +457,7 @@ impl<'a, B: Brush> Cluster<'a, B> {
     /// on the containing line.
     pub fn visual_offset(&self) -> Option<f32> {
         let line = self.line();
-        let mut offset = line.metrics().offset;
+        let mut offset = line.metrics().offset + line.metrics().inline_min_coord;
         for run_index in 0..=self.run.index as usize {
             let item = line.item(run_index)?;
             match item {
@@ -548,7 +563,7 @@ mod tests {
 
     type Brush = ();
 
-    fn create_unaligned_layout() -> Layout<Brush> {
+    fn create_layout(alignment: Alignment) -> Layout<Brush> {
         let mut layout_ctx = LayoutContext::new();
         // TODO: Use a test font
         let mut font_ctx = FontContext::new();
@@ -556,13 +571,13 @@ mod tests {
         let mut builder = layout_ctx.ranged_builder(&mut font_ctx, text, 1.0, true);
         builder.push_default(StyleProperty::FontSize(10.));
         let mut layout = builder.build(text);
+        layout.set_alignment(alignment, AlignmentOptions::default());
         layout.break_all_lines(None);
         layout
     }
 
     fn cluster_from_position_with_alignment(alignment: Alignment) {
-        let mut layout = create_unaligned_layout();
-        layout.align(alignment, AlignmentOptions::default());
+        let layout = create_layout(alignment);
         assert_eq!(
             layout.len(),
             1,

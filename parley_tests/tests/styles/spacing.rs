@@ -4,10 +4,9 @@
 //! Tests for spacing style properties.
 
 use crate::test_name;
-use crate::util::{ColorBrush, TestEnv, samples};
-use parley::layout::Alignment;
+use crate::util::{ColorBrush, TestEnv, draw_layout, render_to_pixmap, samples};
+use parley::Layout;
 use parley::style::{LineHeight, StyleProperty};
-use parley::{AlignmentOptions, Layout};
 
 /// Helper to build a layout with line height applied
 fn build_with_line_height(
@@ -19,7 +18,6 @@ fn build_with_line_height(
     builder.push_default(StyleProperty::LineHeight(line_height));
     let mut layout = builder.build(text);
     layout.break_all_lines(None);
-    layout.align(Alignment::Start, AlignmentOptions::default());
     layout
 }
 
@@ -29,7 +27,6 @@ fn build_with_letter_spacing(env: &mut TestEnv, text: &str, spacing: f32) -> Lay
     builder.push_default(StyleProperty::LetterSpacing(spacing));
     let mut layout = builder.build(text);
     layout.break_all_lines(None);
-    layout.align(Alignment::Start, AlignmentOptions::default());
     layout
 }
 
@@ -39,7 +36,6 @@ fn build_with_word_spacing(env: &mut TestEnv, text: &str, spacing: f32) -> Layou
     builder.push_default(StyleProperty::WordSpacing(spacing));
     let mut layout = builder.build(text);
     layout.break_all_lines(None);
-    layout.align(Alignment::Start, AlignmentOptions::default());
     layout
 }
 
@@ -131,6 +127,51 @@ fn style_letter_spacing_with_ligatures() {
     let layout_with_spacing = build_with_letter_spacing(&mut env, text, 2.0);
     env.with_name("with_spacing")
         .check_layout_snapshot(&layout_with_spacing);
+}
+
+/// Modelled on the WPT test
+/// `css/css-text/letter-spacing/letter-spacing-control-chars-001.html`.
+#[test]
+fn style_letter_spacing_ignores_default_ignorables() {
+    let mut env = TestEnv::new(test_name!(), None);
+
+    let reference_text = "letterspacing";
+    let ref_layout = build_with_letter_spacing(&mut env, reference_text, 4.0);
+    let config = env.rendering_config();
+    let ref_image = render_to_pixmap(draw_layout(config, &ref_layout, None, &[]));
+    for (c, name) in [
+        ('\u{200B}', "ZERO WIDTH SPACE"),
+        ('\u{2060}', "WORD JOINER"),
+        ('\u{FEFF}', "ZERO WIDTH NO-BREAK SPACE"),
+        ('\u{00AD}', "SOFT HYPHEN"),
+        ('\u{200E}', "LEFT-TO-RIGHT MARK"),
+        ('\u{200C}', "ZERO WIDTH NON-JOINER"),
+        ('\u{200D}', "ZERO WIDTH JOINER"),
+    ] {
+        let text = format!("{c}let{c}ter{c}spac{c}ing{c}");
+
+        let layout = build_with_letter_spacing(&mut env, &text, 4.0);
+        assert_eq!(
+            layout.width(),
+            ref_layout.width(),
+            "{name}: the line advance should not change"
+        );
+
+        let config = env.rendering_config();
+        let test_img = render_to_pixmap(draw_layout(config, &layout, None, &[]));
+        assert!(
+            ref_image.width() == test_img.width()
+                && ref_image.height() == test_img.height()
+                && ref_image.data() == test_img.data(),
+            "{name}: the rendered layout should not change"
+        );
+        assert_eq!(
+            layout.calculate_content_widths().max,
+            ref_layout.calculate_content_widths().max,
+            "{name}: the max-content width should not change"
+        );
+        // We don't check min-content-width, as e.g. soft hypehn does introduce soft wrap opportunities.
+    }
 }
 
 // ============================================================================

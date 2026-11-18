@@ -49,14 +49,11 @@ pub(crate) fn shape_text<'a, B: Brush>(
     analysis: &Analysis,
     char_style_indices: &[u16],
     scx: &mut Shaper,
-    mut text: &str,
+    text: &str,
     layout: &mut Layout<B>,
+    style_features: &'a mut Vec<SmallVec<[FontFeature; 8]>>,
 ) {
-    // If we have both empty text and no inline boxes, shape with a fake space
-    // to generate metrics that can be used to size a cursor.
-    if text.is_empty() && inline_boxes.is_empty() {
-        text = " ";
-    }
+    let scale = layout.data.scale;
 
     // Do nothing if there is no text or styles (there should always be a default style)
     if text.is_empty() || styles.is_empty() {
@@ -77,26 +74,25 @@ pub(crate) fn shape_text<'a, B: Brush>(
 
     // Merge font features with letter-spacing ligature suppression.
     //
-    // TODO: This allocation is slightly unfortunate (though solvable). It's required currently,
+    // TODO: This copy is slightly unfortunate (though solvable). It's required currently,
     // because the iterator providing `ShapeOptions` has to provide a borrowed `&'a [FontFeature]`,
     // which cannot be tied to the lifetime of the call to `Iterator::next`. What we'd need is a
     // lending iterator (i.e., we probably just need to let `parley_engine` take some trait
     // providing the items).
-    let style_features: &'_ Vec<SmallVec<[FontFeature; 8]>> = &styles
-        .iter()
-        .map(|style| {
-            let style_features = rcx.features(style.font_features).unwrap_or(&[]);
-            if !nearly_zero(style.letter_spacing) {
-                // Later values override earlier values.
-                OPTIONAL_LIGATURES_OFF
-                    .into_iter()
-                    .chain(style_features.iter().copied())
-                    .collect()
-            } else {
-                style_features.iter().copied().collect()
-            }
-        })
-        .collect();
+    style_features.clear();
+    style_features.extend(styles.iter().map(|style| {
+        let style_features = rcx.features(style.font_features).unwrap_or(&[]);
+        if !nearly_zero(style.letter_spacing) {
+            // Later values override earlier values.
+            OPTIONAL_LIGATURES_OFF
+                .into_iter()
+                .chain(style_features.iter().copied())
+                .collect()
+        } else {
+            style_features.iter().copied().collect()
+        }
+    }));
+    let style_features = &*style_features;
 
     // Split when shaping-relevant style properties change and at out-of-flow boxes.
     let items = {
@@ -172,6 +168,9 @@ pub(crate) fn shape_text<'a, B: Brush>(
                 options: ShapeOptions {
                     language: item_style.locale,
                     font_size: item_style.font_size,
+                    // TODO: Keep the logical font size in `ResolvedStyle` instead of
+                    // dividing the scale back out.
+                    point_size: item_style.font_size / scale,
                     features: &style_features[item_style_index as usize],
                     variations: rcx.variations(item_style.font_variations).unwrap_or(&[]),
                 },
@@ -399,19 +398,22 @@ impl<'a, 'b, B: Brush> parley_engine::FontSelector for FontSelector<'a, 'b, B> {
         let mut best_coverage = Coverage::NONE;
 
         self.query.matches_with(|font| {
-            let Some(charmap) = font.charmap() else {
-                return fontique::QueryStatus::Continue;
-            };
-
+            // Only create the charmap if the character is the unicode range, as the the range check
+            // is a lot cheaper than creating the charmap. That matters if families are split into
+            // many subsets.
+            let mut charmap = None;
             let coverage = cluster.calculate_coverage(|ch| {
-                charmap
-                    .map(ch)
-                    .map(|g| {
+                font.in_unicode_range(ch)
+                    && charmap
+                        .get_or_insert_with(|| font.charmap())
+                        .as_ref()
+                        .and_then(|charmap| charmap.map(ch))
                         // Any non-zero value indicates the existence of a glyph.
-                        g != 0
-                    })
-                    .unwrap_or_default()
+                        .is_some_and(|g| g != 0)
             });
+            if let Some(None) = charmap {
+                return fontique::QueryStatus::Continue;
+            }
             if coverage > best_coverage {
                 selected_font = Some(font);
                 best_coverage = coverage;

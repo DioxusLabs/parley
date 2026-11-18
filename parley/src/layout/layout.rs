@@ -3,8 +3,8 @@
 
 use crate::IndentOptions;
 use crate::InlineBox;
-use crate::layout::alignment::align;
 use crate::layout::data::LayoutData;
+use crate::layout::style_metrics::StyleMetrics;
 use crate::layout::{
     ContentWidths, SpanMetrics, Style, alignment::Alignment, alignment::AlignmentOptions,
     line::Line, line_break::BreakLines,
@@ -76,11 +76,10 @@ impl<B: Brush> Layout<B> {
     /// The motivating use case is placing bullet list markers - Blink uses the root
     /// span's ascent and descent for their location and size.
     pub fn root_span_metrics(&self) -> Option<SpanMetrics> {
-        self.data.style_metrics.first().map(|it| SpanMetrics {
-            ascent: it.ascent,
-            descent: it.descent,
-            x_height: it.x_height,
-        })
+        self.data
+            .style_metrics
+            .first()
+            .map(StyleMetrics::span_metrics)
     }
 
     /// Returns the length of the source text, in bytes.
@@ -88,9 +87,10 @@ impl<B: Brush> Layout<B> {
         self.data.text_len
     }
 
-    /// Returns the alignment that was applied to the layout by [`Layout::align`].
+    /// Returns the alignment that was active when lines were most recently broken.
     ///
-    /// Returns `None` if the layout has not been aligned since it was last built.
+    /// This returns `None` if [`Layout::break_all_lines`] or [`Layout::break_lines`] have
+    /// not been called since the layout was last built or [cleared](Self::clear).
     pub fn alignment(&self) -> Option<Alignment> {
         self.data.alignment
     }
@@ -191,6 +191,61 @@ impl<B: Brush> Layout<B> {
         }
     }
 
+    /// Returns the line containing `byte_index` and the x-coordinate of the primary caret there.
+    ///
+    /// The primary caret is where text in the paragraph's direction would be inserted. Where the
+    /// text direction changes, this would be the position of a bidi neutral.
+    ///
+    /// This can be useful to, e.g., anchor things to the text that don't take part in layout.
+    ///
+    /// Returns `None` if the layout hasn't been broken into lines. See [`Self::break_lines`] and
+    /// [`Self::break_all_lines`].
+    pub fn primary_caret(&self, byte_index: usize) -> Option<(Line<'_, B>, f32)> {
+        let byte_index = byte_index.min(self.data.text_len);
+
+        // The last line starting at or before `byte_index`.
+        let index = self
+            .data
+            .lines
+            .partition_point(|line| line.text_range.start <= byte_index);
+        let line = self.get(index.checked_sub(1)?)?;
+
+        let cluster_at = |byte_index| {
+            line.runs()
+                .find_map(|run| run.cluster_at_text_byte(byte_index))
+        };
+        let before = byte_index.checked_sub(1).and_then(cluster_at);
+        let after = cluster_at(byte_index);
+        let [before_level, after_level] = [before, after]
+            .map(|cluster| cluster.map_or(self.data.base_level, |c| c.run.shaped.bidi_level));
+
+        // A bidi-neutral would take the lower of its neighbors' bidi levels, so it sits against
+        // that neighbor.
+        //
+        // We're either at the trailing edge of the character before, or the leading edge of the
+        // character after. Trailing is right in LTR, leading is left in LTR. Vice-versa for RTL.
+        let trailing = before_level <= after_level;
+        let neighbor = if trailing { before } else { after };
+        let x = match neighbor {
+            Some(cluster) => {
+                let right = trailing != cluster.is_rtl();
+                cluster.visual_offset()? + if right { cluster.advance() } else { 0. }
+            }
+            // If there's no neighbor, place the caret at the line's start edge if we're trailing,
+            // or end edge if we're leading.
+            None => {
+                let metrics = line.metrics();
+                let left = metrics.offset + metrics.inline_min_coord;
+                if trailing != self.is_rtl() {
+                    left
+                } else {
+                    left + line.runs().map(|run| run.advance()).sum::<f32>()
+                }
+            }
+        };
+        Some((line, x))
+    }
+
     /// Returns an iterator over the lines in the layout.
     pub fn lines(
         &self,
@@ -212,14 +267,33 @@ impl<B: Brush> Layout<B> {
     /// available width for line breaking and offsetting content during alignment. Negative
     /// values cause the line to protrude beyond the start edge.
     ///
-    /// This must be called before [`Layout::break_all_lines`] or [`Layout::break_lines`],
-    /// and before [`Layout::align`].
+    /// This must be called before [`Layout::break_all_lines`] or [`Layout::break_lines`].
+    /// The text indentation is reset to zero when the layout is [cleared](Self::clear) or built into.
     pub fn set_text_indent(&mut self, amount: f32, options: IndentOptions) {
         self.data.indent_amount = amount;
         self.data.indent_options = options;
     }
 
+    /// Set the alignment for the layout.
+    ///
+    /// This only takes effect the next time [`Layout::break_all_lines`] or [`Layout::break_lines`] is called.
+    /// The currently active value can be read as [`Self::alignment`].
+    ///
+    /// If a finite `max_advance` is supplied to `Layout::break_all_lines` then alignment will be applied
+    /// relative to that width. Otherwise alignment will be applied relative to the width of the
+    /// longest line as computed by line breaking.
+    ///
+    /// If line-specific `offset` and `max_advance` are set using the advanced methods on the `BreakLines`
+    /// struct then each line will be aligned individually within its line box.
+    ///
+    /// The alignment to be used is reset to [`Alignment::Start`] when the layout is [cleared](Self::clear) or built into.
+    pub fn set_alignment(&mut self, alignment: Alignment, options: AlignmentOptions) {
+        self.data.alignment_setting = alignment;
+        self.data.alignment_options = options;
+    }
+
     /// Returns line breaker to compute lines for the layout.
+    // TODO: You must call [`BreakLines::finish`]?
     pub fn break_lines(&mut self) -> BreakLines<'_, B> {
         BreakLines::new(self)
     }
@@ -228,21 +302,6 @@ impl<B: Brush> Layout<B> {
     pub fn break_all_lines(&mut self, max_advance: Option<f32>) {
         self.break_lines()
             .break_remaining(max_advance.unwrap_or(f32::MAX));
-    }
-
-    /// Apply alignment to the layout.
-    ///
-    /// You must perform line breaking prior to aligning, through [`Layout::break_lines`] or
-    /// [`Layout::break_all_lines`].
-    ///
-    /// If a finite `max_advance` is supplied to `Layout::break_all_lines` then that width will be applied
-    /// relative to that width. Otherwise alignment will be applied relative to the width of the
-    /// longest line as computed by line breaking.
-    ///
-    /// If line-specific `offset` and `max_advance` are set using the advanced methods on the `BreakLines`
-    /// struct then each line will be aligned individually within its line box.
-    pub fn align(&mut self, alignment: Alignment, options: AlignmentOptions) {
-        align(&mut self.data, alignment, options);
     }
 
     /// Returns the index and `Line` object for the line containing the

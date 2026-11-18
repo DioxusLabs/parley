@@ -10,9 +10,9 @@ use std::sync::Arc;
 
 use fontique::{Blob, Collection, CollectionOptions, SourceCache};
 use parley::{
-    BoundingBox, FontContext, FontFamily, FontFamilyName, Layout, LayoutContext, LineHeight,
-    PlainEditor, PlainEditorDriver, PositionedLayoutItem, RangedBuilder, StyleProperty, TextStyle,
-    TreeBuilder,
+    Alignment, AlignmentOptions, BoundingBox, FontContext, FontFamily, FontFamilyName, Layout,
+    LayoutContext, LineHeight, PlainEditor, PlainEditorDriver, PositionedLayoutItem, RangedBuilder,
+    StyleProperty, TextStyle, TreeBuilder,
 };
 use peniko::{Color, kurbo::Size};
 use vello_cpu::Pixmap;
@@ -87,7 +87,7 @@ pub(crate) fn load_fonts(
                 continue;
             }
             let font_data = std::fs::read(&path)?;
-            collection.register_fonts(Blob::new(Arc::new(font_data)), None);
+            collection.register_font(Blob::new(Arc::new(font_data)), 0, None);
         }
     }
     Ok(())
@@ -329,6 +329,8 @@ impl TestEnv {
                     builder.push_default(StyleProperty::FontSize(char_info_font_size));
                     builder.push_default(StyleProperty::Brush(ColorBrush::new(CLUSTER_INFO_COLOR)));
                     let mut grapheme_layout = builder.build(grapheme);
+                    // TODO: Maybe Center or Start alignment would be better?
+                    grapheme_layout.set_alignment(Alignment::Left, AlignmentOptions::default());
                     grapheme_layout.break_all_lines(Some(400.0));
                     grapheme_layouts.insert(grapheme.to_string(), grapheme_layout);
                 }

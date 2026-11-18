@@ -3,7 +3,10 @@
 
 //! Additional advance applied on top of shaped advance.
 
-use parley_engine::{Atom, Grapheme, ShapedSlice, shape::Whitespace};
+use alloc::vec::Vec;
+use core::ops::Range;
+use parley_engine::shape::Whitespace;
+use parley_engine::{Atom, ShapedSlice};
 
 /// Whether the whitespace is a word separator.
 ///
@@ -31,7 +34,7 @@ pub(crate) fn is_word_separator(whitespace: Whitespace) -> bool {
 /// disable optional ligation when shaping).
 ///
 /// [css-spacing]: https://www.w3.org/TR/css-text-4/#spacing
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub(crate) struct Gaps {
     /// For horizontal text, additional spacing visually to the left.
     ///
@@ -96,18 +99,35 @@ impl Spacing {
         self.word == 0. && self.letter == 0.
     }
 
-    /// The gaps around an atom whose first character has the given whitespace class.
+    /// The gaps around an atom whose first character:
+    /// - has the given whitespace class, and
+    /// - has the given value for its [`CharacterFlags::is_default_ignorable`].
     ///
     /// This is [`EffectiveSpacing::gaps`] under [`Justification::NONE`].
+    ///
+    /// In CSS [letter-spacing][] ignores "invisible zero-width formatting characters", but
+    /// doesn't specify an exact list. Blink chooses to ignore clusters which start with a default
+    /// ignorable character, so we do the same. Blink does additionally hardcode skipping letter-spacing
+    /// for U+000C FORM FEED, but we choose not to, as the WPTs suggest it should have ink.
+    ///
+    /// Only checking the first character does sometimes cause undesirable results, primarily due to
+    /// U+115F HANGUL CHOSEONG FILLER. Blink has the same bug, but fixing this would be welcome.
+    ///
+    /// [`CharacterFlags::is_default_ignorable`]: parley_engine::shape::CharacterFlags::is_default_ignorable
+    /// [letter-spacing]: https://www.w3.org/TR/css-text-4/#letter-spacing-property
     #[inline(always)]
-    pub(crate) fn gaps(self, whitespace: Whitespace) -> Gaps {
+    pub(crate) fn gaps(self, whitespace: Whitespace, is_default_ignorable: bool) -> Gaps {
         if whitespace == Whitespace::Newline {
             return Gaps::ZERO;
         }
 
         let mut gaps = Gaps {
             before: 0.,
-            after: self.letter,
+            after: if is_default_ignorable {
+                0.
+            } else {
+                self.letter
+            },
         };
 
         if is_word_separator(whitespace) {
@@ -172,8 +192,11 @@ impl EffectiveSpacing {
     /// The gaps around `atom`.
     #[inline(always)]
     pub(crate) fn gaps(self, atom: &Atom<'_>) -> Gaps {
-        let whitespace = atom.characters()[0].whitespace;
-        let mut gaps = self.spacing.gaps(whitespace);
+        let first_cluster = atom.shaped_clusters()[0];
+        let whitespace = first_cluster.whitespace();
+        let mut gaps = self
+            .spacing
+            .gaps(whitespace, first_cluster.is_default_ignorable());
 
         if is_word_separator(whitespace)
             && atom.shaped_clusters_range().end <= self.justification.justification_end_cluster
@@ -189,41 +212,69 @@ impl EffectiveSpacing {
     pub(crate) fn atom_advance(self, atom: &Atom<'_>) -> f32 {
         atom.advance() + self.gaps(atom).total()
     }
+}
 
-    /// The total advance of `grapheme`, i.e., the sum of the shaped advance and gaps.
-    ///
-    /// This only adds the gap that the grapheme owns, i.e., if that grapheme boundary is also an
-    /// atom boundary.
-    pub(crate) fn grapheme_advance(self, atom: &Atom<'_>, grapheme: Grapheme, is_rtl: bool) -> f32 {
-        let gaps = self.gaps(atom);
-
-        // TODO: perhaps spacing should not be applied if the grapheme `continues_before` /
-        // `continues_after`. The same then should hold true in `gaps` computed for an atom.
-        let (owns_before, owns_after) = if is_rtl {
-            (grapheme.is_atom_end(), grapheme.is_atom_start())
+/// Write the [`Gaps`] for the shaped clusters in `slice` into `cluster_gaps`,
+/// given that `spacing` applies.
+pub(crate) fn push_cluster_gaps(
+    cluster_gaps: &mut Vec<Gaps>,
+    slice: ShapedSlice<'_>,
+    spacing: EffectiveSpacing,
+    is_rtl: bool,
+) {
+    let start = cluster_gaps.len();
+    cluster_gaps.resize(start + slice.shaped_clusters().len(), Gaps::ZERO);
+    let entries = &mut cluster_gaps[start..];
+    let base = slice.shaped_clusters_range().start;
+    for atom in slice.atoms_start() {
+        let gaps = spacing.gaps(&atom);
+        if gaps.before == 0. && gaps.after == 0. {
+            continue;
+        }
+        let clusters = atom.shaped_clusters();
+        let (first, last) = if is_rtl {
+            (clusters.len() - 1, 0)
         } else {
-            (grapheme.is_atom_start(), grapheme.is_atom_end())
+            (0, clusters.len() - 1)
         };
+        let offset = (atom.shaped_clusters_range().start - base) as usize;
+        entries[offset + first].before += gaps.before;
+        entries[offset + last].after += gaps.after;
+    }
+}
 
-        grapheme.advance()
-            + if owns_before { gaps.before } else { 0. }
-            + if owns_after { gaps.after } else { 0. }
+/// A slice of the [`Gaps`] for the shaped clusters with global indices
+/// `run_cluster_start..run_cluster_start + entries.len()`
+#[derive(Copy, Clone, Debug)]
+pub(crate) struct RunGaps<'a> {
+    entries: &'a [Gaps],
+    /// The global index of the first shaped cluster whose gap is in `entries`.
+    /// (That is, to get the index of a shaped cluster's gaps in `entries`, we subtract
+    /// `run_cluster_start` from its global index).
+    run_cluster_start: u32,
+}
+
+impl<'a> RunGaps<'a> {
+    #[inline]
+    pub(crate) fn new(entries: &'a [Gaps], run_cluster_start: u32) -> Self {
+        Self {
+            entries,
+            run_cluster_start,
+        }
     }
 
-    /// The total advance of `slice`, i.e., the sum of shaped advances and gaps.
     #[inline]
-    pub(crate) fn slice_advance(self, slice: ShapedSlice<'_>) -> f32 {
-        if self.is_zero() {
-            slice
-                .shaped_clusters()
-                .iter()
-                .map(|cluster| cluster.advance)
-                .sum()
-        } else {
-            slice
-                .atoms_start()
-                .map(|atom| self.atom_advance(&atom))
-                .sum()
+    pub(crate) fn for_cluster_range(self, range: Range<u32>) -> &'a [Gaps] {
+        &self.entries[(range.start - self.run_cluster_start) as usize
+            ..(range.end - self.run_cluster_start) as usize]
+    }
+
+    pub(crate) fn for_atom(self, atom: &Atom<'_>) -> Gaps {
+        let mut gaps = Gaps::ZERO;
+        for entry in self.for_cluster_range(atom.shaped_clusters_range()) {
+            gaps.before += entry.before;
+            gaps.after += entry.after;
         }
+        gaps
     }
 }

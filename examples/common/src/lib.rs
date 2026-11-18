@@ -19,8 +19,8 @@ use std::time::Instant;
 use parley::VerticalAlign;
 use parley::fontique::Blob;
 use parley::{
-    Alignment, AlignmentOptions, FontContext, FontFamily, FontWeight, GenericFamily, InlineBox,
-    InlineBoxKind, Layout, LayoutContext, LineHeight, StyleProperty,
+    FontContext, FontFamily, FontWeight, GenericFamily, InlineBox, InlineBoxKind, Layout,
+    LayoutContext, LineHeight, StyleProperty,
 };
 use peniko::Color;
 
@@ -156,7 +156,6 @@ pub fn build_simple_layout(
 
     let mut layout = builder.build(&config.text);
     layout.break_all_lines(config.max_advance);
-    layout.align(Alignment::Start, AlignmentOptions::default());
 
     let width = layout.width().ceil() as u16;
     let height = layout.height().ceil() as u16;
@@ -177,7 +176,7 @@ pub fn build_rich_layout(
     let colr_font_data = std::fs::read(colr_font_path).expect("Failed to load COLR font");
     font_cx
         .collection
-        .register_fonts(Blob::new(Arc::new(colr_font_data)), None);
+        .register_font(Blob::new(Arc::new(colr_font_data)), 0, None);
 
     let (underline_range, strikethrough_range, party_emoji_range) = style_ranges(&config.text);
 
@@ -219,7 +218,6 @@ pub fn build_rich_layout(
 
     let mut layout = builder.build(&config.text);
     layout.break_all_lines(config.max_advance);
-    layout.align(Alignment::Start, AlignmentOptions::default());
 
     let width = layout.width().ceil() as u16;
     let height = layout.height().ceil() as u16;
