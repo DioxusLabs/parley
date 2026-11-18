@@ -3,9 +3,11 @@
 
 //! Model for a font.
 
-use crate::{CharmapIndex, UnicodeRangeSet};
+use crate::{AtomicCounter, CharmapIndex, UnicodeRangeSet};
+use alloc::{boxed::Box, vec::Vec};
+use core::sync::atomic::Ordering;
 
-use super::source::{SourceInfo, SourceKind};
+use super::source::{PendingFontStatus, PendingSource, SourceInfo, SourceKind};
 use super::{Blob, source_cache::SourceCache};
 use crate::{FontStyle, FontStyleRange, FontWeight, FontWeightRange, FontWidth, FontWidthRange};
 use parlance::Synthesis;
@@ -14,9 +16,34 @@ use smallvec::SmallVec;
 
 type AxisVec = SmallVec<[AxisInfo; 1]>;
 
+/// Unique identifier for a font.
+///
+/// Every [`FontInfo`] is given one when it is created, and keeps it when it is
+/// cloned or has overrides applied, so an identifier names the same font in every
+/// copy of a collection.
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[repr(transparent)]
+pub struct FontId(u64);
+
+impl FontId {
+    /// Creates a new unique identifier.
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        static ID_COUNTER: AtomicCounter = AtomicCounter::new(1);
+        #[allow(clippy::useless_conversion, reason = "Not useless on 32-bit platforms")]
+        Self(ID_COUNTER.fetch_add(1, Ordering::Relaxed).into())
+    }
+
+    /// Returns the underlying integer value.
+    pub fn to_u64(self) -> u64 {
+        self.0
+    }
+}
+
 /// Representation of a single font in a family.
 #[derive(Clone, Debug)]
 pub struct FontInfo {
+    id: FontId,
     source: SourceInfo,
     index: u32,
     width: FontWidthRange,
@@ -32,6 +59,7 @@ impl FontInfo {
     /// Creates a new font object from the given source and index.
     pub fn from_source(source: SourceInfo, index: u32) -> Option<Self> {
         match &source.kind {
+            SourceKind::Pending(_) => None,
             #[cfg(feature = "std")]
             SourceKind::Path(path) => {
                 let file = std::fs::File::open(&**path).ok()?;
@@ -44,6 +72,15 @@ impl FontInfo {
                 Self::from_font_ref(&font, source.clone(), index)
             }
         }
+    }
+
+    /// Returns the unique identifier for the font.
+    pub fn id(&self) -> FontId {
+        self.id
+    }
+
+    pub(crate) fn set_id(&mut self, id: FontId) {
+        self.id = id;
     }
 
     /// Returns an object describing how to locate the data containing this
@@ -63,6 +100,7 @@ impl FontInfo {
             source_cache.get(&self.source)
         } else {
             match &self.source.kind {
+                SourceKind::Pending(_) => None,
                 SourceKind::Memory(blob) => Some(blob.clone()),
                 #[cfg(feature = "std")]
                 SourceKind::Path(path) => super::source_cache::load_blob(path),
@@ -228,6 +266,49 @@ impl FontInfo {
 }
 
 impl FontInfo {
+    pub(crate) fn new_pending(id: FontId, info: &FontInfoOverride<'_>) -> Self {
+        let mut font = Self {
+            id,
+            source: SourceInfo::new(
+                super::source::SourceId::new(),
+                SourceKind::Pending(PendingSource {
+                    status: PendingFontStatus::Unloaded,
+                    overrides: Box::new(PendingOverrides {
+                        width: info.width,
+                        style: info.style,
+                        weight: info.weight,
+                        axes: info.axes.map(<[_]>::to_vec),
+                        unicode_range: info.unicode_range.cloned(),
+                    }),
+                }),
+            ),
+            index: 0,
+            width: FontWidthRange::default(),
+            style: FontStyleRange::default(),
+            weight: FontWeightRange::default(),
+            axes: AxisVec::default(),
+            attr_axes: 0,
+            charmap_index: CharmapIndex::default(),
+            unicode_range: None,
+        };
+        font.apply_override(info);
+        font
+    }
+
+    /// The pending source of a descriptor-only font, and `None` for a font with data.
+    pub fn pending(&self) -> Option<&PendingSource> {
+        match &self.source.kind {
+            SourceKind::Pending(pending) => Some(pending),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn set_pending_status(&mut self, status: PendingFontStatus) {
+        if let SourceKind::Pending(pending) = &mut self.source.kind {
+            pending.status = status;
+        }
+    }
+
     pub(crate) fn from_font_ref(
         font: &FontRef<'_>,
         source: SourceInfo,
@@ -276,6 +357,7 @@ impl FontInfo {
             FontWeightRange::new(FontWeight::new(min), FontWeight::new(max))
         });
         Some(Self {
+            id: FontId::new(),
             source,
             index,
             width,
@@ -336,6 +418,31 @@ const WIDTH_AXIS: u8 = 0x02;
 const SLANT_AXIS: u8 = 0x04;
 const ITALIC_AXIS: u8 = 0x08;
 const OPTICAL_SIZE_AXIS: u8 = 0x10;
+
+/// The descriptors a pending font was registered with. Unlike the [`FontInfo`] of the
+/// pending font, this records which of them were given, which decides whether a value
+/// read from the font's data is replaced once the data arrives.
+#[derive(Clone)]
+pub(crate) struct PendingOverrides {
+    width: Option<FontWidthRange>,
+    style: Option<FontStyleRange>,
+    weight: Option<FontWeightRange>,
+    axes: Option<Vec<(Tag, f32)>>,
+    unicode_range: Option<UnicodeRangeSet>,
+}
+
+impl PendingOverrides {
+    pub(crate) fn as_override(&self) -> FontInfoOverride<'_> {
+        FontInfoOverride {
+            family_name: None,
+            width: self.width,
+            style: self.style,
+            weight: self.weight,
+            axes: self.axes.as_deref(),
+            unicode_range: self.unicode_range.as_ref(),
+        }
+    }
+}
 
 /// An axis of variation for a variable font.
 ///
@@ -537,9 +644,7 @@ mod tests {
 
         let synthesis = font.synthesis(FontWidth::NORMAL, FontStyle::Normal, FontWeight::NORMAL);
         assert_eq!(
-            synthesis
-                .variation_settings()
-                .collect::<alloc::vec::Vec<_>>(),
+            synthesis.variation_settings().collect::<Vec<_>>(),
             [(parlance::Tag::new(b"wght"), FontWeight::NORMAL.value())]
         );
         assert!(!synthesis.embolden());
@@ -558,18 +663,14 @@ mod tests {
 
         let synthesis = font.synthesis(FontWidth::NORMAL, FontStyle::Normal, FontWeight::BOLD);
         assert_eq!(
-            synthesis
-                .variation_settings()
-                .collect::<alloc::vec::Vec<_>>(),
+            synthesis.variation_settings().collect::<Vec<_>>(),
             [(parlance::Tag::new(b"wght"), 500.)]
         );
         assert!(!synthesis.embolden());
 
         let synthesis = font.synthesis(FontWidth::NORMAL, FontStyle::Normal, FontWeight::THIN);
         assert_eq!(
-            synthesis
-                .variation_settings()
-                .collect::<alloc::vec::Vec<_>>(),
+            synthesis.variation_settings().collect::<Vec<_>>(),
             [(parlance::Tag::new(b"wght"), 300.)]
         );
     }
