@@ -594,13 +594,12 @@ impl ContentWidthsMeasurer {
         // The cluster index at which nothing has been placed on the current line yet, if any.
         let mut empty_at = if self.line_has_content { usize::MAX } else { 0 };
 
-        let mut atom_hangs = false;
         let mut skip_atom = false;
         for (i, cluster) in clusters.iter().enumerate() {
             let whitespace = cluster.whitespace();
             let style = &styles[cluster.style_index as usize];
-            let is_atom_start = i == 0 || cluster.is_grapheme_start();
-            if is_atom_start {
+            let mut advance = cluster.advance;
+            if i == 0 || cluster.is_grapheme_start() {
                 skip_atom = false;
                 let prev_text_wrap_mode = self.text_wrap_mode;
                 self.text_wrap_mode = style.text_wrap_mode;
@@ -618,30 +617,30 @@ impl ContentWidthsMeasurer {
                     skip_atom = true;
                     continue;
                 }
+                if SPACED {
+                    // Each atom gets spacing exactly once, and we don't maintain per-cluster
+                    // advances, so we can just add it eagerly.
+                    advance += spacing
+                        .gaps(whitespace, cluster.is_default_ignorable())
+                        .total();
+                }
             } else if skip_atom {
                 // The next line starts after the whole newline atom.
                 empty_at = i + 1;
                 continue;
             }
 
-            let mut advance = cluster.advance;
-            if SPACED && is_atom_start {
-                // Each atom gets spacing exactly once, and we don't maintain per-cluster advances,
-                // so we can just add it eagerly.
-                advance += spacing
-                    .gaps(whitespace, cluster.is_default_ignorable())
-                    .total();
-            }
             self.running_min_width += advance;
             self.running_max_width += advance;
 
             // A cluster hangs if all of its characters hang. Its first character is checked via the
             // cached flags so the common case never touches `characters`.
-            atom_hangs = whitespace_hangs(whitespace, style)
+            // We only hang whole atoms, and a non-newline multi-cluster atom always contains a
+            // non-hanging character (e.g. a prepend character before a space, or a combining mark
+            // after one), so continuation clusters never hang.
+            let hangs = whitespace_hangs(whitespace, style)
                 && can_hang
-                // We only hang in full atoms, so we can only actually hang this
-                // cluster if every prior cluster in the atom was hanging.
-                && (is_atom_start || atom_hangs)
+                && (i == 0 || cluster.is_grapheme_start())
                 && (cluster.char_len() == 1
                     || slice
                         .characters_in(cluster.chars_range())
@@ -652,7 +651,7 @@ impl ContentWidthsMeasurer {
                                 &styles[character.style_index as usize],
                             )
                         }));
-            if atom_hangs {
+            if hangs {
                 self.running_hanging_whitespace += advance;
                 self.hangs_conditionally =
                     style.white_space_collapse == WhiteSpaceCollapse::Preserve;
