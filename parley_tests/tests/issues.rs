@@ -40,7 +40,7 @@ fn issue_489() {
         let item = line.items().next().unwrap();
         let glyph_run = match item {
             PositionedLayoutItem::GlyphRun(glyph_run) => glyph_run,
-            PositionedLayoutItem::InlineBox(_) => unreachable!(),
+            PositionedLayoutItem::InlineBox(_) | PositionedLayoutItem::Anchor(_) => unreachable!(),
         };
 
         assert!(!glyph_run.run().is_rtl());

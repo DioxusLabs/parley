@@ -1,7 +1,6 @@
 // Copyright 2025 the Parley Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use crate::FloatedBox;
 use crate::IndentOptions;
 use crate::InlineBox;
 use crate::layout::data::LayoutData;
@@ -11,6 +10,7 @@ use crate::layout::{
     line::Line, line_break::BreakLines,
 };
 use crate::style::Brush;
+use crate::{Anchor, FloatedBox};
 
 use core::cmp::Ordering;
 use core::fmt;
@@ -190,6 +190,13 @@ impl<B: Brush> Layout<B> {
     /// Iterator over floated boxes in text index order.
     pub fn floated_boxes(&self) -> impl ExactSizeIterator<Item = &FloatedBox> + '_ {
         self.data.floated_boxes.iter()
+    }
+
+    /// Returns an iterator over the anchors in the layout, in text order.
+    ///
+    /// Their positions are reported by [`Line::items`].
+    pub fn anchors(&self) -> impl ExactSizeIterator<Item = &Anchor> + '_ {
+        self.data.anchors.iter()
     }
 
     /// Returns the line containing `byte_index` and the x-coordinate of the primary caret there.

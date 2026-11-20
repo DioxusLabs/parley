@@ -122,6 +122,7 @@ fn main() {
                 PositionedLayoutItem::GlyphRun(glyph_run) => {
                     render_glyph_run(&glyph_run, &mut pen, padding);
                 }
+                PositionedLayoutItem::Anchor(_) => {}
                 PositionedLayoutItem::InlineBox(inline_box) => {
                     pen.set_origin(inline_box.x + padding as f32, inline_box.y + padding as f32);
                     pen.set_color(foreground_color);

@@ -350,6 +350,7 @@ fn walk_items(layout: &Layout<ColorBrush>) -> (usize, f32) {
                         advance += glyph.advance;
                     }
                 }
+                PositionedLayoutItem::Anchor(_) => {}
                 PositionedLayoutItem::InlineBox(inline_box) => {
                     advance += inline_box.width;
                 }

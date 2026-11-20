@@ -132,7 +132,48 @@ impl<'a, B: Brush> Line<'a, B> {
             item_index: 0,
             clusters_consumed: 0,
             offset: 0.,
+            anchors: self.anchor_range(),
+            pending_anchors: (0, 0),
+            leading_anchors_done: false,
+            phase: 0,
         }
+    }
+
+    /// The range of the layout's anchors that are on this line.
+    ///
+    /// An anchor at the line's start is on this line only if the line doesn't continue from a
+    /// soft wrap; one at the line's end is on this line unless the line ends in a forced break.
+    fn anchor_range(&self) -> (usize, usize) {
+        let anchors = &self.layout.data.anchors;
+        if anchors.is_empty() {
+            return (0, 0);
+        }
+        let range = self.data.text_range;
+        let ends_in_forced_break = |line: &LineData| {
+            line.break_reason == BreakReason::Explicit && !line.text_range.is_empty()
+        };
+        let owns_start = self
+            .index
+            .checked_sub(1)
+            .and_then(|prev| self.layout.data.lines.get(prev as usize))
+            .is_none_or(ends_in_forced_break);
+        let is_last = self.index as usize + 1 == self.layout.data.lines.len();
+        let owns_end = is_last || !ends_in_forced_break(self.data);
+        let start = anchors.partition_point(|a| {
+            if owns_start {
+                a.index < range.start
+            } else {
+                a.index <= range.start
+            }
+        });
+        let end = anchors.partition_point(|a| {
+            if owns_end {
+                a.index <= range.end
+            } else {
+                a.index < range.end
+            }
+        });
+        (start, end.max(start))
     }
 }
 
@@ -230,6 +271,18 @@ impl LineMetrics {
 pub enum PositionedLayoutItem<'a, B: Brush> {
     GlyphRun(GlyphRun<'a, B>),
     InlineBox(PositionedInlineBox),
+    /// An [`Anchor`](crate::Anchor) on this line. Anchors are not yielded in text order.
+    Anchor(PositionedAnchor),
+}
+
+/// The computed position of an [`Anchor`](crate::Anchor) within a layout
+#[derive(Debug, Clone)]
+pub struct PositionedAnchor {
+    /// The [`Anchor::id`](crate::Anchor::id) of this anchor.
+    pub id: u64,
+    /// The [`Anchor::index`](crate::Anchor::index) of this anchor.
+    pub index: usize,
+    pub x: f32,
 }
 
 /// The computed position of an inline box within a layout
@@ -333,6 +386,15 @@ struct GlyphRunIter<'a, B: Brush> {
     /// Cursor within the shaped clusters of the run at `item_index` in visual order.
     clusters_consumed: u32,
     offset: f32,
+    /// The range of the layout's anchors that are on this line.
+    anchors: (usize, usize),
+    /// The range of the layout's anchors to yield at the current `offset`.
+    pending_anchors: (usize, usize),
+    /// Whether the anchors at the left edge of the next cluster have been yielded.
+    leading_anchors_done: bool,
+    /// 0 before the line's left edge anchors are yielded, 1 while walking its runs, 2 once its
+    /// right edge anchors are yielded.
+    phase: u8,
 }
 
 impl<'a, B: Brush> GlyphRunIter<'a, B> {
@@ -350,12 +412,124 @@ impl<'a, B: Brush> GlyphRunIter<'a, B> {
     }
 }
 
+impl<'a, B: Brush> GlyphRunIter<'a, B> {
+    /// The subrange of this line's anchors with `start <= index <= end`.
+    fn anchors_between(&self, start: usize, end: usize) -> (usize, usize) {
+        if start > end {
+            return (0, 0);
+        }
+        let anchors = &self.line.layout.data.anchors[self.anchors.0..self.anchors.1];
+        let lo = anchors.partition_point(|a| a.index < start);
+        let hi = anchors.partition_point(|a| a.index <= end);
+        (self.anchors.0 + lo, self.anchors.0 + hi)
+    }
+
+    /// The bidi level of the run on this line that ends (`before`) or starts at `text_byte`, or
+    /// the paragraph's if there is none.
+    fn neighbor_level(&self, text_byte: usize, before: bool) -> parlance::BidiLevel {
+        let data = &self.line.layout.data;
+        data.line_items[self.line.data.item_range]
+            .iter()
+            .find(|item| {
+                !item.text_range.is_empty()
+                    && if before {
+                        item.text_range.end == text_byte
+                    } else {
+                        item.text_range.start == text_byte
+                    }
+            })
+            .map_or(data.base_level, |item| item.bidi_level)
+    }
+
+    /// The anchors at the line's start (or `end`) edge.
+    ///
+    /// An anchor sits against the neighbor with the lower bidi level, like a bidi-neutral would,
+    /// and against the preceding one if they are equal. The line's edges have the paragraph's
+    /// level, so an anchor at the start of the line is always at its start edge, and one at the
+    /// end is at the end edge unless the text before it is at the paragraph's level.
+    fn edge_anchors(&self, end: bool) -> (usize, usize) {
+        let range = self.line.data.text_range;
+        if !end {
+            return self.anchors_between(range.start, range.start);
+        }
+        if range.is_empty()
+            || self.neighbor_level(range.end, true) == self.line.layout.data.base_level
+        {
+            return (0, 0);
+        }
+        self.anchors_between(range.end, range.end)
+    }
+
+    /// The anchors at the left (or `right`) edge of the shaped cluster `cluster_idx` of `run`'s
+    /// `cluster_count` clusters on this line.
+    fn cluster_anchors(
+        &self,
+        run: &Run<'a, B>,
+        cluster: &ShapedCluster,
+        cluster_idx: u32,
+        cluster_count: u32,
+        right: bool,
+    ) -> (usize, usize) {
+        let chars = cluster.chars_range();
+        if chars.is_empty() {
+            return (0, 0);
+        }
+        let characters = self.line.layout.data.shaped_text.characters();
+        let start = characters[chars.start as usize].text_byte_start as usize;
+        let end = characters[chars.end as usize - 1].text_byte_range().end;
+        let level = run.shaped.bidi_level;
+        let line_range = self.line.data.text_range;
+        if right == run.is_rtl() {
+            // The leading edge. This holds the anchors within the cluster, and those at its
+            // start if the text before it has a higher bidi level.
+            let at_start = cluster_idx == 0
+                && start != line_range.start
+                && self.neighbor_level(start, true) > level;
+            self.anchors_between(if at_start { start } else { start + 1 }, end - 1)
+        } else {
+            // The trailing edge.
+            let at_end =
+                cluster_idx + 1 != cluster_count || level <= self.neighbor_level(end, false);
+            // Those at the start of the line are at its start edge.
+            if at_end && end != line_range.start {
+                self.anchors_between(end, end)
+            } else {
+                (0, 0)
+            }
+        }
+    }
+}
+
 impl<'a, B: Brush> Iterator for GlyphRunIter<'a, B> {
     type Item = PositionedLayoutItem<'a, B>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        let has_anchors = self.anchors.0 != self.anchors.1;
         loop {
-            let run = self.line.item(self.item_index)?;
+            if self.pending_anchors.0 < self.pending_anchors.1 {
+                let anchor = &self.line.layout.data.anchors[self.pending_anchors.0];
+                self.pending_anchors.0 += 1;
+                return Some(PositionedLayoutItem::Anchor(PositionedAnchor {
+                    id: anchor.id,
+                    index: anchor.index,
+                    x: self.offset
+                        + self.line.data.metrics.inline_min_coord
+                        + self.line.data.metrics.offset,
+                }));
+            }
+            if has_anchors && self.phase == 0 {
+                self.phase = 1;
+                self.pending_anchors = self.edge_anchors(self.line.layout.is_rtl());
+                continue;
+            }
+            let Some(run) = self.line.item(self.item_index) else {
+                if has_anchors && self.phase == 1 {
+                    self.phase = 2;
+                    self.pending_anchors = self.edge_anchors(!self.line.layout.is_rtl());
+                    continue;
+                }
+                return None;
+            };
 
             let line_slice = run.line_slice();
             let run_cluster_range = line_slice.shaped_clusters_range();
@@ -382,6 +556,22 @@ impl<'a, B: Brush> Iterator for GlyphRunIter<'a, B> {
                 };
                 let cluster = &shaped_clusters[cluster_idx as usize];
                 let cluster_glyph_count = usize::from(cluster.glyph_len());
+                if has_anchors && !self.leading_anchors_done {
+                    let anchors =
+                        self.cluster_anchors(&run, cluster, cluster_idx, cluster_count, false);
+                    if anchors.0 < anchors.1 {
+                        // If there is an in-progress glyph run, we yield that first; the anchors
+                        // are then found again by the next call.
+                        if glyph_run_style_index.is_some() {
+                            break;
+                        }
+                        self.pending_anchors = anchors;
+                    }
+                    self.leading_anchors_done = true;
+                    if anchors.0 < anchors.1 {
+                        break;
+                    }
+                }
                 if cluster_glyph_count == 0 {
                     if cluster.is_inline_object() {
                         // If there is an in-progress glyph run, we yield that first; the object
@@ -402,6 +592,16 @@ impl<'a, B: Brush> Iterator for GlyphRunIter<'a, B> {
                         );
                         let x = self.offset + gaps.before;
                         self.offset += cluster.advance + gaps.total();
+                        if has_anchors {
+                            self.leading_anchors_done = false;
+                            self.pending_anchors = self.cluster_anchors(
+                                &run,
+                                cluster,
+                                cluster_idx,
+                                cluster_count,
+                                true,
+                            );
+                        }
                         return Some(self.positioned_inline_box(box_index, x));
                     }
                     // The invariant of glyph runs is that each glyph has the same style index.
@@ -426,6 +626,15 @@ impl<'a, B: Brush> Iterator for GlyphRunIter<'a, B> {
                             cluster_gaps[cluster_idx as usize].total()
                         });
                     position += 1;
+                }
+                if has_anchors {
+                    // Anchors at the right edge end the glyph run, and are yielded after it.
+                    self.leading_anchors_done = false;
+                    self.pending_anchors =
+                        self.cluster_anchors(&run, cluster, cluster_idx, cluster_count, true);
+                    if self.pending_anchors.0 < self.pending_anchors.1 {
+                        break;
+                    }
                 }
             }
 
@@ -457,6 +666,11 @@ impl<'a, B: Brush> Iterator for GlyphRunIter<'a, B> {
                     baseline: self.line.style_baseline(style_index),
                     advance,
                 }));
+            }
+
+            if position < cluster_count {
+                // We stopped at anchors.
+                continue;
             }
 
             // Nothing left to yield in this run.

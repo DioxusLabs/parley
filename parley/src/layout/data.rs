@@ -1,7 +1,6 @@
 // Copyright 2021 the Parley Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use crate::FloatedBox;
 use crate::inline_box::LayoutInlineBox;
 use crate::layout::spacing::{Gaps, Justification, Spacing};
 use crate::layout::style_metrics::{BoxMetrics, StyleMetrics, inline_box_placement};
@@ -9,6 +8,7 @@ use crate::layout::whitespace::whitespace_hangs;
 use crate::layout::{ContentWidths, LineMetrics, Style};
 use crate::resolve::ResolvedStyle;
 use crate::style::Brush;
+use crate::{Anchor, FloatedBox};
 use crate::{IndentOptions, LineHeight, OverflowWrap, TextWrapMode, WhiteSpaceCollapse};
 use core::range::Range;
 
@@ -190,6 +190,7 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) style_metrics: Vec<StyleMetrics>,
     pub(crate) inline_boxes: Vec<LayoutInlineBox>,
     pub(crate) floated_boxes: Vec<FloatedBox>,
+    pub(crate) anchors: Vec<Anchor>,
 
     // Output of shaping (input to line breaking)
     pub(crate) shaped_text: ShapedText,
@@ -244,6 +245,7 @@ impl<B: Brush> Default for LayoutData<B> {
             style_metrics: Vec::new(),
             inline_boxes: Vec::new(),
             floated_boxes: Vec::new(),
+            anchors: Vec::new(),
             shaped_text: ShapedText::new(),
             runs: Vec::new(),
             lines: Vec::new(),
@@ -276,6 +278,7 @@ impl<B: Brush> LayoutData<B> {
         self.style_metrics.clear();
         self.inline_boxes.clear();
         self.floated_boxes.clear();
+        self.anchors.clear();
         self.shaped_text.clear();
         self.runs.clear();
         self.lines.clear();

@@ -169,6 +169,7 @@ pub(crate) fn draw_layout(
                 PositionedLayoutItem::GlyphRun(glyph_run) => {
                     render_glyph_run(&glyph_run, &mut renderer, &mut resources, config);
                 }
+                PositionedLayoutItem::Anchor(_) => {}
                 PositionedLayoutItem::InlineBox(inline_box) => {
                     draw_rect(
                         &mut renderer,
@@ -276,6 +277,7 @@ pub(crate) fn draw_layout_with_clusters(
                         config,
                     );
                 }
+                PositionedLayoutItem::Anchor(_) => {}
                 PositionedLayoutItem::InlineBox(_) => {
                     panic!("Inline boxes are not supported in cluster rendering");
                 }
@@ -336,6 +338,7 @@ pub(crate) fn draw_layout_with_clusters(
                         let item = line.items().next().unwrap();
                         let glyph_run = match item {
                             PositionedLayoutItem::GlyphRun(glyph_run) => glyph_run,
+                            PositionedLayoutItem::Anchor(_) => continue,
                             PositionedLayoutItem::InlineBox(_) => {
                                 panic!("Inline boxes are not supported in cluster rendering");
                             }

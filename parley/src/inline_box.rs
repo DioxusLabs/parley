@@ -99,3 +99,24 @@ pub(crate) fn inline_object_box_index(inline_boxes: &[LayoutInlineBox], text_byt
     );
     index
 }
+
+/// A zero-sized anchor at a position in the text, which takes no part in layout.
+///
+/// An anchor isn't represented in the text, doesn't split shaping, and neither takes up space nor
+/// introduces a line break opportunity. Once lines are broken, it is reported on the line that
+/// holds its text position as a [`PositionedLayoutItem::Anchor`](crate::PositionedLayoutItem),
+/// at the position a bidi-neutral character would have there. This is the static position of an
+/// absolutely positioned box in CSS.
+///
+/// An anchor at a soft wrap is on the line that ends there; one after a forced break is on the
+/// line that starts there.
+#[derive(PartialEq, Debug, Clone)]
+pub struct Anchor {
+    /// An identifier of your choosing, which Parley doesn't interpret. It is copied to
+    /// [`PositionedAnchor::id`](crate::PositionedAnchor::id).
+    pub id: u64,
+    /// The byte offset into the underlying text string at which the anchor is placed.
+    ///
+    /// When using the [`TreeBuilder`](crate::TreeBuilder), this offset is set by the builder.
+    pub index: usize,
+}

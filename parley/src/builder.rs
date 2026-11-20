@@ -15,7 +15,7 @@ use parlance::BaseDirection;
 use parley_engine::break_overrides::LineBreakOverrideFn;
 use parley_engine::{AnalysisDataSources, DictionaryProvider, InlineObject};
 
-use crate::inline_box::{FloatedBox, InlineBox, LayoutInlineBox};
+use crate::inline_box::{Anchor, FloatedBox, InlineBox, LayoutInlineBox};
 use crate::resolve::{ResolvedStyle, StyleRun};
 use crate::util::resolve_range;
 
@@ -89,6 +89,11 @@ impl<'b, B: Brush> RangedBuilder<'b, B> {
     /// Adds a floated box.
     pub fn push_floated_box(&mut self, floated_box: FloatedBox) {
         self.lcx.floated_boxes.push(floated_box);
+    }
+
+    /// Adds an anchor.
+    pub fn push_anchor(&mut self, anchor: Anchor) {
+        self.lcx.anchors.push(anchor);
     }
 
     /// Sets the paragraph's base direction.
@@ -216,6 +221,11 @@ impl<'b, B: Brush> StyleRunBuilder<'b, B> {
     /// Adds a floated box.
     pub fn push_floated_box(&mut self, floated_box: FloatedBox) {
         self.lcx.floated_boxes.push(floated_box);
+    }
+
+    /// Adds an anchor.
+    pub fn push_anchor(&mut self, anchor: Anchor) {
+        self.lcx.anchors.push(anchor);
     }
 
     /// Sets the paragraph's base direction.
@@ -360,6 +370,16 @@ impl<'b, B: Brush> TreeBuilder<'b, B> {
         self.lcx.floated_boxes.push(floated_box);
     }
 
+    /// Pushes an anchor at the current position in the text.
+    ///
+    /// The anchor precedes any pending collapsible whitespace.
+    ///
+    /// Note: this overwrites the anchor's [`Anchor::index`].
+    pub fn push_anchor(&mut self, mut anchor: Anchor) {
+        anchor.index = self.lcx.tree_style_builder.text().len();
+        self.lcx.anchors.push(anchor);
+    }
+
     /// Sets the paragraph's base direction.
     ///
     /// The default is [`BaseDirection::Auto`], which infers the direction from the text.
@@ -435,6 +455,7 @@ fn build_into_layout<B: Brush>(
     lcx.inline_boxes
         .sort_unstable_by_key(|b| b.inline_box.index);
     lcx.floated_boxes.sort_by_key(|b| b.index);
+    lcx.anchors.sort_by_key(|a| a.index);
 
     lcx.inline_objects.clear();
     for inline_box in &mut lcx.inline_boxes {
@@ -531,6 +552,11 @@ fn build_into_layout<B: Brush>(
     core::mem::swap(&mut layout.data.inline_boxes, &mut lcx.inline_boxes);
     layout.data.floated_boxes.clear();
     core::mem::swap(&mut layout.data.floated_boxes, &mut lcx.floated_boxes);
+    layout.data.anchors.clear();
+    core::mem::swap(&mut layout.data.anchors, &mut lcx.anchors);
+    for anchor in &mut layout.data.anchors {
+        anchor.index = anchor.index.min(text.len());
+    }
 
     // Find the shaped clusters of the inline objects, and place their boxes there.
     //

@@ -27,7 +27,9 @@ pub use alignment::{Alignment, AlignmentOptions};
 pub use cluster::{Affinity, Cluster, ClusterPath, ClusterSide};
 pub use data::BreakReason;
 pub use layout::Layout;
-pub use line::{GlyphRun, Line, LineMetrics, PositionedInlineBox, PositionedLayoutItem};
+pub use line::{
+    GlyphRun, Line, LineMetrics, PositionedAnchor, PositionedInlineBox, PositionedLayoutItem,
+};
 pub use line_break::{
     BreakLines, BreakerState, FloatedBoxData, LineBreakData, MaxHeightBreakData, YieldData,
 };

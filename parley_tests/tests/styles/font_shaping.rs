@@ -166,7 +166,9 @@ fn style_features_ligatures_ltr_cluster_details() {
     let item = line.items().next().unwrap();
     let glyph_run = match item {
         parley::PositionedLayoutItem::GlyphRun(glyph_run) => glyph_run,
-        parley::PositionedLayoutItem::InlineBox(_) => unreachable!(),
+        parley::PositionedLayoutItem::InlineBox(_) | parley::PositionedLayoutItem::Anchor(_) => {
+            unreachable!()
+        }
     };
     let mut last_advance = f32::MAX;
     glyph_run.run().clusters().enumerate().for_each(|(i, c)| {
@@ -212,7 +214,9 @@ fn style_features_ligatures_rtl_cluster_details() {
     let item = line.items().next().unwrap();
     let glyph_run = match item {
         parley::PositionedLayoutItem::GlyphRun(glyph_run) => glyph_run,
-        parley::PositionedLayoutItem::InlineBox(_) => unreachable!(),
+        parley::PositionedLayoutItem::InlineBox(_) | parley::PositionedLayoutItem::Anchor(_) => {
+            unreachable!()
+        }
     };
     let mut last_advance = f32::MAX;
     glyph_run.run().clusters().enumerate().for_each(|(i, c)| {

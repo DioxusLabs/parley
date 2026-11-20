@@ -1229,7 +1229,7 @@ fn shaping_context_across_items() {
                     PositionedLayoutItem::GlyphRun(run) => {
                         Some(run.glyphs().map(|glyph| glyph.id).collect::<Vec<_>>())
                     }
-                    PositionedLayoutItem::InlineBox(_) => None,
+                    PositionedLayoutItem::InlineBox(_) | PositionedLayoutItem::Anchor(_) => None,
                 })
                 .flatten()
                 .collect()

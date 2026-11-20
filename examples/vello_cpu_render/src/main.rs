@@ -131,6 +131,7 @@ fn render_frame(
                     }
                 }
 
+                PositionedLayoutItem::Anchor(_) => {}
                 PositionedLayoutItem::InlineBox(inline_box) => {
                     renderer.set_paint(config.foreground_color);
                     let (x0, y0) = (inline_box.x as f64, inline_box.y as f64);

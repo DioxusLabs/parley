@@ -90,3 +90,73 @@ fn out_of_flow_box_is_not_a_line_break_opportunity() {
         );
     }
 }
+
+/// Every anchor is reported exactly once, on the line holding its text position, at the position
+/// of the primary caret there.
+#[test]
+fn anchors_are_at_the_primary_caret() {
+    use parley::Anchor;
+
+    let mut env = TestEnv::new(test_name!(), None);
+    for text in [
+        "",
+        "Hello world! This is a test of anchors.",
+        "Hello\nworld\n",
+        "abc אבג דהו 123 def",
+        "אבג דהו abc 12 34",
+        "1 2 34",
+    ] {
+        for rtl in [false, true] {
+            for max_advance in [None, Some(60.0)] {
+                let mut builder = env.ranged_builder(text);
+                if rtl {
+                    builder.set_base_direction(parley::BaseDirection::Rtl);
+                }
+                let indices: Vec<usize> = (0..=text.len())
+                    .filter(|i| text.is_char_boundary(*i))
+                    .collect();
+                for &index in &indices {
+                    // Two anchors per position
+                    for id in [index * 2, index * 2 + 1] {
+                        builder.push_anchor(Anchor {
+                            id: id as u64,
+                            index,
+                        });
+                    }
+                }
+                let mut layout: Layout<ColorBrush> = builder.build(text);
+                layout.break_all_lines(max_advance);
+
+                let mut seen = vec![0; (text.len() + 1) * 2];
+                for (line_index, line) in layout.lines().enumerate() {
+                    for item in line.items() {
+                        let PositionedLayoutItem::Anchor(anchor) = item else {
+                            continue;
+                        };
+                        seen[anchor.id as usize] += 1;
+                        let range = line.text_range();
+                        assert!(
+                            range.start <= anchor.index && anchor.index <= range.end,
+                            "{text:?}: anchor {} on line {range:?}",
+                            anchor.index
+                        );
+                        let (caret_line, caret_x) = layout.primary_caret(anchor.index).unwrap();
+                        // At a soft wrap the caret is on the next line, the anchor on this one.
+                        if caret_line.text_range() == range {
+                            assert!(
+                                (caret_x - anchor.x).abs() < 0.01,
+                                "{text:?} rtl={rtl} wrap={max_advance:?} line {line_index}: anchor {} at {}, caret at {caret_x}",
+                                anchor.index,
+                                anchor.x
+                            );
+                        }
+                    }
+                }
+                for &index in &indices {
+                    assert_eq!(seen[index * 2], 1, "{text:?} rtl={rtl}: anchor {index}");
+                    assert_eq!(seen[index * 2 + 1], 1, "{text:?} rtl={rtl}: anchor {index}");
+                }
+            }
+        }
+    }
+}

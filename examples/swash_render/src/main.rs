@@ -202,6 +202,7 @@ fn main() {
                 PositionedLayoutItem::GlyphRun(glyph_run) => {
                     render_glyph_run(&mut scale_cx, &glyph_run, &mut img, padding);
                 }
+                PositionedLayoutItem::Anchor(_) => {}
                 PositionedLayoutItem::InlineBox(inline_box) => {
                     for x_off in 0..(inline_box.width.floor() as u32) {
                         for y_off in 0..(inline_box.height.floor() as u32) {
